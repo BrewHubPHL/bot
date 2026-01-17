@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrewBot @ BrewHubPHL</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f8f4f0; margin: 0; height: 100vh; display: flex; flex-direction: column; color: #3c2f2f; }
+        header { background: #3c2f2f; color: #fff; padding: 20px; text-align: center; }
+        h1 { margin: 0; font-size: 1.8em; }
+        #chat-container { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .message { max-width: 80%; padding: 12px 18px; border-radius: 18px; line-height: 1.4; word-wrap: break-word; }
+        .bot { background: #e0d6c9; align-self: flex-start; border-bottom-left-radius: 4px; }
+        .user { background: #3c2f2f; color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+        #input-area { display: flex; padding: 15px; background: #fff; border-top: 1px solid #ddd; align-items: center; gap: 10px; }
+        input { flex: 1; padding: 15px; border: 1px solid #ccc; border-radius: 25px; font-size: 1em; }
+        button { padding: 0 20px; background: #6b4f4f; color: white; border: none; border-radius: 25px; cursor: pointer; font-weight: bold; height: 50px; min-width: 80px; }
+        button:hover { background: #8b6f6f; }
+        button:disabled { background: #aaa; cursor: not-allowed; }
+        #mic-btn { background: #6b4f4f; width: 50px; border-radius: 50%; font-size: 1.4em; }
+        #mic-btn.recording { background: #d32f2f; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(211,47,47,0.7); } 70% { box-shadow: 0 0 0 10px rgba(211,47,47,0); } 100% { box-shadow: 0 0 0 0 rgba(211,47,47,0); } }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>BrewBot @ BrewHubPHL</h1>
+        <p>Philly's upcoming coffee + parcel hub — talk or type for personalized drinks!</p>
+    </header>
+    <div id="chat-container">
+        <div class="message bot">
+            Hey! Welcome to BrewHubPHL (opening soon in Point Breeze, Philly).<br>
+            Tell me about the weather, your mood, cravings, dietary needs... (type or hold the mic to speak). I'll suggest the perfect drink and read it aloud.
+        </div>
+    </div>
+    <div id="input-area">
+        <input type="text" id="user-input" placeholder="Type or hold mic to speak..." autocomplete="off">
+        <button id="mic-btn" title="Hold to speak">🎤</button>
+        <button id="send-btn">Send</button>
+    </div>
+
+    <script>
+        console.log('BrewBot script loaded');
+
+        const GROK_API_KEY = 'xai-CneESkzgwFiEqDLxh6b8FjqEyaxg9XIwuGq5nJYBKFmasdydOjcSkj2n8c52Ni1MJihLCiHfWRZJ43CL';
+        const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
+        const MODEL = 'grok-3-mini';
+
+        const ELEVENLABS_API_KEY = '8f2b7595e8ee919301efc31d760591d573c68afca05648c1eb681376e24b55fa';
+        const VOICE_ID = '21m00Tcm4TlvDq8ikWAM'; // Rachel - warm, friendly American female (perfect barista vibe)
+
+        const SYSTEM_PROMPT = `You are BrewBot, the friendly AI barista at BrewHubPHL, a new independent coffee shop + parcel hub opening soon in Point Breeze, Philadelphia. We're passionate about high-quality coffee, seasonal drinks, and making every order feel personal.
+
+Our menu includes:
+- Sizes: Small (12oz), Medium (16oz +$0.75), Large (20oz +$1.50)
+- Milk: Whole/Skim (free), Oat/Almond (+$0.75), Soy (+$0.50)
+- Extra Espresso Shot: +$1.00
+- Syrups/Flavors: Vanilla, Caramel, Hazelnut, Mocha, Lavender, Seasonal (+$0.75 each)
+- Hot or Iced: Free switch
+- Decaf: Free
+
+Drinks:
+- Espresso Classics: Espresso ($3.50 single/$4.50 double), Macchiato ($4.25), Cortado ($4.50), Cappuccino ($4.75), Flat White ($5.00), Americano ($4.00), Latte ($5.00), Mocha ($5.50)
+- Brewed: House Drip ($3.50), Pour Over ($5.50 single-origin), Cold Brew ($5.00)
+- Tea & More: Chai Latte ($5.00), Matcha Latte ($5.50), London Fog ($5.00), Hot Chocolate ($4.75), Loose Leaf Tea ($4.00)
+- Seasonal (Winter): Maple Spice Latte ($5.75), Peppermint Mocha ($5.75)
+
+Rules:
+1. Greet warmly and ask about weather/mood/cravings/diet if not mentioned.
+2. Suggest 2-3 specific drinks that match (explain why briefly).
+3. Guide natural customizations: size, milk, sweetness, extras, hot/iced.
+4. Upsell gently if relevant.
+5. Confirm full order with price before "adding to cart".
+6. Since not open yet: "Saved as fave — ready when we open! Want to join the VIP waitlist?"
+7. Be friendly, concise, Philly-local vibe.
+8. Do not use any emojis in your responses.
+Never suggest off-menu items.
+Current date: January 2026 (winter season).`;
+
+        let conversation = [{ role: "system", content: SYSTEM_PROMPT }];
+
+        const chatContainer = document.getElementById('chat-container');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const micBtn = document.getElementById('mic-btn');
+
+        function addMessage(text, sender) {
+            const div = document.createElement('div');
+            div.className = `message ${sender}`;
+            div.innerHTML = text.replace(/\n/g, '<br>');
+            chatContainer.appendChild(div);
+            div.scrollIntoView({ behavior: 'smooth' });
+            return div;
+        }
+
+        // ElevenLabs TTS: Stream and play audio
+        async function playWithElevenLabs(text) {
+            if (!text) return;
+
+            try {
+                const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'audio/mpeg',
+                        'xi-api-key': ELEVENLABS_API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        model_id: 'eleven_turbo_v2', // Fast & natural
+                        voice_settings: {
+                            stability: 0.75,
+                            similarity_boost: 0.75
+                        }
+                    })
+                });
+
+                if (!response.ok) throw new Error(`ElevenLabs error ${response.status}`);
+
+                const audioBlob = await response.blob();
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+                audio.play();
+            } catch (err) {
+                console.error('ElevenLabs TTS error:', err);
+                // Fallback to browser TTS if ElevenLabs fails
+                const utterance = new SpeechSynthesisUtterance(text);
+                speechSynthesis.speak(utterance);
+            }
+        }
+
+        // Voice input (speech-to-text)
+        let recognition = null;
+        if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+            recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript;
+                }
+                userInput.value = transcript;
+            };
+
+            recognition.onend = () => micBtn.classList.remove('recording');
+            recognition.onerror = () => micBtn.classList.remove('recording');
+        } else {
+            micBtn.style.display = 'none';
+        }
+
+        if (recognition) {
+            micBtn.addEventListener('mousedown', () => { micBtn.classList.add('recording'); recognition.start(); });
+            micBtn.addEventListener('mouseup', () => recognition.stop());
+            micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); micBtn.classList.add('recording'); recognition.start(); });
+            micBtn.addEventListener('touchend', (e) => { e.preventDefault(); recognition.stop(); });
+        }
+
+        async function sendMessage() {
+            console.log('Send triggered');
+            let msg = userInput.value.trim();
+            if (!msg) return;
+
+            addMessage(msg, 'user');
+            userInput.value = '';
+            sendBtn.disabled = true;
+
+            conversation.push({ role: "user", content: msg });
+
+            const typing = addMessage('BrewBot thinking...', 'bot');
+            typing.id = 'typing';
+
+            try {
+                const res = await fetch(GROK_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${GROK_API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        model: MODEL,
+                        messages: conversation,
+                        temperature: 0.7,
+                        max_tokens: 500
+                    })
+                });
+
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    throw new Error(`API error ${res.status}: ${errorText}`);
+                }
+
+                const data = await res.json();
+                const reply = data.choices[0].message.content.trim();
+
+                document.getElementById('typing')?.remove();
+                addMessage(reply, 'bot');
+                playWithElevenLabs(reply);
+
+                conversation.push({ role: "assistant", content: reply });
+            } catch (err) {
+                console.error('Grok error:', err);
+                document.getElementById('typing')?.remove();
+                addMessage('Oops — something went wrong. Try again?', 'bot');
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        console.log('Event listeners attached');
+    </script>
+</body>
+</html>

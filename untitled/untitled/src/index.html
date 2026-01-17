@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BrewBot @ Brew Hub PHL</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f8f4f0;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      color: #3c2f2f;
+    }
+
+    header {
+      background: #3c2f2f;
+      color: #fff;
+      padding: 20px;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.8em;
+    }
+
+    #chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .message {
+      max-width: 80%;
+      padding: 12px 18px;
+      border-radius: 18px;
+      line-height: 1.4;
+      word-wrap: break-word;
+    }
+
+    .bot {
+      background: #e0d6c9;
+      align-self: flex-start;
+      border-bottom-left-radius: 4px;
+    }
+
+    .user {
+      background: #3c2f2f;
+      color: #fff;
+      align-self: flex-end;
+      border-bottom-right-radius: 4px;
+    }
+
+    #input-area {
+      display: flex;
+      padding: 15px;
+      background: #fff;
+      border-top: 1px solid #ddd;
+    }
+
+    input {
+      flex: 1;
+      padding: 15px;
+      border: 1px solid #ccc;
+      border-radius: 25px;
+      font-size: 1em;
+    }
+
+    button {
+      margin-left: 10px;
+      padding: 0 20px;
+      background: #6b4f4f;
+      color: white;
+      border: none;
+      border-radius: 25px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    button:hover {
+      background: #8b6f6f;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>BrewBot @ Brew Hub PHL ☕</h1>
+    <p>Philly's upcoming coffee spot — chat to practice orders!</p>
+  </header>
+  <div id="chat-container">
+    <div class="message bot">
+      Hey! 👋 Welcome to Brew Hub PHL (opening soon in Philly).<br>
+      Tell me about the weather, your mood, cravings... and I'll suggest the perfect drink. What's up today?
+    </div>
+  </div>
+  <div id="input-area">
+    <input type="text" id="user-input" placeholder="e.g., It's cold and I'm tired..." autocomplete="off">
+    <button onclick="sendMessage()">Send</button>
+  </div>
+
+  <script>
+    const menu = {
+      sizes: {
+        small: 0,
+        medium: 0.75,
+        large: 1.50
+      },
+      basePrices: {
+        "House Drip": 3.50,
+        "Americano": 4.00,
+        "Pour Over": 5.50,
+        "Latte": 5.00,
+        "Mocha": 5.50,
+        "Chai Latte": 5.00,
+        "Matcha Latte": 5.50,
+        "Hot Chocolate": 4.75,
+        "Cappuccino": 4.75
+      },
+      custom: {
+        oat: 0.75,
+        almond: 0.75,
+        soy: 0.50,
+        "extra shot": 1.00,
+        syrup: 0.75
+      }
+    };
+    let order = {};
+
+    function sendMessage() {
+      const input = document.getElementById('user-input');
+      const msg = input.value.trim();
+      if (!msg) return;
+      addMessage(msg, 'user');
+      input.value = '';
+      let response = "";
+      const lower = msg.toLowerCase();
+      // First message handling
+      if (document.querySelectorAll('.message').length === 2) {
+        response = "Got it! 😊 Let me think... ";
+      }
+      // Mood + weather triggers
+      if (lower.includes('cold') || lower.includes('freezing') || lower.includes('terrible') || lower.includes('bad mood')) {
+        response += "Rough vibes on a cold day—here are some warm comfort picks:<br>• Rich Mocha (chocolate + espresso hug)<br>• Spicy Chai Latte<br>• Real Hot Chocolate<br>Which sounds good? Hot/iced, size, milk? ☕";
+      }
+      // Black coffee path
+      else if (lower.includes('black') || lower.includes('black coffee') || lower.includes('hot black')) {
+        response += "Straight-up hot black coffee—strong choice! 🔥<br>• House Drip ($3.50)<br>• Americano ($4.00)<br>• Pour Over ($5.50, single-origin)<br>Which one? Size (small/medium/large)? Extra shots?";
+      }
+      // Pour Over confirmation
+      else if (lower.includes('large pour over') || lower.includes('latge pour over') || lower.includes('large pour')) {
+        const price = menu.basePrices["Pour Over"] + menu.sizes.large;
+        order = {
+          drink: "Large Pour Over",
+          price: price.toFixed(2)
+        };
+        response += `Locked in: Large (20oz) Pour Over — $${price.toFixed(2)} ☕🔥<br>Hot, black, full caffeine.<br><br>Awesome! Saved as your fave. We'll have it ready when we open soon.<br>Want on the VIP opening list? Drop email/phone! 📬`;
+      }
+      // Fallback
+      else {
+        response += "Tell me more—weather? Mood? Craving sweet/strong/refreshing? I'll suggest perfect drinks from our menu. ☕";
+      }
+      setTimeout(() => addMessage(response, 'bot'), 800);
+    }
+
+    function addMessage(text, sender) {
+      const div = document.createElement('div');
+      div.className = 'message ' + sender;
+      div.innerHTML = text;
+      document.getElementById('chat-container').appendChild(div);
+      div.scrollIntoView({
+        behavior: 'smooth'
+      });
+    }
+    // Enter key support
+    document.getElementById('user-input').addEventListener('keypress', e => {
+      if (e.key === 'Enter') sendMessage();
+    });
+  </script>
+</body>
+
+</html>
