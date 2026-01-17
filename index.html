@@ -48,6 +48,8 @@
         #mic-btn { background: #6b4f4f; width: 60px; height: 60px; border-radius: 50%; font-size: 1.8em; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
         #mic-btn.recording { background: #d32f2f; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(211,47,47,0.7); } 70% { box-shadow: 0 0 0 12px rgba(211,47,47,0); } 100% { box-shadow: 0 0 0 0 rgba(211,47,47,0); } }
+        #clear-btn { background: #ccc; color: #666; width: 60px; height: 60px; border-radius: 50%; font-size: 1.4em; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.2); transition: all 0.2s; }
+        #clear-btn:hover { background: #aaa; transform: translateY(-2px); }
 
         /* Waitlist Modal */
         #waitlist-modal {
@@ -198,6 +200,7 @@
         <input type="text" id="user-input" placeholder="Type or hold mic to speak..." autocomplete="off">
         <button id="mic-btn" title="Hold to speak">🎤</button>
         <button id="send-btn">Send</button>
+        <button id="clear-btn" title="Clear chat">🗑️</button>
     </div>
 
     <!-- Waitlist Modal -->
@@ -260,6 +263,7 @@ Current date: January 2026 (winter season).`;
             const chatContainer = document.getElementById('chat-container');
             const userInput = document.getElementById('user-input');
             const sendBtn = document.getElementById('send-btn');
+            const clearBtn = document.getElementById('clear-btn');
             const micBtn = document.getElementById('mic-btn');
 
             // Waitlist Modal Elements
@@ -433,6 +437,14 @@ Current date: January 2026 (winter season).`;
 
             userInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') sendMessage();
+            });
+
+            clearBtn.addEventListener('click', () => {
+                if (confirm('Clear the entire chat?')) {
+                    chatContainer.innerHTML = '';
+                    conversation = [{ role: "system", content: SYSTEM_PROMPT }];
+                    addMessage('Hey! Welcome to BrewHubPHL (opening soon in Point Breeze, Philly).<br>Tell me about the weather, your mood, cravings... (type or hold the mic to speak). I\'ll suggest the perfect drink and read it aloud.', 'bot');
+                }
             });
 
             console.log('Event listeners attached');
