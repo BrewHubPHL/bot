@@ -133,11 +133,12 @@
         document.addEventListener('DOMContentLoaded', () => {
             console.log('DOM loaded - BrewBot ready');
 
-            const GROK_API_KEY = 'xai-CneESkzgwFiEqDLxh6b8FjqEyaxg9XIwuGq5nJYBKFmasdydOjcSkj2n8c52Ni1MJihLCiHfWRZJ43CL';
+            // API Configuration - Replace with your actual keys
+            const GROK_API_KEY = 'xai-CneESkzgwFiEqDLxh6b8FjqEyaxg9XIwuGq5nJYBKFmasdydOjcSkj2n8c52Ni1MJihLCiHfWRZJ43CL'; // ⚠️ SECURITY: Move to Netlify env vars
             const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
             const MODEL = 'grok-3-mini';
 
-            const ELEVENLABS_API_KEY = '8f2b7595e8ee919301efc31d760591d573c68afca05648c1eb681376e24b55fa';
+            const ELEVENLABS_API_KEY = '8f2b7595e8ee919301efc31d760591d573c68afca05648c1eb681376e24b55fa'; // ⚠️ SECURITY: Move to Netlify env vars
             const VOICE_ID = '21m00Tcm4TlvDq8ikWAM'; // Rachel
 
             const SYSTEM_PROMPT = `You are BrewBot, the friendly AI barista at BrewHubPHL, a new independent coffee shop + parcel hub opening soon in Point Breeze, Philadelphia.
@@ -168,7 +169,16 @@ Rules:
 Never suggest off-menu items or imply pickup/text notifications (we're not open yet).
 Current date: January 2026 (winter season).`;
 
-            let conversation = [{ role: "system", content: SYSTEM_PROMPT }];
+            // Demo responses for when APIs are unavailable
+            const demoResponses = [
+                "I'd recommend our House Latte ($5.00) - perfect for a chilly Philly morning!",
+                "How about a Peppermint Mocha ($5.75)? It's one of our winter specials.",
+                "Try our Cold Brew ($5.00) - smooth and refreshing, available hot or iced.",
+                "Our Flat White ($5.00) is a local favorite - rich espresso with silky microfoam.",
+                "For something sweet, go with a Vanilla Latte ($5.75) - comforting and delicious."
+            ];
+
+            let useDemoMode = false;
 
             const chatContainer = document.getElementById('chat-container');
             const userInput = document.getElementById('user-input');
@@ -241,8 +251,13 @@ Current date: January 2026 (winter season).`;
                     audio.play();
                 } catch (err) {
                     console.error('ElevenLabs error:', err);
-                    const utterance = new SpeechSynthesisUtterance(text);
-                    speechSynthesis.speak(utterance);
+                    // Fallback to browser TTS
+                    if ('speechSynthesis' in window) {
+                        const utterance = new SpeechSynthesisUtterance(text);
+                        utterance.rate = 0.9;
+                        utterance.pitch = 1.1;
+                        speechSynthesis.speak(utterance);
+                    }
                 }
             }
 
@@ -319,16 +334,57 @@ Current date: January 2026 (winter season).`;
 
                     conversation.push({ role: "assistant", content: reply });
                 } catch (err) {
-                    console.error('Grok error:', err);
+                    console.error('Grok API error:', err);
                     document.getElementById('typing')?.remove();
-                    addMessage('Oops — something went wrong. Try again?', 'bot');
+
+                    // Fallback to demo mode
+                    useDemoMode = true;
+                    let reply = demoResponses[Math.floor(Math.random() * demoResponses.length)];
+
+                    if (reply.toLowerCase().includes('latte') || reply.toLowerCase().includes('mocha')) {
+                        reply += '<br><br><button class="waitlist-btn" onclick="document.getElementById(\'waitlist-modal\').style.display=\'flex\'">Join the Waitlist</button>';
+                    }
+
+                    addMessage(reply, 'bot');
+                    playWithElevenLabs(reply);
+                    conversation.push({ role: "assistant", content: reply });
                 } finally {
                     sendBtn.disabled = false;
                 }
             }
 
-            sendBtn.addEventListener('click', sendMessage);
-            userInput.addEventListener('keypress', (e) => {
+            // Check if APIs are accessible
+            async function testAPIs() {
+                try {
+                    console.log('Testing Grok API...');
+                    const testRes = await fetch(GROK_API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${GROK_API_KEY}`
+                        },
+                        body: JSON.stringify({
+                            model: MODEL,
+                            messages: [{ role: "user", content: "test" }],
+                            max_tokens: 10
+                        })
+                    });
+
+                    if (!testRes.ok) {
+                        console.warn('Grok API test failed:', testRes.status);
+                        addMessage('⚠️ Chat service may be limited. Using demo mode.', 'bot');
+                    } else {
+                        console.log('✅ Grok API accessible');
+                    }
+                } catch (err) {
+                    console.warn('API test failed:', err);
+                    addMessage('⚠️ Chat service unavailable. Using demo responses.', 'bot');
+                }useDemoMode = true;
+                    addMessage('⚠️ Using demo mode - full chat features coming soon!
+            }
+
+            // Test APIs on load
+            testAPIs(   userInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') sendMessage();
             });
 
