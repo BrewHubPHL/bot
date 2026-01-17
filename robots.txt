@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://brewhub-phl.netlify.app/sitemap.xml
