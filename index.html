@@ -124,7 +124,7 @@
         "image": "https://brewhub-phl.netlify.app/logo.png",
         "address": {
             "@type": "PostalAddress",
-            "addressLocality": "Philadelphia", - Philadelphia Coffee Shop
+            "addressLocality": "Philadelphia",
             "addressRegion": "PA",
             "addressCountry": "US",
             "streetAddress": "Point Breeze"
@@ -466,13 +466,14 @@ Current date: January 2026 (winter season).`;
                     }
                 } catch (err) {
                     console.warn('API test failed:', err);
-                    addMessage('⚠️ Chat service unavailable. Using demo responses.', 'bot');
-                }useDemoMode = true;
-                    addMessage('⚠️ Using demo mode - full chat features coming soon!
-            }
+                    useDemoMode = true;
+                    addMessage('⚠️ Using demo mode - full chat features coming soon!', 'bot');
+                }
 
             // Test APIs on load
-            testAPIs(   userInput.addEventListener('keypress', (e) => {
+            testAPIs();
+
+            userInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') sendMessage();
             });
 
