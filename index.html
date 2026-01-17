@@ -160,18 +160,27 @@ Current date: January 2026 (winter season).`;
                 try {
                     const response = await fetch('/.netlify/functions/elevenlabs-tts', {
                         method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
                         body: JSON.stringify({ text })
                     });
 
-                    if (!response.ok) throw new Error(`TTS error ${response.status}`);
+                    if (!response.ok) {
+                        throw new Error(`TTS proxy error ${response.status}: ${await response.text()}`);
+                    }
 
-                    const audioBlob = await response.blob();
-                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audioData = await response.text();
+                    const audioBlob = new Uint8Array(atob(audioData).split('').map(c => c.charCodeAt(0)));
+                    const audioUrl = URL.createObjectURL(new Blob([audioBlob], { type: 'audio/mpeg' }));
                     const audio = new Audio(audioUrl);
                     audio.play();
                 } catch (err) {
                     console.error('TTS proxy error:', err);
+                    // Fallback to browser TTS
                     const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 0.9;
+                    utterance.pitch = 1.1;
                     speechSynthesis.speak(utterance);
                 }
             }
