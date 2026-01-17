@@ -3,7 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BrewBot @ BrewHubPHL</title>
+    <title>BrewBot @ BrewHubPHL - AI Coffee Recommendations | Philadelphia Coffee Shop</title>
+
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="BrewHubPHL - Philadelphia's upcoming independent coffee shop + parcel hub in Point Breeze. Get personalized drink recommendations from our AI barista BrewBot. Opening soon!">
+    <meta name="keywords" content="coffee shop Philadelphia, Point Breeze coffee, AI barista, craft coffee Philly, coffee recommendations, BrewHubPHL, Philadelphia coffee, local coffee shop">
+    <meta name="author" content="BrewHubPHL">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://brewhub-phl.netlify.app/">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://brewhub-phl.netlify.app/">
+    <meta property="og:title" content="BrewBot @ BrewHubPHL - AI Coffee Recommendations">
+    <meta property="og:description" content="Philadelphia's upcoming independent coffee shop + parcel hub. Get personalized drink recommendations from our AI barista. Opening soon in Point Breeze!">
+    <meta property="og:image" content="https://brewhub-phl.netlify.app/logo.png">
+    <meta property="og:site_name" content="BrewHubPHL">
+    <meta property="og:locale" content="en_US">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://brewhub-phl.netlify.app/">
+    <meta name="twitter:title" content="BrewBot @ BrewHubPHL - AI Coffee Recommendations">
+    <meta name="twitter:description" content="Philadelphia's upcoming independent coffee shop + parcel hub. Get personalized drink recommendations from our AI barista. Opening soon in Point Breeze!">
+    <meta name="twitter:image" content="https://brewhub-phl.netlify.app/logo.png">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(to bottom, #f8f4f0, #e8e0d4); margin: 0; height: 100vh; display: flex; flex-direction: column; color: #3c2f2f; }
         header { background: #3c2f2f; color: #fff; padding: 30px 20px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
@@ -85,8 +112,69 @@
         .waitlist-btn:hover {
             background: #8b6f6f;
         }
-    </style>
-</head>
+    <!-- Structured Data for Local Business -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "LocalBusiness",
+        "name": "BrewHubPHL",
+        "description": "Independent coffee shop and parcel hub in Point Breeze, Philadelphia",
+        "url": "https://brewhub-phl.netlify.app/",
+        "logo": "https://brewhub-phl.netlify.app/logo.png",
+        "image": "https://brewhub-phl.netlify.app/logo.png",
+        "address": {
+            "@type": "PostalAddress",
+            "addressLocality": "Philadelphia", - Philadelphia Coffee Shop
+            "addressRegion": "PA",
+            "addressCountry": "US",
+            "streetAddress": "Point Breeze"
+        },
+        "geo": {
+            "@type": "GeoCoordinates",
+            "latitude": "39.9416",
+            "longitude": "-75.1794"
+        },
+        "telephone": "",
+        "priceRange": "$$",
+        "servesCuisine": "Coffee Shop",
+        "paymentAccepted": "Cash, Credit Card",
+        "currenciesAccepted": "USD",
+        "openingHours": "Coming Soon",
+        "sameAs": [
+            "https://github.com/BrewHubPHL/bot"
+        ],
+        "hasOfferCatalog": {
+            "@type": "OfferCatalog",
+            "name": "Coffee Menu",
+            "itemListElement": [
+                {
+                    "@type": "Offer",
+                    "itemOffered": {
+                        "@type": "Product",
+                        "name": "House Latte",
+                        "description": "Smooth espresso with steamed milk"
+                    }
+                },
+                {
+                    "@type": "Offer",
+                    "itemOffered": {
+                        "@type": "Product",
+                        "name": "Cold Brew",
+                        "description": "Smooth, cold-brewed coffee"
+                    }
+                },
+                {
+                    "@type": "Offer",
+                    "itemOffered": {
+                        "@type": "Product",
+                        "name": "Peppermint Mocha",
+                        "description": "Winter seasonal specialty"
+                    }
+                }
+            ]
+        }
+    }
+    </script>
 <body>
     <!-- Hidden dummy form to force Netlify detection -->
     <form name="waitlist" data-netlify="true" netlify-honeypot="bot-field" hidden>
@@ -113,16 +201,16 @@
     </div>
 
     <!-- Waitlist Modal -->
-    <div id="waitlist-modal">
+    <div id="waitlist-modal" role="dialog" aria-labelledby="waitlist-title" aria-modal="true">
         <div id="waitlist-content">
-            <span id="close-modal">&times;</span>
-            <h2>Join the BrewHubPHL Waitlist</h2>
+            <span id="close-modal" aria-label="Close modal">&times;</span>
+            <h2 id="waitlist-title">Join the BrewHubPHL Waitlist</h2>
             <p>Get opening alerts, exclusive perks, and maybe a free drink on us.</p>
             <form id="waitlist-form" name="waitlist" method="POST" data-netlify="true" netlify-honeypot="bot-field">
                 <input type="hidden" name="form-name" value="waitlist" />
                 <input type="text" name="bot-field" style="display:none" />
-                <input type="text" name="name" placeholder="Your Name" required />
-                <input type="email" name="email" placeholder="Your Email" required />
+                <input type="text" name="name" placeholder="Your Name" required aria-label="Full name">
+                <input type="email" name="email" placeholder="Your Email" required aria-label="Email address">
                 <button type="submit">Sign Up</button>
             </form>
             <div id="success-msg">Thanks! You're on the list — we'll be in touch soon.</div>
