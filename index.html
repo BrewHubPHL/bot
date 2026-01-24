@@ -266,11 +266,10 @@ Current date: January 2026 (winter season).`;
 
             let recognition = null;
             let isListening = false;
-            let silenceTimer = null;
-            let finalTranscript = '';
 
-            // Initialize speech recognition with auto-silence detection
+            // Initialize speech recognition
             if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+                console.log('Initializing speech recognition...');
                 recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
                 recognition.continuous = false; // Single utterance mode
                 recognition.interimResults = false; // Only final results
@@ -280,7 +279,6 @@ Current date: January 2026 (winter season).`;
                 recognition.onstart = () => {
                     console.log('Voice recognition started');
                     isListening = true;
-                    finalTranscript = '';
                     micBtn.classList.add('recording');
                     userInput.placeholder = 'Listening... (speak now)';
                     userInput.value = '';
@@ -338,6 +336,8 @@ Current date: January 2026 (winter season).`;
                         micBtn.textContent = originalText;
                     }, 2000);
                 };
+
+                console.log('Speech recognition initialized successfully');
 
             } else {
                 console.warn('Speech recognition not supported');
