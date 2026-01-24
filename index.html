@@ -198,14 +198,26 @@ Current date: January 2026 (winter season).`;
                     });
 
                     if (!response.ok) {
-                        const errorText = await response.text();
-                        console.error('TTS proxy error:', response.status, errorText);
-                        throw new Error(`TTS proxy error ${response.status}: ${errorText}`);
+                        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                        console.error('TTS proxy error:', response.status, errorData);
+
+                        // Show specific error message
+                        if (errorData.error === 'API key not configured') {
+                            console.warn('ElevenLabs API key not configured, using browser TTS');
+                        } else {
+                            console.warn('ElevenLabs API error, using browser TTS');
+                        }
+
+                        throw new Error(`TTS proxy error ${response.status}: ${errorData.error || 'Unknown error'}`);
                     }
 
                     // Get the base64 encoded audio data
                     const base64Audio = await response.text();
                     console.log('Received base64 audio, length:', base64Audio.length);
+
+                    if (!base64Audio || base64Audio.length < 100) {
+                        throw new Error('Invalid or empty audio data received');
+                    }
 
                     // Create audio element with data URL
                     const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`;
@@ -214,7 +226,11 @@ Current date: January 2026 (winter season).`;
                     // Add event listeners for debugging
                     audio.addEventListener('loadstart', () => console.log('Audio loading started'));
                     audio.addEventListener('canplay', () => console.log('Audio can play'));
-                    audio.addEventListener('error', (e) => console.error('Audio error:', e));
+                    audio.addEventListener('error', (e) => {
+                        console.error('Audio error:', e);
+                        // Fallback to browser TTS on audio playback error
+                        speakWithBrowser(text);
+                    });
 
                     // Play the audio
                     const playPromise = audio.play();
@@ -223,20 +239,28 @@ Current date: January 2026 (winter season).`;
                             console.log('Audio playing successfully');
                         }).catch(error => {
                             console.error('Audio play failed:', error);
-                            throw error;
+                            // Fallback to browser TTS on play failure
+                            speakWithBrowser(text);
                         });
                     }
 
                 } catch (err) {
                     console.error('TTS error:', err);
                     // Fallback to browser TTS
-                    if ('speechSynthesis' in window) {
-                        console.log('Falling back to browser TTS');
-                        const utterance = new SpeechSynthesisUtterance(text);
-                        utterance.rate = 0.9;
-                        utterance.pitch = 1.1;
-                        speechSynthesis.speak(utterance);
-                    }
+                    speakWithBrowser(text);
+                }
+            }
+
+            // Browser TTS fallback function
+            function speakWithBrowser(text) {
+                if ('speechSynthesis' in window) {
+                    console.log('Using browser TTS fallback');
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.rate = 0.9;
+                    utterance.pitch = 1.1;
+                    speechSynthesis.speak(utterance);
+                } else {
+                    console.warn('No TTS available - neither ElevenLabs nor browser TTS');
                 }
             }
 

@@ -12,11 +12,24 @@ exports.handler = async (event) => {
 
         console.log('ElevenLabs TTS request for text:', text.substring(0, 50) + '...');
 
+        // Check if API key is available
+        const apiKey = process.env.ELEVENLABS_API_KEY;
+        if (!apiKey) {
+            console.error('ELEVENLABS_API_KEY not found in environment variables');
+            return {
+                statusCode: 500,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: 'API key not configured' })
+            };
+        }
+
+        console.log('API key found, making request to ElevenLabs...');
+
         const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM/stream`, {
             method: 'POST',
             headers: {
                 'Accept': 'audio/mpeg',
-                'xi-api-key': process.env.ELEVENLABS_API_KEY,
+                'xi-api-key': apiKey,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
@@ -52,8 +65,14 @@ exports.handler = async (event) => {
         const audioBuffer = await response.arrayBuffer();
         console.log('Audio buffer size:', audioBuffer.byteLength);
 
+        if (audioBuffer.byteLength === 0) {
+            console.error('Received empty audio buffer');
+            throw new Error('Empty audio response from ElevenLabs');
+        }
+
         // Convert to base64
         const base64Audio = Buffer.from(audioBuffer).toString('base64');
+        console.log('Base64 audio length:', base64Audio.length);
 
         return {
             statusCode: 200,
