@@ -242,34 +242,80 @@ Current date: January 2026 (winter season).`;
 
             let recognition = null;
             let isListening = false;
+            let silenceTimer = null;
+            let finalTranscript = '';
 
-            // Initialize speech recognition with mobile support
+            // Initialize speech recognition with auto-silence detection
             if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
                 recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-                recognition.continuous = false;
-                recognition.interimResults = false; // Changed to false for better mobile performance
+                recognition.continuous = true; // Keep listening for silence detection
+                recognition.interimResults = true; // Get partial results for real-time feedback
                 recognition.lang = 'en-US';
                 recognition.maxAlternatives = 1;
 
                 recognition.onstart = () => {
                     console.log('Voice recognition started');
                     isListening = true;
+                    finalTranscript = '';
                     micBtn.classList.add('recording');
-                    userInput.placeholder = 'Listening...';
+                    userInput.placeholder = 'Listening... (speak now, auto-send when you stop)';
+                    userInput.value = '';
                 };
 
                 recognition.onresult = (event) => {
-                    const transcript = event.results[0][0].transcript;
-                    console.log('Voice result:', transcript);
-                    userInput.value = transcript;
+                    let interimTranscript = '';
+                    let hasFinalResult = false;
+
+                    // Process all results
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const transcript = event.results[i][0].transcript;
+                        if (event.results[i].isFinal) {
+                            finalTranscript += transcript;
+                            hasFinalResult = true;
+                        } else {
+                            interimTranscript += transcript;
+                        }
+                    }
+
+                    // Show interim results in input field
+                    const displayText = finalTranscript + interimTranscript;
+                    userInput.value = displayText;
                     userInput.focus();
+
+                    // Reset silence timer on any speech
+                    if (silenceTimer) {
+                        clearTimeout(silenceTimer);
+                    }
+
+                    // Start silence detection timer (2 seconds of silence)
+                    silenceTimer = setTimeout(() => {
+                        console.log('Silence detected, auto-sending message');
+                        recognition.stop();
+                    }, 2000);
+
+                    console.log('Voice interim result:', displayText);
                 };
 
                 recognition.onend = () => {
                     console.log('Voice recognition ended');
                     isListening = false;
                     micBtn.classList.remove('recording');
-                    userInput.placeholder = 'Type or tap mic to speak...';
+                    userInput.placeholder = 'Processing...';
+
+                    // Clear any pending silence timer
+                    if (silenceTimer) {
+                        clearTimeout(silenceTimer);
+                        silenceTimer = null;
+                    }
+
+                    // Auto-send if we have a transcript
+                    const transcript = userInput.value.trim();
+                    if (transcript) {
+                        console.log('Auto-sending voice message:', transcript);
+                        sendMessage();
+                    } else {
+                        userInput.placeholder = 'Type or tap mic to speak...';
+                    }
                 };
 
                 recognition.onerror = (event) => {
@@ -278,6 +324,12 @@ Current date: January 2026 (winter season).`;
                     micBtn.classList.remove('recording');
                     userInput.placeholder = 'Type or tap mic to speak...';
 
+                    // Clear silence timer on error
+                    if (silenceTimer) {
+                        clearTimeout(silenceTimer);
+                        silenceTimer = null;
+                    }
+
                     // Show user-friendly error messages
                     let errorMsg = 'Voice not available';
                     switch(event.error) {
@@ -285,10 +337,13 @@ Current date: January 2026 (winter season).`;
                             errorMsg = 'Microphone permission denied';
                             break;
                         case 'no-speech':
-                            errorMsg = 'No speech detected';
+                            errorMsg = 'No speech detected - try speaking louder';
                             break;
                         case 'network':
                             errorMsg = 'Network error - try again';
+                            break;
+                        case 'aborted':
+                            errorMsg = 'Voice input cancelled';
                             break;
                     }
 
@@ -305,10 +360,14 @@ Current date: January 2026 (winter season).`;
                 micBtn.style.display = 'none';
             }
 
-            // Improved mobile voice button handling
+            // Improved mobile voice button handling with auto-silence detection
             if (recognition) {
                 const startListening = async () => {
-                    if (isListening) return;
+                    if (isListening) {
+                        // If already listening, stop it (manual override)
+                        recognition.stop();
+                        return;
+                    }
 
                     try {
                         // Request microphone permission if needed
@@ -323,37 +382,22 @@ Current date: January 2026 (winter season).`;
                     }
                 };
 
-                const stopListening = () => {
-                    if (isListening) {
-                        recognition.stop();
-                    }
-                };
+                // Mouse events (desktop) - single click to start/stop
+                micBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    startListening();
+                });
 
-                // Mouse events (desktop)
-                micBtn.addEventListener('mousedown', startListening);
-                micBtn.addEventListener('mouseup', stopListening);
-
-                // Touch events (mobile) - improved
+                // Touch events (mobile) - tap to start/stop
                 micBtn.addEventListener('touchstart', (e) => {
                     e.preventDefault();
                     startListening();
                 });
 
+                // Prevent default touch behavior
                 micBtn.addEventListener('touchend', (e) => {
                     e.preventDefault();
-                    stopListening();
                 });
-
-                // Click fallback for devices that don't support touch properly
-                micBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    if (!isListening) {
-                        startListening();
-                    } else {
-                        stopListening();
-                    }
-                });
-            }
 
             async function sendMessage() {
                 console.log('Send triggered');
