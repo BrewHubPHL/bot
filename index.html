@@ -223,9 +223,12 @@ Current date: January 2026 (winter season).`;
                     const audioDataUrl = `data:audio/mpeg;base64,${base64Audio}`;
                     const audio = new Audio(audioDataUrl);
 
+                    // Set consistent volume (70% for good audibility without being too loud)
+                    audio.volume = 0.7;
+
                     // Add event listeners for debugging
                     audio.addEventListener('loadstart', () => console.log('Audio loading started'));
-                    audio.addEventListener('canplay', () => console.log('Audio can play'));
+                    audio.addEventListener('canplay', () => console.log('Audio can play, volume:', audio.volume));
                     audio.addEventListener('error', (e) => {
                         console.error('Audio error:', e);
                         // Fallback to browser TTS on audio playback error
@@ -236,7 +239,7 @@ Current date: January 2026 (winter season).`;
                     const playPromise = audio.play();
                     if (playPromise !== undefined) {
                         playPromise.then(() => {
-                            console.log('Audio playing successfully');
+                            console.log('Audio playing successfully at volume:', audio.volume);
                         }).catch(error => {
                             console.error('Audio play failed:', error);
                             // Fallback to browser TTS on play failure
@@ -258,6 +261,7 @@ Current date: January 2026 (winter season).`;
                     const utterance = new SpeechSynthesisUtterance(text);
                     utterance.rate = 0.9;
                     utterance.pitch = 1.1;
+                    utterance.volume = 0.7; // Consistent volume with ElevenLabs
                     speechSynthesis.speak(utterance);
                 } else {
                     console.warn('No TTS available - neither ElevenLabs nor browser TTS');
