@@ -248,8 +248,8 @@ Current date: January 2026 (winter season).`;
             // Initialize speech recognition with auto-silence detection
             if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
                 recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-                recognition.continuous = true; // Keep listening for silence detection
-                recognition.interimResults = true; // Get partial results for real-time feedback
+                recognition.continuous = false; // Single utterance mode
+                recognition.interimResults = false; // Only final results
                 recognition.lang = 'en-US';
                 recognition.maxAlternatives = 1;
 
@@ -258,64 +258,30 @@ Current date: January 2026 (winter season).`;
                     isListening = true;
                     finalTranscript = '';
                     micBtn.classList.add('recording');
-                    userInput.placeholder = 'Listening... (speak now, auto-send when you stop)';
+                    userInput.placeholder = 'Listening... (speak now)';
                     userInput.value = '';
                 };
 
                 recognition.onresult = (event) => {
-                    let interimTranscript = '';
-                    let hasFinalResult = false;
-
-                    // Process all results
-                    for (let i = event.resultIndex; i < event.results.length; i++) {
-                        const transcript = event.results[i][0].transcript;
-                        if (event.results[i].isFinal) {
-                            finalTranscript += transcript;
-                            hasFinalResult = true;
-                        } else {
-                            interimTranscript += transcript;
-                        }
-                    }
-
-                    // Show interim results in input field
-                    const displayText = finalTranscript + interimTranscript;
-                    userInput.value = displayText;
+                    const transcript = event.results[0][0].transcript;
+                    console.log('Voice result:', transcript);
+                    userInput.value = transcript;
                     userInput.focus();
 
-                    // Reset silence timer on any speech
-                    if (silenceTimer) {
-                        clearTimeout(silenceTimer);
-                    }
-
-                    // Start silence detection timer (2 seconds of silence)
-                    silenceTimer = setTimeout(() => {
-                        console.log('Silence detected, auto-sending message');
-                        recognition.stop();
-                    }, 2000);
-
-                    console.log('Voice interim result:', displayText);
+                    // Auto-send after a brief delay to show the result
+                    setTimeout(() => {
+                        if (userInput.value.trim()) {
+                            console.log('Auto-sending voice message:', userInput.value.trim());
+                            sendMessage();
+                        }
+                    }, 500);
                 };
 
                 recognition.onend = () => {
                     console.log('Voice recognition ended');
                     isListening = false;
                     micBtn.classList.remove('recording');
-                    userInput.placeholder = 'Processing...';
-
-                    // Clear any pending silence timer
-                    if (silenceTimer) {
-                        clearTimeout(silenceTimer);
-                        silenceTimer = null;
-                    }
-
-                    // Auto-send if we have a transcript
-                    const transcript = userInput.value.trim();
-                    if (transcript) {
-                        console.log('Auto-sending voice message:', transcript);
-                        sendMessage();
-                    } else {
-                        userInput.placeholder = 'Type or tap mic to speak...';
-                    }
+                    userInput.placeholder = 'Type or tap mic to speak...';
                 };
 
                 recognition.onerror = (event) => {
@@ -323,12 +289,6 @@ Current date: January 2026 (winter season).`;
                     isListening = false;
                     micBtn.classList.remove('recording');
                     userInput.placeholder = 'Type or tap mic to speak...';
-
-                    // Clear silence timer on error
-                    if (silenceTimer) {
-                        clearTimeout(silenceTimer);
-                        silenceTimer = null;
-                    }
 
                     // Show user-friendly error messages
                     let errorMsg = 'Voice not available';
@@ -360,14 +320,10 @@ Current date: January 2026 (winter season).`;
                 micBtn.style.display = 'none';
             }
 
-            // Improved mobile voice button handling with auto-silence detection
+            // Improved mobile voice button handling
             if (recognition) {
                 const startListening = async () => {
-                    if (isListening) {
-                        // If already listening, stop it (manual override)
-                        recognition.stop();
-                        return;
-                    }
+                    if (isListening) return;
 
                     try {
                         // Request microphone permission if needed
@@ -382,13 +338,13 @@ Current date: January 2026 (winter season).`;
                     }
                 };
 
-                // Mouse events (desktop) - single click to start/stop
+                // Mouse events (desktop) - single click to start
                 micBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     startListening();
                 });
 
-                // Touch events (mobile) - tap to start/stop
+                // Touch events (mobile) - tap to start
                 micBtn.addEventListener('touchstart', (e) => {
                     e.preventDefault();
                     startListening();
@@ -398,6 +354,7 @@ Current date: January 2026 (winter season).`;
                 micBtn.addEventListener('touchend', (e) => {
                     e.preventDefault();
                 });
+            }
 
             async function sendMessage() {
                 console.log('Send triggered');
