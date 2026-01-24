@@ -391,6 +391,17 @@ Current date: January 2026 (winter season).`;
 
                 addMessage(msg, 'user');
                 userInput.value = '';
+
+                // Check if user mentioned waitlist
+                if (msg.toLowerCase().includes('waitlist')) {
+                    console.log('Waitlist keyword detected, opening modal');
+                    setTimeout(() => {
+                        document.getElementById('waitlist-modal').style.display = 'flex';
+                    }, 500); // Small delay for smooth UX
+                    sendBtn.disabled = false;
+                    return; // Don't send to AI
+                }
+
                 sendBtn.disabled = true;
 
                 conversation.push({ role: "user", content: msg });
