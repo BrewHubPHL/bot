@@ -35,7 +35,7 @@
             
             const { error } = await supabase
                 .from('profiles')
-                .insert([{ full_name: 'Waitlist User', phone_number: 'N/A' }]); // Adjust columns as needed
+                .insert([{ email }]); // Insert just the email column
 
             if (error) {
                 document.getElementById('message').innerText = "Try again soon!";
