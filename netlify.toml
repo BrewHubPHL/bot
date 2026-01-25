@@ -1,0 +1,14 @@
+[build]
+  command = "npm run build" # Change this if you use a different build command
+  publish = "public"        # The folder where your HTML/CSS/JS lives
+
+[functions]
+  directory = "netlify/functions" # Tells Netlify where the BrewBot code is
+  node_bundler = "esbuild"       # Makes your function start up faster
+
+# This turns "brewhub-phl.netlify.app/api/announce" 
+# into your actual function path automatically.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
