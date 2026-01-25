@@ -1,6 +1,6 @@
 [build]
-  command = "npm run build" # Change this if you use a different build command
   publish = "public"        # The folder where your HTML/CSS/JS lives
+  command = ""              # Remove this line if you use a different build command
 
 [functions]
   directory = "netlify/functions" # Tells Netlify where the BrewBot code is
