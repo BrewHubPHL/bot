@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>BrewHub Admin | BrewBot Control</title>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: white; text-align: center; padding: 50px; }
+        .status-box { border: 2px solid #333; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .active { color: #00ff00; }
+        button { background: #ff4757; color: white; border: none; padding: 15px 30px; border-radius: 5px; cursor: pointer; font-size: 1.2rem; }
+        button:active { transform: scale(0.98); }
+    </style>
+</head>
+<body>
+    <h1>BrewBot Admin Dashboard</h1>
+    
+    <div class="status-box">
+        <p>BrewBot Voice: <span id="voice-status">Waiting...</span></p>
+        <p>Continuous Listening: <span id="mic-status" class="active">Ready</span></p>
+    </div>
+
+    <button id="start-bot">Wake up BrewBot</button>
+
+    <script src="admin-logic.js"></script> 
+</body>
+</html>
