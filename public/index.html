@@ -34,7 +34,7 @@
             const email = document.getElementById('email').value;
             
             const { error } = await supabase
-                .from('profiles')
+                .from('waitlist')
                 .insert([{ email }]); // Insert just the email column
 
             if (error) {
