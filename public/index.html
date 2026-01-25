@@ -27,7 +27,7 @@
 
     <script>
         // Use your public keys here (they are safe for the frontend)
-        const supabase = supabase.createClient('YOUR_SUPABASE_URL', 'YOUR_SUPABASE_ANON_KEY');
+        supabase = supabase.createClient('YOUR_SUPABASE_URL', 'YOUR_SUPABASE_ANON_KEY');
 
         document.getElementById('signup-form').addEventListener('submit', async (e) => {
             e.preventDefault();
