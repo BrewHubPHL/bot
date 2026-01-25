@@ -69,5 +69,24 @@
     </div>
 
     <script src="app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        // Use your public Supabase URL and anon key
+        const supabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
+
+        document.getElementById('waitlistForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('emailInput').value;
+            const { error } = await supabase
+                .from('waitlist')
+                .insert([{ email }]);
+            if (error) {
+                alert('There was a problem. Please try again soon!');
+            } else {
+                alert("You're on the list! See you soon.");
+                document.getElementById('waitlistForm').reset();
+            }
+        });
+    </script>
 </body>
 </html>
