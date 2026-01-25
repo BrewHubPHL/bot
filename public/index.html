@@ -3,108 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BrewHub PHL | Coffee & Parcels</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <title>BrewHub PHL | Coming Soon</title>
     <style>
+        :root {
+            --primary-coffee: #4b3832;
+            --accent-orange: #d4a373;
+            --bg-color: #fefae0;
+        }
         body {
-            font-family: sans-serif;
-            background: #1a1a1a;
-            color: #f4f4f4;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--primary-coffee);
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
+            justify-content: center;
             min-height: 100vh;
             margin: 0;
-        }
-        .container {
             text-align: center;
-            border: 1px solid #333;
-            padding: 2rem;
-            border-radius: 8px;
-            background: #222;
-            max-width: 350px;
-            width: 90vw;
-            box-shadow: 0 4px 24px 0 #0004;
         }
-        .logo-img {
-            width: 90px;
-            height: 90px;
-            object-fit: contain;
-            margin-bottom: 0.5rem;
-            border-radius: 50%;
-            background: #fff;
-            box-shadow: 0 2px 8px 0 #0002;
-        }
+        .container { padding: 20px; max-width: 500px; }
+        
         .logo {
-            font-size: 2.1rem;
-            margin-bottom: 0.5rem;
-            color: #d4a373;
-            font-weight: bold;
+            max-width: 180px;
+            height: auto;
+            margin-bottom: 20px;
+            filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.1));
         }
-        input {
-            padding: 10px;
-            border-radius: 4px;
-            border: none;
-            width: 100%;
-            max-width: 250px;
-            margin-bottom: 1rem;
+
+        h1 { font-size: 2rem; margin-bottom: 10px; }
+        p { line-height: 1.6; margin-bottom: 30px; }
+
+        .waitlist-form { display: flex; flex-direction: column; gap: 10px; }
+        input[type="email"] {
+            padding: 12px;
+            border: 2px solid var(--primary-coffee);
+            border-radius: 5px;
+            font-size: 1rem;
         }
         button {
-            padding: 10px 20px;
-            background: #d4a373;
+            padding: 12px;
+            background-color: var(--primary-coffee);
+            color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 5px;
+            font-size: 1rem;
             cursor: pointer;
-            font-weight: bold;
-            width: 100%;
-            max-width: 250px;
+            transition: background 0.3s;
         }
-        @media (max-width: 600px) {
-            .container {
-                padding: 1rem;
-                max-width: 98vw;
-            }
-            .logo-img {
-                width: 64px;
-                height: 64px;
-            }
-            .logo {
-                font-size: 1.5rem;
-            }
-        }
+        button:hover { background-color: var(--accent-orange); }
     </style>
 </head>
 <body>
+
     <div class="container">
-        <img src="../logo.png" alt="BrewHub Logo" class="logo-img" />
-        <div class="logo">BrewHub PHL</div>
-        <p>South Philly’s Newest Coffee Hub & Parcel Pickup.</p>
-        <p>Join the waitlist for exclusive opening perks.</p>
-        <form id="signup-form">
-            <input type="email" id="email" placeholder="Enter your email" required>
-            <button type="submit">Notify Me</button>
+        <img src="logo.png" alt="BrewHub PHL Logo" class="logo">
+        
+        <h1>Something is Brewing.</h1>
+        <p>Coffee, community, and the BrewBot are coming to Philadelphia soon. Join the waitlist for opening day updates.</p>
+
+        <form id="waitlistForm" class="waitlist-form">
+            <input type="email" id="emailInput" placeholder="Enter your email" required>
+            <button type="submit">Keep me posted</button>
         </form>
-        <p id="message"></p>
     </div>
 
-    <script>
-        // Use your public keys here (they are safe for the frontend)
-        supabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
-
-        document.getElementById('signup-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('email').value;
-            
-            const { error } = await supabase
-                .from('waitlist')
-                .insert([{ email }]); // Insert just the email column
-
-            if (error) {
-                document.getElementById('message').innerText = "Try again soon!";
-            } else {
-                document.getElementById('message').innerText = "You're on the list! See you soon.";
-            }
-        });
-    </script>
+    <script src="app.js"></script>
 </body>
 </html>
