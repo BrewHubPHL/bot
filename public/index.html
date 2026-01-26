@@ -2,372 +2,254 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BrewHub PHL | Cafe & Parcel Hub</title>
-    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
     <style>
-                        * {
-                            box-sizing: border-box;
-                        }
-
-        @media (max-width: 500px) {
-            #chatbox {
-                position: fixed !important;
-                left: 5vw !important;
-                right: 5vw !important;
-                width: 90vw !important;
-                bottom: 100px !important;
-            }
+        :root { 
+            --hub-brown: #3c2f2f; 
+            --hub-tan: #d4b59e; 
+            --hub-light: #f8f4f0; 
+            --glass: rgba(255, 255, 255, 0.95);
         }
-                #chat-input,
-                .hub-form input {
-                    font-size: 16px !important; /* Forces 16px to satisfy iOS Safari */
-                    -webkit-text-size-adjust: 100%;
-                }
-        :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; }
-        body { font-family: 'Segoe UI', sans-serif; background-color: var(--hub-light); margin: 0; color: var(--hub-brown); display: flex; flex-direction: column; min-height: 100vh; }
+
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%);
+            margin: 0; color: var(--hub-brown); display: flex; flex-direction: column; min-height: 100vh; 
+        }
         
-        header { background: var(--hub-brown); color: #fff; padding: 40px 20px; text-align: center; border-bottom: 4px solid var(--hub-tan); }
-        #logo { max-width: 280px; width: 100%; height: auto; margin-bottom: 10px; }
-        
+        header { background: var(--hub-brown); color: #fff; padding: 60px 20px; text-align: center; border-bottom: 6px solid var(--hub-tan); }
+        #logo { max-width: 300px; width: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
+
         main { flex: 1; display: flex; justify-content: center; align-items: center; padding: 40px 20px; }
-        .hero-card { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); max-width: 450px; width: 100%; text-align: center; }
-        
-        .hub-form { display: flex; flex-direction: column; gap: 15px; }
-        .hub-form input { padding: 15px; border: 1px solid #ddd; border-radius: 12px; font-size: 1em; background: #fafafa; }
-        .primary-btn { background: var(--hub-brown); color: white; border: none; padding: 16px; border-radius: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-
-        /* Floating Bot UI */
-        #bot-bubble { position: fixed; bottom: 30px; right: 30px; z-index: 1000; }
-        #bot-trigger { width: 70px; height: 70px; background: var(--hub-brown); border-radius: 50%; display: flex; justify-content: center; align-items: center; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
-        
-        /* Pulse Animation */
-        .speaking-pulse { animation: pulse-glow 1.5s infinite; filter: drop-shadow(0 0 10px var(--hub-tan)); }
-        @keyframes pulse-glow { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
-
-        /* Chatbox */
-        #chatbox { display: none; position: fixed; bottom: 85px; right: 30px; width: 320px; background: #fff; border-radius: 16px; box-shadow: 0 8px 32px rgba(60,47,47,0.2); flex-direction: column; overflow: hidden; border: 1px solid var(--hub-brown); }
-        #chat-header { background: var(--hub-brown); color: #fff; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
-        #chat-messages { flex: 1; padding: 15px; background: #faf8f6; max-height: 250px; overflow-y: auto; }
-        
-        /* Mic Icon & Form */
-        #chat-form { display: flex; align-items: center; border-top: 1px solid #eee; background: #fff; padding-right: 10px; }
-        #chat-input { flex: 1; border: none; padding: 15px; outline: none; }
-        #mic-btn { background: none; border: none; font-size: 1.4em; cursor: pointer; color: #ccc; transition: 0.3s; }
-        #mic-btn.listening { color: #d32f2f; transform: scale(1.2); animation: mic-pulse 1.5s infinite; }
-        @keyframes mic-pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        
-        #voice-toggle { cursor: pointer; font-size: 1.2em; border: none; background: none; color: white; }
-
-        /* Voice Level Bar */
-        #voice-level-bar {
-            width: 60px;
-            height: 8px;
-            background: #eee;
-            border-radius: 4px;
-            margin-left: 10px;
-            display: inline-block;
-            vertical-align: middle;
-            overflow: hidden;
+        .hero-card { 
+            background: var(--glass); padding: 50px; border-radius: 30px; box-shadow: 0 15px 45px rgba(60,47,47,0.08); 
+            max-width: 450px; width: 100%; text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px);
         }
-        #voice-level-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #d4b59e 0%, #3c2f2f 100%);
-            border-radius: 4px;
-            width: 0%;
-            transition: width 0.1s linear;
+
+        h1 { font-size: 2.2em; margin-bottom: 10px; }
+        .subtitle { color: #7a6a6a; margin-bottom: 30px; line-height: 1.5; }
+
+        .hub-form input { 
+            width: 100%; padding: 18px; border: 2px solid #eee; border-radius: 15px; font-size: 1.1em; margin-bottom: 15px; box-sizing: border-box; transition: 0.3s;
         }
+        .hub-form input:focus { border-color: var(--hub-tan); outline: none; }
+
+        .primary-btn { 
+            width: 100%; background: var(--hub-brown); color: white; border: none; padding: 18px; border-radius: 15px; font-weight: bold; font-size: 1.1em; cursor: pointer; transition: 0.3s;
+        }
+        .primary-btn:hover { background: #2a2121; transform: translateY(-2px); }
+
+        /* Floating BrewBot UI */
+        #bot-bubble { position: fixed; bottom: 40px; right: 40px; z-index: 1000; }
+        #bot-trigger { 
+            width: 80px; height: 80px; background: var(--hub-brown); border: 4px solid var(--hub-tan); border-radius: 50%; 
+            display: flex; justify-content: center; align-items: center; cursor: pointer; box-shadow: 0 10px 30px rgba(0,0,0,0.2); font-size: 35px; transition: 0.4s;
+        }
+        .speaking-pulse { animation: pulse-glow 1.5s infinite; border-color: #fff !important; }
+        @keyframes pulse-glow { 0% { transform: scale(1); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+        /* Modern Chatbox */
+        #chatbox { 
+            display: none; position: absolute; bottom: 100px; right: 0; width: 340px; 
+            background: white; border-radius: 25px; box-shadow: 0 20px 60px rgba(0,0,0,0.15); 
+            flex-direction: column; overflow: hidden; border: 1px solid #f0f0f0;
+        }
+        #chat-header { background: var(--hub-brown); color: #fff; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
+        #chat-messages { height: 280px; padding: 20px; overflow-y: auto; background: #fafafa; font-size: 15px; }
+        
+        #chat-form { display: flex; align-items: center; padding: 15px; background: #fff; border-top: 1px solid #eee; }
+        #chat-input { flex: 1; border: none; padding: 10px; font-size: 16px; outline: none; }
+
+        /* Visual Equalizer & Mic */
+        #mic-btn { background: none; border: none; font-size: 1.5em; cursor: pointer; color: #ccc; display: flex; align-items: center; gap: 8px; transition: 0.3s; }
+        .equalizer { display: none; align-items: center; gap: 3px; height: 20px; }
+        .listening .equalizer { display: flex; }
+        .listening #mic-icon { color: #d32f2f; }
+        .bar { width: 3px; height: 5px; background: #d32f2f; animation: bar-dance 1s infinite ease-in-out; }
+        .bar:nth-child(2) { animation-delay: 0.2s; }
+        .bar:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bar-dance { 0%, 100% { height: 5px; } 50% { height: 20px; } }
+
+        footer { text-align: center; padding: 20px; font-size: 12px; color: #999; text-transform: uppercase; letter-spacing: 2px; }
     </style>
 </head>
 <body>
 
     <header>
         <img src="logo.png" alt="BrewHub PHL" id="logo">
-        <p>Philly's Premier Coffee & Parcel Hub</p>
+        <p>COFFEE • PARCELS • COMMUNITY</p>
     </header>
 
     <main>
         <section class="hero-card">
-            <h1>Join the Waitlist</h1>
-            <p style="color: #666; margin-bottom: 25px;">Secure your spot for opening day perks and seamless parcel management.</p>
+            <h1>Opening Soon</h1>
+            <p class="subtitle">Join the neighborhub for opening alerts and seamless parcel management in Point Breeze.</p>
             <form class="hub-form" id="waitlist-form">
-                <input type="email" id="email" placeholder="Email Address" required>
-                <button type="submit" class="primary-btn">Get Early Access</button>
+                <input type="email" id="email" placeholder="Your favorite email address" required>
+                <button type="submit" class="primary-btn">JOIN THE WAITLIST</button>
             </form>
-            <p id="form-msg" style="display:none; color: green; margin-top: 15px;">You're on the list! See you soon.</p>
+            <p id="form-msg" style="display:none; color: #4a7c44; margin-top: 15px; font-weight: bold;">You're in! Welcome to the neighborhub.</p>
         </section>
     </main>
 
     <div id="bot-bubble">
-        <div id="bot-trigger"><span>☕</span></div>
+        <div id="bot-trigger" title="Talk to BrewBot">☕</div>
         <div id="chatbox">
             <div id="chat-header">
-                <span>BrewBot</span>
+                <span>BrewBot Assistant</span>
                 <div>
-                    <button id="voice-toggle" title="Toggle Voice">🔊</button>
-                    <span id="chat-close" style="cursor:pointer; margin-left:10px;">×</span>
+                    <button id="mute-btn" style="background:none; border:none; color:white; cursor:pointer; font-size:1.2em;">🔊</button>
+                    <span id="chat-close" style="cursor:pointer; margin-left:15px; font-size: 20px;">×</span>
                 </div>
             </div>
             <div id="chat-messages"></div>
             <form id="chat-form">
-                <input id="chat-input" type="text" placeholder="Ask BrewBot..." autocomplete="off" required />
-                <button type="button" id="mic-btn">🎤</button>
-                <span id="voice-level-bar"><span id="voice-level-fill"></span></span>
-                <button type="submit" style="background:var(--hub-brown); color:white; border:none; padding:10px; border-radius:8px; cursor:pointer;">Send</button>
+                <input id="chat-input" type="text" placeholder="Ask BrewBot..." autocomplete="off">
+                <button type="button" id="mic-btn">
+                    <span id="mic-icon">🎤</span>
+                    <div class="equalizer">
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                    </div>
+                </button>
+                <button type="submit" style="background:none; border:none; color:var(--hub-brown); font-weight:bold; cursor:pointer;">SEND</button>
             </form>
         </div>
     </div>
 
+    <footer>South Philadelphia • Point Breeze</footer>
+
     <script>
-                // --- HANDLE WAITLIST SUBMISSION ---
-                document.getElementById('waitlist-form').onsubmit = async function(e) {
-                    e.preventDefault();
-                    const emailValue = document.getElementById('email').value;
-                    const msg = document.getElementById('form-msg');
-                    const form = this;
+        // --- 1. CONFIGURATION ---
+        const SB_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
+        const SB_KEY = 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN';
+        const GS_URL = 'https://script.google.com/macros/s/AKfycbwxMRnRbXqvoQq_O5B08fAsQLhYkUNrp4zwpZkyHkWh_IKkE4NNFn6NGZct09HUlaJ4/exec';
 
-                    // --- TRIGGER COFFEE CONFETTI ---
-                    const count = 200;
-                    const defaults = { origin: { y: 0.7 } };
+        const _supabase = supabase.createClient(SB_URL, SB_KEY);
+        const audioPlayer = new Audio();
+        let isAudioUnlocked = false, isMuted = false, recognition = null;
+        let history = [{ role: 'system', content: "Friendly Philly Barista. Concise. Professional. You speak for BrewHub PHL." }];
 
-                    function fire(particleRatio, opts) {
-                      confetti({
-                        ...defaults,
-                        ...opts,
-                        particleCount: Math.floor(count * particleRatio),
-                        // BrewHub Colors: Brown, Tan, and a hint of Gold
-                        colors: ['#3c2f2f', '#d4b59e', '#ffffff', '#b8860b'] 
-                      });
-                    }
-
-                    fire(0.25, { spread: 26, startVelocity: 55 });
-                    fire(0.2, { spread: 60 });
-                    fire(0.35, { spread: 100, decay: 0.91, scalar: 0.8 });
-                    fire(0.1, { spread: 120, startVelocity: 25, decay: 0.92, scalar: 1.2 });
-                    fire(0.1, { spread: 120, startVelocity: 45 });
-
-                    // --- EXISTING LOGIC ---
-                    // 1. Send to Supabase
-                    if (typeof _supabase !== 'undefined') {
-                        _supabase.from('waitlist').insert([{ email: emailValue }]);
-                    }
-
-                    // 2. Send to Google Sheets
-                    fetch('https://script.google.com/macros/s/AKfycbxkBnMkyUDaIaVrllfiEJF3oJDGUXrb6p5OpTuqghoQ0iuJPODyhqjB8Ixqb0zKFc2cAw/exec', {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: emailValue })
-                    });
-
-                    // 3. UI Feedback
-                    msg.style.display = 'block';
-                    form.style.display = 'none';
-            
-                    speak("Incredible! You're officially a Hub member. Keep an eye on your inbox for our opening details.");
-                };
-        const botTrigger = document.getElementById('bot-trigger');
-        const chatbox = document.getElementById('chatbox');
-        const chatInput = document.getElementById('chat-input');
-        const chatForm = document.getElementById('chat-form');
+        const trigger = document.getElementById('bot-trigger');
+        const box = document.getElementById('chatbox');
         const micBtn = document.getElementById('mic-btn');
-        const voiceToggle = document.getElementById('voice-toggle');
-        const voiceLevelFill = document.getElementById('voice-level-fill');
+        const input = document.getElementById('chat-input');
+        const form = document.getElementById('chat-form');
 
-        let isMuted = false;
-        let recognition = null;
-        let recognizing = false;
-        let chatHistory = [{ role: 'system', content: "You are BrewBot, the AI Barista at BrewHub PHL. Be concise and Philly-friendly." }];
-
-        // --- SpeechRecognition Setup ---
-        window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (window.SpeechRecognition) {
-            recognition = new window.SpeechRecognition();
+        // --- 2. VOICE RECOGNITION ---
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
             recognition.lang = 'en-US';
-            recognition.interimResults = false;
-            recognition.continuous = false;
-
-            recognition.onstart = () => {
-                recognizing = true;
-                micBtn.classList.add('listening');
-                startVoiceLevel();
+            recognition.onstart = () => micBtn.classList.add('listening');
+            recognition.onend = () => micBtn.classList.remove('listening');
+            recognition.onresult = (e) => { 
+                input.value = e.results[0][0].transcript; 
+                form.requestSubmit(); 
             };
-            recognition.onend = () => {
-                recognizing = false;
-                micBtn.classList.remove('listening');
-                stopVoiceLevel();
-            };
-            recognition.onerror = (e) => {
-                recognizing = false;
-                micBtn.classList.remove('listening');
-                stopVoiceLevel();
-            };
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript.trim();
-                if (transcript) {
-                    chatInput.value = transcript;
-                    chatForm.requestSubmit();
-                }
-            };
-        } else {
-            micBtn.style.display = 'none';
-            document.getElementById('voice-level-bar').style.display = 'none';
+            micBtn.onclick = () => { try { recognition.start(); } catch(e) {} };
         }
 
-        micBtn.addEventListener('click', () => {
-            if (!recognition) return;
-            if (recognizing) {
-                recognition.stop();
-            } else {
-                recognition.start();
-            }
-        });
-
-        // --- 1. VOICE RECOGNITION (LISTENING) + LEVEL ---
-        let audioStream, audioContext, analyser, dataArray, rafId;
-
-        async function startVoiceLevel() {
-            try {
-                audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const source = audioContext.createMediaStreamSource(audioStream);
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 256;
-                dataArray = new Uint8Array(analyser.frequencyBinCount);
-                source.connect(analyser);
-                animateVoiceLevel();
-            } catch (err) {
-                // Fallback: hide bar if not allowed
-                voiceLevelFill.style.width = '0%';
-            }
-        }
-
-        function animateVoiceLevel() {
-            analyser.getByteTimeDomainData(dataArray);
-            // Calculate normalized volume (0-1)
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-                const v = (dataArray[i] - 128) / 128;
-                sum += v * v;
-            }
-            const volume = Math.sqrt(sum / dataArray.length);
-            const percent = Math.min(1, volume * 3) * 100;
-            voiceLevelFill.style.width = percent + '%';
-            rafId = requestAnimationFrame(animateVoiceLevel);
-        }
-
-        function stopVoiceLevel() {
-            if (rafId) cancelAnimationFrame(rafId);
-            if (audioStream) {
-                audioStream.getTracks().forEach(track => track.stop());
-                audioStream = null;
-            }
-            if (audioContext) {
-                audioContext.close();
-                audioContext = null;
-            }
-            voiceLevelFill.style.width = '0%';
-        }
-
-        // --- UPDATED CORE VOICE LOOP ---
         async function speak(text) {
             if (isMuted) return;
-
-            // 1. KILL THE MIC: Ensure recognition is fully stopped before speaking
-            if (recognition) {
-                try {
-                    recognition.stop(); 
-                } catch (e) {
-                    console.log("Mic already stopped");
-                }
-            }
-
-            botTrigger.classList.add('speaking-pulse');
-
+            if (recognition) try { recognition.stop(); } catch(e){}
+            
+            trigger.classList.add('speaking-pulse');
             try {
                 const res = await fetch('/.netlify/functions/elevenlabs-tts', { 
                     method: 'POST', 
+                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ text }) 
                 });
                 const base64 = await res.text();
-                const audio = new Audio(`data:audio/mpeg;base64,${base64}`);
-                // 2. PLAY THE VOICE
-                await audio.play();
-
-                audio.onended = () => {
-                    botTrigger.classList.remove('speaking-pulse');
-                    // 3. RE-START THE MIC: Only after the audio is totally finished
-                    if (!isMuted && recognition && chatbox.style.display === 'flex') {
-                        setTimeout(() => {
-                            try {
-                                recognition.start();
-                            } catch (e) {
-                                console.error("Mic restart failed:", e);
-                            }
-                        }, 300); // Small 300ms breather for the browser
-                    }
+                audioPlayer.src = `data:audio/mpeg;base64,${base64}`;
+                await audioPlayer.play();
+                audioPlayer.onended = () => {
+                    trigger.classList.remove('speaking-pulse');
+                    // AUTO-LISTEN: Start mic after bot stops
+                    if(!isMuted && recognition) setTimeout(() => { try { recognition.start(); } catch(e){} }, 400);
                 };
-            } catch (err) {
-                console.error("Voice Error:", err);
-                botTrigger.classList.remove('speaking-pulse');
+            } catch (err) { 
+                trigger.classList.remove('speaking-pulse'); 
             }
         }
 
-        // --- 3. CHAT FLOW ---
-        voiceToggle.onclick = (e) => { e.stopPropagation(); isMuted = !isMuted; voiceToggle.innerText = isMuted ? '🔇' : '🔊'; };
-        
-        botTrigger.onclick = () => {
-            if (chatbox.style.display === 'flex') { chatbox.style.display = 'none'; return; }
-            chatbox.style.display = 'flex';
-            const greet = "Hey! Welcome to the Hub. How can I help you today?";
-            renderMsg('assistant', greet);
-            speak(greet);
+        // --- 3. DATA SUBMISSION (SUPABASE + GOOGLE) ---
+        document.getElementById('waitlist-form').onsubmit = async function(e) {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+
+            // Trigger Coffee Bean Confetti
+            confetti({ 
+                particleCount: 150, spread: 70, origin: { y: 0.6 },
+                colors: ['#3c2f2f', '#d4b59e', '#ffffff'] 
+            });
+
+            // Send to both backends
+            try {
+                await _supabase.from('waitlist').insert([{ email }]);
+                fetch(GS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ email }) });
+            } catch (err) { console.error("Sync Error:", err); }
+
+            this.style.display = 'none';
+            document.getElementById('form-msg').style.display = 'block';
+            speak("Welcome to the hub! You're on the list, neighbor.");
         };
 
-        // --- UPDATED FORM HANDLER ---
-        chatForm.onsubmit = async (e) => {
+        // --- 4. CHAT INTERACTIONS ---
+        trigger.onclick = () => {
+            // Unlocks audio for mobile Safari
+            if (!isAudioUnlocked) { 
+                audioPlayer.play().then(() => { audioPlayer.pause(); isAudioUnlocked = true; }); 
+            }
+            box.style.display = box.style.display === 'flex' ? 'none' : 'flex';
+            if (box.style.display === 'flex') speak("Hey! Welcome to the hub. What can I do for you?");
+        };
+
+        form.onsubmit = async (e) => {
             e.preventDefault();
-            const val = chatInput.value.trim();
+            const val = input.value.trim();
             if (!val) return;
 
-            renderMsg('user', val);
-            chatInput.value = '';
-
-            // Safety: Stop mic manually when user hits Send
+            render('user', val);
+            input.value = '';
             if (recognition) recognition.stop();
-
-            chatHistory.push({ role: 'user', content: val });
 
             try {
                 const res = await fetch('/.netlify/functions/grok-proxy', { 
                     method: 'POST', 
-                    body: JSON.stringify({ messages: chatHistory }) 
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ messages: history }) 
                 });
                 const data = await res.json();
                 const reply = data.choices[0].message.content;
-                chatHistory.push({ role: 'assistant', content: reply });
-                renderMsg('assistant', reply);
-                // Trigger the voice again for the new reply
-                speak(reply); 
+                history.push({ role: 'assistant', content: reply });
+                render('assistant', reply);
+                speak(reply);
             } catch (err) {
-                console.error("Chat Error:", err);
-                renderMsg('assistant', "I'm having trouble connecting to the hub. Check your connection!");
+                render('assistant', "I hit a snag. Mind repeating that?");
             }
         };
 
-        function renderMsg(role, text) {
+        function render(role, text) {
             const div = document.createElement('div');
+            div.style.marginBottom = "15px";
             div.innerHTML = `<strong>${role === 'user' ? 'You' : 'BrewBot'}:</strong> ${text}`;
-            div.style.marginBottom = "10px";
             document.getElementById('chat-messages').appendChild(div);
-            document.getElementById('chat-messages').scrollTop = 9999;
+            document.getElementById('chat-messages').scrollTop = 999;
         }
-        
-        document.getElementById('chat-close').onclick = () => chatbox.style.display = 'none';
 
-        // --- 4. VOICE LEVEL VISUALIZATION ---
-        // Remove old updateVoiceLevel/recognition event code (now handled above)
+        document.getElementById('mute-btn').onclick = (e) => { 
+            isMuted = !isMuted; 
+            e.target.innerText = isMuted ? '🔇' : '🔊'; 
+        };
+        document.getElementById('chat-close').onclick = () => box.style.display = 'none';
     </script>
 </body>
 </html>
