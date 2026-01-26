@@ -31,6 +31,142 @@
         #bot-trigger:hover { transform: scale(1.1); }
         .speaking-pulse { animation: pulse-glow 1.5s infinite; filter: drop-shadow(0 0 10px var(--hub-tan)); }
         @keyframes pulse-glow { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+
+        /* Chatbox Styling */
+        #chatbox { 
+            display: none; 
+            position: absolute; 
+            bottom: 80px; 
+            right: 0; 
+            width: 300px; 
+            background: white; 
+            border: 1px solid #ddd; 
+            border-radius: 10px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1); 
+            flex-direction: column; 
+        }
+        #chat-header {
+            background: var(--hub-brown); 
+            color: white; 
+            padding: 10px 15px; 
+            border-top-left-radius: 10px; 
+            border-top-right-radius: 10px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+        }
+        #chat-close {
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #chat-messages {
+            padding: 15px;
+            flex: 1;
+            overflow-y: auto;
+            max-height: 200px;
+        }
+        #chat-form {
+            display: flex;
+            border-top: 1px solid #ddd;
+        }
+        #chat-input {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-bottom-left-radius: 10px;
+            border-top-left-radius: 10px;
+        }
+        #chat-form button {
+            padding: 10px 15px;
+            background: var(--hub-brown);
+            color: white;
+            border: none;
+            border-top-right-radius: 10px;
+            border-bottom-right-radius: 10px;
+            cursor: pointer;
+        }
+        #chat-form button:hover {
+            background: #5a4646;
+        }
+
+        /* Chatbox Styles */
+        #chatbox {
+            position: absolute;
+            bottom: 80px;
+            right: 0;
+            width: 320px;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(60,47,47,0.18);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 1001;
+            border: 1.5px solid var(--hub-brown);
+        }
+        #chat-header {
+            background: var(--hub-brown);
+            color: #fff;
+            padding: 14px 16px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 1.1em;
+        }
+        #chat-close {
+            cursor: pointer;
+            font-size: 1.3em;
+        }
+        #chat-messages {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+            background: #faf8f6;
+            font-size: 1em;
+            min-height: 120px;
+            max-height: 260px;
+        }
+        .chat-msg {
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+        .chat-user {
+            color: var(--hub-brown);
+            font-weight: 600;
+        }
+        .chat-bot {
+            color: #5a4646;
+        }
+        #chat-form {
+            display: flex;
+            border-top: 1px solid #eee;
+            background: #fff;
+        }
+        #chat-input {
+            flex: 1;
+            border: none;
+            padding: 14px;
+            font-size: 1em;
+            border-radius: 0 0 0 16px;
+            outline: none;
+        }
+        #chat-form button {
+            background: var(--hub-brown);
+            color: #fff;
+            border: none;
+            padding: 0 18px;
+            font-size: 1em;
+            border-radius: 0 0 16px 0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #chat-form button:hover {
+            background: #5a4646;
+        }
+        @media (max-width: 500px) {
+            #chatbox { width: 98vw; right: -10px; }
+        }
     </style>
 </head>
 <body>
@@ -57,6 +193,15 @@
     <div id="bot-bubble">
         <div id="bot-trigger" title="Hear BrewBot">
             <span style="font-size: 30px;">☕</span>
+        </div>
+
+        <div id="chatbox">
+            <div id="chat-header">BrewBot <span id="chat-close">×</span></div>
+            <div id="chat-messages"></div>
+            <form id="chat-form">
+                <input id="chat-input" type="text" placeholder="Ask BrewBot..." autocomplete="off" required />
+                <button type="submit">Send</button>
+            </form>
         </div>
     </div>
 
@@ -99,6 +244,71 @@
             document.getElementById('form-msg').style.display = 'block';
             this.style.display = 'none';
         });
+
+        // --- 3. CHATBOX FUNCTIONALITY ---
+        const chatbox = document.getElementById('chatbox');
+        const chatClose = document.getElementById('chat-close');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        let chatHistory = [
+            { role: 'system', content: "You are BrewBot, a friendly, coffee-obsessed AI barista and parcel expert at BrewHub PHL. Keep answers concise, helpful, and on-brand." }
+        ];
+
+        // Show/hide chatbox
+        botTrigger.addEventListener('click', () => {
+            chatbox.style.display = chatbox.style.display === 'none' ? 'flex' : 'none';
+        });
+        chatClose.addEventListener('click', () => {
+            chatbox.style.display = 'none';
+        });
+
+        // Render chat messages
+        function renderMessages() {
+            chatMessages.innerHTML = '';
+            chatHistory.filter(m => m.role !== 'system').forEach(msg => {
+                const div = document.createElement('div');
+                div.className = 'chat-msg ' + (msg.role === 'user' ? 'chat-user' : 'chat-bot');
+                div.textContent = (msg.role === 'user' ? 'You: ' : 'BrewBot: ') + msg.content;
+                chatMessages.appendChild(div);
+            });
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Handle chat form submit
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userMsg = chatInput.value.trim();
+            if (!userMsg) return;
+            chatHistory.push({ role: 'user', content: userMsg });
+            renderMessages();
+            chatInput.value = '';
+            // Call Grok proxy
+            try {
+                const res = await fetch('/.netlify/functions/grok-proxy', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ messages: chatHistory })
+                });
+                const data = await res.json();
+                const reply = data.choices?.[0]?.message?.content || 'Sorry, I had trouble responding.';
+                chatHistory.push({ role: 'assistant', content: reply });
+                renderMessages();
+            } catch (err) {
+                chatHistory.push({ role: 'assistant', content: 'Sorry, there was a network error.' });
+                renderMessages();
+            }
+        });
+
+        // Optional: open chatbox if user presses Enter on BrewBot button
+        botTrigger.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                chatbox.style.display = chatbox.style.display === 'none' ? 'flex' : 'none';
+            }
+        });
+
+        // Initialize chatbox hidden
+        chatbox.style.display = 'none';
     </script>
 </body>
 </html>
