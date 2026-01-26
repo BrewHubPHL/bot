@@ -217,6 +217,8 @@
                 <input id="chat-input" type="text" placeholder="Ask BrewBot..." autocomplete="off" required />
                 <button type="submit">Send</button>
             </form>
+            <!-- Voice toggle button for chatbox -->
+            <button id="voice-toggle" title="Toggle BrewBot voice" style="position:absolute;top:8px;right:40px;z-index:1100;font-size:1.2em;background:none;border:none;cursor:pointer;">🔊</button>
         </div>
     </div>
 
@@ -266,9 +268,33 @@
         const chatMessages = document.getElementById('chat-messages');
         const chatForm = document.getElementById('chat-form');
         const chatInput = document.getElementById('chat-input');
+        const voiceToggle = document.getElementById('voice-toggle');
         let chatHistory = [
             { role: 'system', content: "You are BrewBot, a friendly, coffee-obsessed AI barista and parcel expert at BrewHub PHL. Keep answers concise, helpful, and on-brand." }
         ];
+        let isVoiceEnabled = true; // Voice feature is enabled by default
+        let isMuted = false;
+        let recognition = null;
+
+        // Initialize Speech Recognition
+        defineSpeechRecognition();
+
+        function defineSpeechRecognition() {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.lang = 'en-US';
+                recognition.interimResults = false;
+
+                // AUTO-SEND: Triggered when the user stops talking
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    chatInput.value = transcript;
+                    console.log("Auto-sending transcript:", transcript);
+                    chatForm.requestSubmit(); // Triggers the 'submit' event automatically
+                };
+            }
+        }
 
         // Show/hide chatbox
         botTrigger.addEventListener('click', () => {
@@ -321,7 +347,35 @@
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
 
-        // Handle chat form submit
+        // --- CORE VOICE FUNCTION ---
+        async function speakReply(text) {
+            if (isMuted) return; // Save credits if muted
+
+            botTrigger.classList.add('speaking-pulse');
+            try {
+                const response = await fetch('/.netlify/functions/elevenlabs-tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                const base64Audio = await response.text();
+                const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
+                await audio.play();
+                audio.onended = () => {
+                    botTrigger.classList.remove('speaking-pulse');
+                    // AUTO-LISTEN: Start mic once bot is done talking
+                    if (!isMuted && recognition) {
+                        console.log("BrewBot done. Listening for reply...");
+                        recognition.start();
+                    }
+                };
+            } catch (err) {
+                console.error("Voice Error:", err);
+                botTrigger.classList.remove('speaking-pulse');
+            }
+        }
+
+        // --- CHAT SUBMISSION ---
         chatForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const userMsg = chatInput.value.trim();
@@ -338,73 +392,34 @@
                     body: JSON.stringify({ messages: chatHistory })
                 });
                 const data = await res.json();
-                const reply = data.choices?.[0]?.message?.content || 'Sorry, I had trouble responding.';
+                const reply = data.choices?.[0]?.message?.content || 'Snag in the brew.';
+                
                 chatHistory.push({ role: 'assistant', content: reply });
                 renderMessages();
-
-                // --- NEW: AUTO-PLAY VOICE ---
-                botTrigger.classList.add('speaking-pulse');
-                try {
-                    const voiceRes = await fetch('/.netlify/functions/elevenlabs-tts', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ text: reply })
-                    });
-                    const base64Audio = await voiceRes.text();
-                    const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
-                    audio.play();
-                    audio.onended = () => botTrigger.classList.remove('speaking-pulse');
-                } catch (err) {
-                    botTrigger.classList.remove('speaking-pulse');
-                }
+                
+                // Triggers the auto-voice + auto-listen loop
+                speakReply(reply); 
             } catch (err) {
-                chatHistory.push({ role: 'assistant', content: 'Sorry, there was a network error.' });
-                renderMessages();
+                console.error(err);
             }
         });
 
-        // --- Voice to Text for User ---
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = false;
-            recognition.lang = 'en-US';
+        // Mute Toggle Logic
+        voiceToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            isMuted = !isMuted;
+            voiceToggle.innerText = isMuted ? '🔇' : '🔊';
+        });
 
-            // Add mic button to chat form
-            const micBtn = document.createElement('button');
-            micBtn.type = 'button';
-            micBtn.title = 'Speak your message';
-            micBtn.innerHTML = '🎤';
-            micBtn.style.marginLeft = '6px';
-            micBtn.style.fontSize = '1.1em';
-            micBtn.style.background = 'none';
-            micBtn.style.border = 'none';
-            micBtn.style.cursor = 'pointer';
-            chatForm.appendChild(micBtn);
-
-            micBtn.onclick = () => {
-                micBtn.disabled = true;
-                micBtn.innerHTML = '🎙️';
-                recognition.start();
-            };
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                chatInput.value = transcript;
-                micBtn.disabled = false;
-                micBtn.innerHTML = '🎤';
-                chatInput.focus();
-            };
-            recognition.onerror = () => {
-                micBtn.disabled = false;
-                micBtn.innerHTML = '🎤';
-                alert('Voice recognition failed.');
-            };
-            recognition.onend = () => {
-                micBtn.disabled = false;
-                micBtn.innerHTML = '🎤';
-            };
-        }
+        // Toggle voice feature on/off
+        voiceToggle.addEventListener('click', () => {
+            isVoiceEnabled = !isVoiceEnabled;
+            voiceToggle.style.color = isVoiceEnabled ? 'inherit' : '#ccc';
+            voiceToggle.style.cursor = isVoiceEnabled ? 'pointer' : 'default';
+            if (!isVoiceEnabled) {
+                botTrigger.classList.remove('speaking-pulse');
+            }
+        });
 
         // Optional: open chatbox if user presses Enter on BrewBot button
         botTrigger.addEventListener('keydown', (e) => {
