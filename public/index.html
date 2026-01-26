@@ -165,7 +165,12 @@
             background: #5a4646;
         }
         @media (max-width: 500px) {
-            #chatbox { width: 98vw; right: -10px; }
+            #chatbox { width: 98vw; right: 1vw; left: 1vw; min-width: unset; max-width: unset; }
+            #chat-header { font-size: 1em; padding: 12px 10px; }
+            #chat-messages { padding: 10px; font-size: 0.98em; }
+            #chat-form { flex-direction: row; }
+            #chat-input { font-size: 1em; padding: 10px; }
+            #chat-form button { padding: 0 10px; font-size: 1em; }
         }
     </style>
 </head>
@@ -266,10 +271,41 @@
         // Render chat messages
         function renderMessages() {
             chatMessages.innerHTML = '';
-            chatHistory.filter(m => m.role !== 'system').forEach(msg => {
+            chatHistory.filter(m => m.role !== 'system').forEach((msg, idx) => {
                 const div = document.createElement('div');
                 div.className = 'chat-msg ' + (msg.role === 'user' ? 'chat-user' : 'chat-bot');
-                div.textContent = (msg.role === 'user' ? 'You: ' : 'BrewBot: ') + msg.content;
+                if (msg.role === 'user') {
+                    div.textContent = 'You: ' + msg.content;
+                } else {
+                    div.textContent = 'BrewBot: ' + msg.content;
+                    // Add TTS button for BrewBot replies
+                    const speakBtn = document.createElement('button');
+                    speakBtn.textContent = '🔊';
+                    speakBtn.title = 'Hear this reply';
+                    speakBtn.style.marginLeft = '8px';
+                    speakBtn.style.fontSize = '1em';
+                    speakBtn.style.background = 'none';
+                    speakBtn.style.border = 'none';
+                    speakBtn.style.cursor = 'pointer';
+                    speakBtn.onclick = async () => {
+                        speakBtn.disabled = true;
+                        try {
+                            const response = await fetch('/.netlify/functions/elevenlabs-tts', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ text: msg.content })
+                            });
+                            const base64Audio = await response.text();
+                            const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
+                            audio.play();
+                            audio.onended = () => { speakBtn.disabled = false; };
+                        } catch (err) {
+                            speakBtn.disabled = false;
+                            alert('Sorry, there was a problem with voice playback.');
+                        }
+                    };
+                    div.appendChild(speakBtn);
+                }
                 chatMessages.appendChild(div);
             });
             chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -299,6 +335,49 @@
                 renderMessages();
             }
         });
+
+        // --- Voice to Text for User ---
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            // Add mic button to chat form
+            const micBtn = document.createElement('button');
+            micBtn.type = 'button';
+            micBtn.title = 'Speak your message';
+            micBtn.innerHTML = '🎤';
+            micBtn.style.marginLeft = '6px';
+            micBtn.style.fontSize = '1.1em';
+            micBtn.style.background = 'none';
+            micBtn.style.border = 'none';
+            micBtn.style.cursor = 'pointer';
+            chatForm.appendChild(micBtn);
+
+            micBtn.onclick = () => {
+                micBtn.disabled = true;
+                micBtn.innerHTML = '🎙️';
+                recognition.start();
+            };
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                chatInput.value = transcript;
+                micBtn.disabled = false;
+                micBtn.innerHTML = '🎤';
+                chatInput.focus();
+            };
+            recognition.onerror = () => {
+                micBtn.disabled = false;
+                micBtn.innerHTML = '🎤';
+                alert('Voice recognition failed.');
+            };
+            recognition.onend = () => {
+                micBtn.disabled = false;
+                micBtn.innerHTML = '🎤';
+            };
+        }
 
         // Optional: open chatbox if user presses Enter on BrewBot button
         botTrigger.addEventListener('keydown', (e) => {
