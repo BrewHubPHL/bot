@@ -2,10 +2,28 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BrewHub PHL | Cafe & Parcel Hub</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <style>
+                        * {
+                            box-sizing: border-box;
+                        }
+
+                        @media (max-width: 500px) {
+                            #chatbox {
+                                position: fixed;
+                                left: 5vw;  /* Gives 5% breathing room on the left */
+                                right: 5vw; /* Gives 5% breathing room on the right */
+                                width: 90vw;
+                                bottom: 100px; /* Moves it up so it doesn't hit the home bar */
+                            }
+                        }
+                #chat-input,
+                .hub-form input {
+                    font-size: 16px !important; /* Forces 16px to satisfy iOS Safari */
+                    -webkit-text-size-adjust: 100%;
+                }
         :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; }
         body { font-family: 'Segoe UI', sans-serif; background-color: var(--hub-light); margin: 0; color: var(--hub-brown); display: flex; flex-direction: column; min-height: 100vh; }
         
