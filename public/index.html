@@ -326,10 +326,11 @@
             e.preventDefault();
             const userMsg = chatInput.value.trim();
             if (!userMsg) return;
+
             chatHistory.push({ role: 'user', content: userMsg });
             renderMessages();
             chatInput.value = '';
-            // Call Grok proxy
+
             try {
                 const res = await fetch('/.netlify/functions/grok-proxy', {
                     method: 'POST',
@@ -340,6 +341,22 @@
                 const reply = data.choices?.[0]?.message?.content || 'Sorry, I had trouble responding.';
                 chatHistory.push({ role: 'assistant', content: reply });
                 renderMessages();
+
+                // --- NEW: AUTO-PLAY VOICE ---
+                botTrigger.classList.add('speaking-pulse');
+                try {
+                    const voiceRes = await fetch('/.netlify/functions/elevenlabs-tts', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: reply })
+                    });
+                    const base64Audio = await voiceRes.text();
+                    const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
+                    audio.play();
+                    audio.onended = () => botTrigger.classList.remove('speaking-pulse');
+                } catch (err) {
+                    botTrigger.classList.remove('speaking-pulse');
+                }
             } catch (err) {
                 chatHistory.push({ role: 'assistant', content: 'Sorry, there was a network error.' });
                 renderMessages();
