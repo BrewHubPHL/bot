@@ -222,26 +222,49 @@
             voiceLevelFill.style.width = '0%';
         }
 
-        // --- 2. TEXT-TO-SPEECH (SPEAKING) ---
-        async function speakReply(text) {
+        // --- UPDATED CORE VOICE LOOP ---
+        async function speak(text) {
             if (isMuted) return;
+
+            // 1. KILL THE MIC: Ensure recognition is fully stopped before speaking
+            if (recognition) {
+                try {
+                    recognition.stop(); 
+                } catch (e) {
+                    console.log("Mic already stopped");
+                }
+            }
+
             botTrigger.classList.add('speaking-pulse');
+
             try {
-                const res = await fetch('/.netlify/functions/elevenlabs-tts', {
-                    method: 'POST',
-                    body: JSON.stringify({ text })
+                const res = await fetch('/.netlify/functions/elevenlabs-tts', { 
+                    method: 'POST', 
+                    body: JSON.stringify({ text }) 
                 });
                 const base64 = await res.text();
                 const audio = new Audio(`data:audio/mpeg;base64,${base64}`);
+                // 2. PLAY THE VOICE
                 await audio.play();
+
                 audio.onended = () => {
                     botTrigger.classList.remove('speaking-pulse');
-                    // Only restart recognition if not muted, chatbox is open, and not already recognizing
-                    if (!isMuted && recognition && chatbox.style.display === 'flex' && !recognizing) {
-                        try { recognition.start(); } catch (e) {}
+                    // 3. RE-START THE MIC: Only after the audio is totally finished
+                    if (!isMuted && recognition && chatbox.style.display === 'flex') {
+                        setTimeout(() => {
+                            try {
+                                recognition.start();
+                            } catch (e) {
+                                console.error("Mic restart failed:", e);
+                            }
+                        }, 300); // Small 300ms breather for the browser
                     }
                 };
-            } catch (err) { botTrigger.classList.remove('speaking-pulse'); }
+            } catch (err) {
+                console.error("Voice Error:", err);
+                botTrigger.classList.remove('speaking-pulse');
+            }
+        }
         }
 
         // --- 3. CHAT FLOW ---
@@ -255,19 +278,35 @@
             speakReply(greet);
         };
 
+        // --- UPDATED FORM HANDLER ---
         chatForm.onsubmit = async (e) => {
             e.preventDefault();
-            const msg = chatInput.value;
-            chatHistory.push({ role: 'user', content: msg });
-            renderMsg('user', msg);
+            const val = chatInput.value.trim();
+            if (!val) return;
+
+            renderMsg('user', val);
             chatInput.value = '';
 
-            const res = await fetch('/.netlify/functions/grok-proxy', { method: 'POST', body: JSON.stringify({ messages: chatHistory }) });
-            const data = await res.json();
-            const reply = data.choices[0].message.content;
-            chatHistory.push({ role: 'assistant', content: reply });
-            renderMsg('assistant', reply);
-            speakReply(reply);
+            // Safety: Stop mic manually when user hits Send
+            if (recognition) recognition.stop();
+
+            chatHistory.push({ role: 'user', content: val });
+
+            try {
+                const res = await fetch('/.netlify/functions/grok-proxy', { 
+                    method: 'POST', 
+                    body: JSON.stringify({ messages: chatHistory }) 
+                });
+                const data = await res.json();
+                const reply = data.choices[0].message.content;
+                chatHistory.push({ role: 'assistant', content: reply });
+                renderMsg('assistant', reply);
+                // Trigger the voice again for the new reply
+                speak(reply); 
+            } catch (err) {
+                console.error("Chat Error:", err);
+                renderMsg('assistant', "I'm having trouble connecting to the hub. Check your connection!");
+            }
         };
 
         function renderMsg(role, text) {
