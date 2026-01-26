@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BrewHub PHL | Cafe & Parcel Hub</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -119,41 +120,53 @@
     </div>
 
     <script>
-                // --- WAITLIST FORM HANDLER ---
-                // Ensure Supabase client is loaded via CDN
-                const waitlistForm = document.getElementById('waitlist-form');
-                const formMsg = document.getElementById('form-msg');
-                if (waitlistForm) {
-                    waitlistForm.addEventListener('submit', async (e) => {
-                        e.preventDefault();
-                        const email = document.getElementById('email').value.trim();
-                        if (!email) return;
+                // --- HANDLE WAITLIST SUBMISSION ---
+                document.getElementById('waitlist-form').onsubmit = async function(e) {
+                    e.preventDefault();
+                    const emailValue = document.getElementById('email').value;
+                    const msg = document.getElementById('form-msg');
+                    const form = this;
 
-                        // Load Supabase client if not already loaded
-                        if (!window.supabase) {
-                            const script = document.createElement('script');
-                            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/dist/umd/supabase.min.js';
-                            document.head.appendChild(script);
-                            await new Promise(res => { script.onload = res; });
-                        }
+                    // --- TRIGGER COFFEE CONFETTI ---
+                    const count = 200;
+                    const defaults = { origin: { y: 0.7 } };
 
-                        // Initialize Supabase client (replace with your actual project URL and anon key)
-                        const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
-                        const SUPABASE_ANON_KEY = 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN';
-                        const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                    function fire(particleRatio, opts) {
+                      confetti({
+                        ...defaults,
+                        ...opts,
+                        particleCount: Math.floor(count * particleRatio),
+                        // BrewHub Colors: Brown, Tan, and a hint of Gold
+                        colors: ['#3c2f2f', '#d4b59e', '#ffffff', '#b8860b'] 
+                      });
+                    }
 
-                        // Insert email into 'waitlist' table
-                        const { error } = await _supabase.from('waitlist').insert([{ email }]);
-                        if (!error) {
-                            formMsg.style.display = 'block';
-                            waitlistForm.style.display = 'none';
-                        } else {
-                            formMsg.style.display = 'block';
-                            formMsg.style.color = 'red';
-                            formMsg.textContent = 'There was a problem. Please try again later.';
-                        }
+                    fire(0.25, { spread: 26, startVelocity: 55 });
+                    fire(0.2, { spread: 60 });
+                    fire(0.35, { spread: 100, decay: 0.91, scalar: 0.8 });
+                    fire(0.1, { spread: 120, startVelocity: 25, decay: 0.92, scalar: 1.2 });
+                    fire(0.1, { spread: 120, startVelocity: 45 });
+
+                    // --- EXISTING LOGIC ---
+                    // 1. Send to Supabase
+                    if (typeof _supabase !== 'undefined') {
+                        _supabase.from('waitlist').insert([{ email: emailValue }]);
+                    }
+
+                    // 2. Send to Google Sheets
+                    fetch('https://script.google.com/macros/s/AKfycbxkBnMkyUDaIaVrllfiEJF3oJDGUXrb6p5OpTuqghoQ0iuJPODyhqjB8Ixqb0zKFc2cAw/exec', {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: emailValue })
                     });
-                }
+
+                    // 3. UI Feedback
+                    msg.style.display = 'block';
+                    form.style.display = 'none';
+            
+                    speak("Incredible! You're officially a Hub member. Keep an eye on your inbox for our opening details.");
+                };
         const botTrigger = document.getElementById('bot-trigger');
         const chatbox = document.getElementById('chatbox');
         const chatInput = document.getElementById('chat-input');
