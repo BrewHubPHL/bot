@@ -4,6 +4,7 @@ const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
 
 serve(async (req) => {
   try {
+    // Webhook data from Supabase
     const { record } = await req.json()
     const userEmail = record.email
 
@@ -14,27 +15,44 @@ serve(async (req) => {
         'Authorization': `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: 'BrewHub PHL <hello@brewhubphl.com>',
+        from: 'BrewHub PHL <info@brewhubphl.com>',
         to: [userEmail],
-        subject: 'Welcome to the Hub!',
+        subject: 'Welcome to the Hub! ☕📦',
         html: `
-          <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px;">
-            <h2 style="color: #333;">Cheers, Brewer! 🍻</h2>
-            <p>Thanks for joining <strong>BrewHub PHL</strong>. We're building the ultimate community for Philly brewers, and we're glad to have you on board.</p>
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="https://brewhubphl.com" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Explore the Hub</a>
+          <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+            <h1 style="color: #333;">Welcome to the Hub! ☕📦</h1>
+            <p>Hi there,</p>
+            <p>Thanks for joining <strong>BrewHub PHL</strong>. Whether you're here for a perfect coffee or a secure spot for your packages, we're glad to have you in the neighborhood.</p>
+            
+            <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0;">What we offer:</h3>
+              <ul style="line-height: 1.6;">
+                <li><strong>Cafe:</strong> Fresh brews and local vibes.</li>
+                <li><strong>Parcel Service:</strong> Secure package receiving and pickup.</li>
+                <li><strong>Community:</strong> Your local spot for neighborhood news.</li>
+              </ul>
             </div>
-            <p style="font-size: 0.9em; color: #666;">Need help? Just reply to this email.</p>
+
+            <p>Need help with a delivery or have a question about our menu? Just reply to this email—it goes straight to our inbox.</p>
+            
+            <p>See you at the Hub,<br><strong>The BrewHub PHL Team</strong></p>
             <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-            <p style="font-size: 0.8em; color: #999;">BrewHub PHL | Philadelphia, PA</p>
+            <p style="font-size: 12px; color: #999; text-align: center;">BrewHub PHL | Philadelphia, PA</p>
           </div>
         `,
       }),
     })
 
     const data = await res.json()
-    return new Response(JSON.stringify(data), { status: 200 })
+    return new Response(JSON.stringify(data), { 
+      status: 200, 
+      headers: { 'Content-Type': 'application/json' } 
+    })
+
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+    return new Response(JSON.stringify({ error: error.message }), { 
+      status: 500, 
+      headers: { 'Content-Type': 'application/json' } 
+    })
   }
 })

@@ -1,13 +1,35 @@
+
 exports.handler = async (event) => {
+    // Handle CORS preflight
+    if (event.httpMethod === 'OPTIONS') {
+        return {
+            statusCode: 200,
+            headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type',
+            },
+            body: ''
+        };
+    }
+
     if (event.httpMethod !== 'POST') {
-        return { statusCode: 405, body: 'Method Not Allowed' };
+        return {
+            statusCode: 405,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+            body: 'Method Not Allowed'
+        };
     }
 
     try {
         const { text } = JSON.parse(event.body);
 
         if (!text) {
-            return { statusCode: 400, body: JSON.stringify({ error: 'Text is required' }) };
+            return {
+                statusCode: 400,
+                headers: { 'Access-Control-Allow-Origin': '*' },
+                body: JSON.stringify({ error: 'Text is required' })
+            };
         }
 
         console.log('ElevenLabs TTS request for text:', text.substring(0, 50) + '...');
@@ -18,7 +40,10 @@ exports.handler = async (event) => {
             console.error('ELEVENLABS_API_KEY not found in environment variables');
             return {
                 statusCode: 500,
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
                 body: JSON.stringify({ error: 'API key not configured' })
             };
         }
@@ -50,7 +75,8 @@ exports.handler = async (event) => {
             return {
                 statusCode: response.status,
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
                 },
                 body: JSON.stringify({
                     error: `ElevenLabs API error: ${response.statusText}`,
@@ -90,7 +116,8 @@ exports.handler = async (event) => {
         return {
             statusCode: 500,
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
             },
             body: JSON.stringify({
                 error: 'Internal server error',

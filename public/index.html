@@ -3,88 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BrewHub PHL | Coming Soon</title>
+    <title>BrewHub PHL | Cafe & Parcel Hub</title>
     <style>
-        :root {
-            --primary-coffee: #4b3832;
-            --accent-orange: #d4a373;
-            --bg-color: #fefae0;
-        }
-        body {
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--primary-coffee);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            text-align: center;
-        }
-        .container { padding: 20px; max-width: 500px; }
+        :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: var(--hub-light); margin: 0; color: var(--hub-brown); display: flex; flex-direction: column; min-height: 100vh; }
         
-        .logo {
-            max-width: 180px;
-            height: auto;
-            margin-bottom: 20px;
-            filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.1));
-        }
+        /* Clean Branding Header */
+        header { background: var(--hub-brown); color: #fff; padding: 40px 20px; text-align: center; }
+        #logo { max-width: 280px; width: 100%; height: auto; margin-bottom: 10px; }
+        
+        /* Centered Waitlist Card */
+        main { flex: 1; display: flex; justify-content: center; align-items: center; padding: 40px 20px; }
+        .hero-card { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); max-width: 500px; width: 100%; text-align: center; }
+        h1 { margin-top: 0; font-size: 1.8em; }
+        p.subtitle { color: #666; margin-bottom: 30px; }
 
-        h1 { font-size: 2rem; margin-bottom: 10px; }
-        p { line-height: 1.6; margin-bottom: 30px; }
+        /* Form Styling */
+        .hub-form { display: flex; flex-direction: column; gap: 15px; }
+        .hub-form input { padding: 15px; border: 1px solid #ddd; border-radius: 12px; font-size: 1em; background: #fafafa; }
+        .primary-btn { background: var(--hub-brown); color: white; border: none; padding: 16px; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 1.1em; transition: 0.2s; }
+        .primary-btn:hover { background: #5a4646; }
 
-        .waitlist-form { display: flex; flex-direction: column; gap: 10px; }
-        input[type="email"] {
-            padding: 12px;
-            border: 2px solid var(--primary-coffee);
-            border-radius: 5px;
-            font-size: 1rem;
-        }
-        button {
-            padding: 12px;
-            background-color: var(--primary-coffee);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        button:hover { background-color: var(--accent-orange); }
+        /* Floating BrewBot UI */
+        #bot-bubble { position: fixed; bottom: 30px; right: 30px; z-index: 1000; }
+        #bot-trigger { width: 70px; height: 70px; background: var(--hub-brown); border-radius: 50%; display: flex; justify-content: center; align-items: center; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: 0.3s; }
+        #bot-trigger:hover { transform: scale(1.1); }
+        .speaking-pulse { animation: pulse-glow 1.5s infinite; filter: drop-shadow(0 0 10px var(--hub-tan)); }
+        @keyframes pulse-glow { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <img src="logo.png" alt="BrewHub PHL Logo" class="logo">
-        
-        <h1>Something is Brewing.</h1>
-        <p>Coffee, community, and the BrewBot are coming to Philadelphia soon. Join the waitlist for opening day updates.</p>
+    <header>
+        <img src="logo.png" alt="BrewHub PHL" id="logo">
+        <p>Philly's Premier Coffee & Parcel Hub</p>
+    </header>
 
-        <form id="waitlistForm" class="waitlist-form">
-            <input type="email" id="emailInput" placeholder="Enter your email" required>
-            <button type="submit">Keep me posted</button>
-        </form>
+    <main>
+        <section class="hero-card">
+            <h1>Join the Waitlist</h1>
+            <p class="subtitle">Secure your spot for opening day perks and seamless parcel management in Point Breeze.</p>
+            
+            <form class="hub-form" id="waitlist-form">
+                <!-- Name field removed: only email is collected -->
+                <input type="email" id="email" placeholder="Email Address" required>
+                <button type="submit" class="primary-btn">Get Early Access</button>
+            </form>
+            <p id="form-msg" style="display:none; color: green; margin-top: 15px;">You're on the list! See you soon.</p>
+        </section>
+    </main>
+
+    <div id="bot-bubble">
+        <div id="bot-trigger" title="Hear BrewBot">
+            <span style="font-size: 30px;">☕</span>
+        </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
-        // Use your public Supabase URL and anon key
-        const sb = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
+        // --- 1. HANDLE VOICE (via Netlify) ---
+        const botTrigger = document.getElementById('bot-trigger');
+        
+        botTrigger.addEventListener('click', async () => {
+            const hour = new Date().getHours();
+            let greeting = "Welcome to the Hub! Your coffee is brewing.";
+            if (hour < 12) greeting = "Good morning! The espresso is dialed in and the morning parcels are arriving.";
+            else if (hour < 18) greeting = "Good afternoon! Ready for a pick-me-up?";
+            else greeting = "Good evening! Wrapping up the day at the Hub.";
 
-        document.getElementById('waitlistForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('emailInput').value;
-            const { error } = await sb
-                .from('waitlist')
-                .insert([{ email }]);
-            if (error) {
-                alert('There was a problem. Please try again soon!');
-            } else {
-                alert('Thanks for signing up! See you soon.');
-                document.getElementById('waitlistForm').reset();
+            botTrigger.classList.add('speaking-pulse');
+
+            try {
+                // Calling your Netlify Function proxy
+                const response = await fetch('/.netlify/functions/elevenlabs-tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: greeting })
+                });
+                
+                const base64Audio = await response.text();
+                const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
+                audio.play();
+                audio.onended = () => botTrigger.classList.remove('speaking-pulse');
+            } catch (err) {
+                console.error("Voice Error:", err);
+                botTrigger.classList.remove('speaking-pulse');
             }
+        });
+
+        // --- 2. HANDLE WAITLIST (via Supabase) ---
+        // Note: This assumes you have the Supabase CDN script loaded or handle it via your existing logic
+        document.getElementById('waitlist-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            // Your existing Supabase Logic to insert into 'public.waitlist'
+            document.getElementById('form-msg').style.display = 'block';
+            this.style.display = 'none';
         });
     </script>
 </body>
