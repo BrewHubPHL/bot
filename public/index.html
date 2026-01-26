@@ -218,7 +218,10 @@
                 await audio.play();
                 audio.onended = () => {
                     botTrigger.classList.remove('speaking-pulse');
-                    if (!isMuted && recognition) recognition.start(); // AUTO-LISTEN
+                    // Only restart recognition if not muted, chatbox is open, and not already recognizing
+                    if (!isMuted && recognition && chatbox.style.display === 'flex' && !recognizing) {
+                        try { recognition.start(); } catch (e) {}
+                    }
                 };
             } catch (err) { botTrigger.classList.remove('speaking-pulse'); }
         }
