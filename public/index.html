@@ -119,6 +119,41 @@
     </div>
 
     <script>
+                // --- WAITLIST FORM HANDLER ---
+                // Ensure Supabase client is loaded via CDN
+                const waitlistForm = document.getElementById('waitlist-form');
+                const formMsg = document.getElementById('form-msg');
+                if (waitlistForm) {
+                    waitlistForm.addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        const email = document.getElementById('email').value.trim();
+                        if (!email) return;
+
+                        // Load Supabase client if not already loaded
+                        if (!window.supabase) {
+                            const script = document.createElement('script');
+                            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/dist/umd/supabase.min.js';
+                            document.head.appendChild(script);
+                            await new Promise(res => { script.onload = res; });
+                        }
+
+                        // Initialize Supabase client (replace with your actual project URL and anon key)
+                        const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
+                        const SUPABASE_ANON_KEY = 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN';
+                        const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+                        // Insert email into 'waitlist' table
+                        const { error } = await _supabase.from('waitlist').insert([{ email }]);
+                        if (!error) {
+                            formMsg.style.display = 'block';
+                            waitlistForm.style.display = 'none';
+                        } else {
+                            formMsg.style.display = 'block';
+                            formMsg.style.color = 'red';
+                            formMsg.textContent = 'There was a problem. Please try again later.';
+                        }
+                    });
+                }
         const botTrigger = document.getElementById('bot-trigger');
         const chatbox = document.getElementById('chatbox');
         const chatInput = document.getElementById('chat-input');
