@@ -10,15 +10,15 @@
                             box-sizing: border-box;
                         }
 
-                        @media (max-width: 500px) {
-                            #chatbox {
-                                position: fixed;
-                                left: 5vw;  /* Gives 5% breathing room on the left */
-                                right: 5vw; /* Gives 5% breathing room on the right */
-                                width: 90vw;
-                                bottom: 100px; /* Moves it up so it doesn't hit the home bar */
-                            }
-                        }
+        @media (max-width: 500px) {
+            #chatbox {
+                position: fixed !important;
+                left: 5vw !important;
+                right: 5vw !important;
+                width: 90vw !important;
+                bottom: 100px !important;
+            }
+        }
                 #chat-input,
                 .hub-form input {
                     font-size: 16px !important; /* Forces 16px to satisfy iOS Safari */
@@ -46,7 +46,7 @@
         @keyframes pulse-glow { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
 
         /* Chatbox */
-        #chatbox { display: none; position: absolute; bottom: 85px; right: 0; width: 320px; background: #fff; border-radius: 16px; box-shadow: 0 8px 32px rgba(60,47,47,0.2); flex-direction: column; overflow: hidden; border: 1px solid var(--hub-brown); }
+        #chatbox { display: none; position: fixed; bottom: 85px; right: 30px; width: 320px; background: #fff; border-radius: 16px; box-shadow: 0 8px 32px rgba(60,47,47,0.2); flex-direction: column; overflow: hidden; border: 1px solid var(--hub-brown); }
         #chat-header { background: var(--hub-brown); color: #fff; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
         #chat-messages { flex: 1; padding: 15px; background: #faf8f6; max-height: 250px; overflow-y: auto; }
         
