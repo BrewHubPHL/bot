@@ -108,10 +108,55 @@
         const micBtn = document.getElementById('mic-btn');
         const voiceToggle = document.getElementById('voice-toggle');
         const voiceLevelFill = document.getElementById('voice-level-fill');
-        
+
         let isMuted = false;
         let recognition = null;
+        let recognizing = false;
         let chatHistory = [{ role: 'system', content: "You are BrewBot, the AI Barista at BrewHub PHL. Be concise and Philly-friendly." }];
+
+        // --- SpeechRecognition Setup ---
+        window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (window.SpeechRecognition) {
+            recognition = new window.SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.continuous = false;
+
+            recognition.onstart = () => {
+                recognizing = true;
+                micBtn.classList.add('listening');
+                startVoiceLevel();
+            };
+            recognition.onend = () => {
+                recognizing = false;
+                micBtn.classList.remove('listening');
+                stopVoiceLevel();
+            };
+            recognition.onerror = (e) => {
+                recognizing = false;
+                micBtn.classList.remove('listening');
+                stopVoiceLevel();
+            };
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript.trim();
+                if (transcript) {
+                    chatInput.value = transcript;
+                    chatForm.requestSubmit();
+                }
+            };
+        } else {
+            micBtn.style.display = 'none';
+            document.getElementById('voice-level-bar').style.display = 'none';
+        }
+
+        micBtn.addEventListener('click', () => {
+            if (!recognition) return;
+            if (recognizing) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        });
 
         // --- 1. VOICE RECOGNITION (LISTENING) + LEVEL ---
         let audioStream, audioContext, analyser, dataArray, rafId;
@@ -215,17 +260,7 @@
         document.getElementById('chat-close').onclick = () => chatbox.style.display = 'none';
 
         // --- 4. VOICE LEVEL VISUALIZATION ---
-        function updateVoiceLevel(level) {
-            voiceLevelFill.style.width = `${level}%`;
-        }
-
-        if (recognition) {
-            recognition.onaudiostart = () => { updateVoiceLevel(20); }
-            recognition.onsoundstart = () => { updateVoiceLevel(50); }
-            recognition.onspeechstart = () => { updateVoiceLevel(80); }
-            recognition.onspeechend = () => { updateVoiceLevel(50); }
-            recognition.onend = () => { updateVoiceLevel(0); }
-        }
+        // Remove old updateVoiceLevel/recognition event code (now handled above)
     </script>
 </body>
 </html>
