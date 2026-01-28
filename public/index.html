@@ -132,10 +132,36 @@
         </div>
     </div>
 
-    <footer>
-        South Philadelphia • Point Breeze<br>
-        <a href="https://www.phila.gov/media/20210423160847/Fair-Chance-Hiring-law-poster.pdf" target="_blank">Fair Chance Hiring Notice</a>
-    </footer>
+
+        <footer>
+                South Philadelphia • Point Breeze<br>
+                <a href="#" id="fair-chance-link" style="font-size:10px; text-decoration: underline;">Fair Chance Hiring Notice</a>
+        </footer>
+
+        <!-- Modal for PDF viewer -->
+        <div id="pdf-modal" style="display:none; position:fixed; z-index:1000; left:0; top:0; width:100vw; height:100vh; background:rgba(60,47,47,0.85); align-items:center; justify-content:center;">
+            <div style="background:#fff; border-radius:16px; max-width:90vw; max-height:90vh; width:600px; box-shadow:0 8px 32px rgba(0,0,0,0.18); position:relative; display:flex; flex-direction:column;">
+                <button id="close-pdf-modal" style="position:absolute; top:10px; right:16px; background:none; border:none; font-size:1.7em; color:#3c2f2f; cursor:pointer;">&times;</button>
+                <iframe src="https://www.phila.gov/media/20210423160847/Fair-Chance-Hiring-law-poster.pdf" title="Fair Chance Hiring Notice" style="flex:1; width:100%; height:70vh; border:none; border-radius:0 0 16px 16px;"></iframe>
+            </div>
+        </div>
+
+        <script>
+            // Modal open/close logic for Fair Chance Hiring Notice
+            document.getElementById('fair-chance-link').addEventListener('click', function(e) {
+                e.preventDefault();
+                document.getElementById('pdf-modal').style.display = 'flex';
+            });
+            document.getElementById('close-pdf-modal').addEventListener('click', function() {
+                document.getElementById('pdf-modal').style.display = 'none';
+            });
+            // Optional: close modal on background click
+            document.getElementById('pdf-modal').addEventListener('click', function(e) {
+                if (e.target === this) {
+                    this.style.display = 'none';
+                }
+            });
+        </script>
 
     <script>
         const SB_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
