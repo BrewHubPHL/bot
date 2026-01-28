@@ -145,7 +145,10 @@
         const _supabase = supabase.createClient(SB_URL, SB_KEY);
         const audioPlayer = new Audio();
         let isAudioUnlocked = false, isMuted = false, recognition = null;
-        let history = [{ role: 'system', content: "Friendly Philly Barista. Concise. Professional. You speak for BrewHub PHL." }];
+        let history = [{ 
+            role: 'system', 
+            content: "You are the BrewHub PHL Assistant. Be conversational and concise. Answer questions about coffee, parcel lockers, and our South Philly location. Do not repeat yourself; if you don't understand, ask a clarifying question like 'Could you tell me more about what you're looking for?'" 
+        }];
 
         const trigger = document.getElementById('bot-trigger');
         const box = document.getElementById('chatbox');
