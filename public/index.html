@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -52,7 +54,12 @@
         .primary-btn { 
             width: 100%; background: var(--hub-brown); color: white; border: none; padding: 18px; border-radius: 15px; font-weight: bold; font-size: 1.1em; cursor: pointer; transition: 0.3s;
         }
-        .primary-btn:hover { background: #2a2121; transform: translateY(-2px); }
+
+        .btn-login { background: #007bff; color: white; }
+        .btn-clock-in { background: #28a745; color: white; }
+        .btn-clock-out { background: #dc3545; color: white; }
+        .hidden { display: none; }
+        #status-msg { margin-top: 15px; font-size: 0.9em; color: #555; }
 
         /* Floating BrewBot UI */
         #bot-bubble { position: fixed; bottom: 40px; right: 40px; z-index: 1000; }
@@ -89,9 +96,11 @@
 </head>
 <body>
 
-    <header>
+
+    <header style="position: relative;">
         <img src="logo.png" alt="BrewHub PHL" id="logo">
         <p>COFFEE • PARCELS • COMMUNITY</p>
+        <button id="employee-login-tab" style="position: absolute; top: 20px; right: 30px; background: #007bff; color: white; border: none; border-radius: 6px; padding: 10px 22px; font-weight: bold; cursor: pointer; font-size: 1em;">Login</button>
     </header>
 
     <main>
@@ -104,6 +113,27 @@
             </form>
             <p id="form-msg" style="display:none; color: #4a7c44; margin-top: 15px; font-weight: bold;">Brewing your welcome... hang tight!</p>
         </section>
+
+        <!-- Employee Portal Modal -->
+        <div id="employee-portal-modal" style="display:none; position:fixed; z-index:2000; left:0; top:0; width:100vw; height:100vh; background:rgba(60,47,47,0.85); align-items:center; justify-content:center;">
+            <div style="background:#fff; border-radius:16px; max-width:90vw; max-height:90vh; width:350px; box-shadow:0 8px 32px rgba(0,0,0,0.18); position:relative; display:flex; flex-direction:column; align-items:center; padding: 30px 20px;">
+                <button id="close-employee-portal" style="position:absolute; top:10px; right:16px; background:none; border:none; font-size:1.7em; color:#3c2f2f; cursor:pointer;">&times;</button>
+                <h2>Employee Portal</h2>
+                <div id="login-section">
+                    <p>Employee Login</p>
+                    <input type="email" id="employee-email" placeholder="Email">
+                    <input type="password" id="employee-password" placeholder="Password">
+                    <button class="btn-login" onclick="employeeLogin()">Sign In</button>
+                </div>
+                <div id="portal-section" class="hidden">
+                    <p id="welcome-msg">Welcome!</p>
+                    <button class="btn-clock-in" onclick="handleTimeEntry('CLOCK_IN')">Clock In</button>
+                    <button class="btn-clock-out" onclick="handleTimeEntry('CLOCK_OUT')">Clock Out</button>
+                    <button onclick="employeeLogout()" style="background:none; color:blue; text-decoration:underline; font-size: 0.8em;">Logout</button>
+                </div>
+                <p id="status-msg"></p>
+            </div>
+        </div>
     </main>
 
     <div id="bot-bubble">
@@ -164,6 +194,76 @@
         </script>
 
     <script>
+                // Employee Portal Modal Logic & JS
+                const employeeSupabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
+
+                // Modal logic
+                const loginTab = document.getElementById('employee-login-tab');
+                const portalModal = document.getElementById('employee-portal-modal');
+                const closePortalBtn = document.getElementById('close-employee-portal');
+                if (loginTab && portalModal && closePortalBtn) {
+                    loginTab.onclick = () => { portalModal.style.display = 'flex'; };
+                    closePortalBtn.onclick = () => { portalModal.style.display = 'none'; };
+                    portalModal.addEventListener('click', function(e) {
+                        if (e.target === this) this.style.display = 'none';
+                    });
+                }
+
+                // Check if employee is already logged in on page load
+                (async () => {
+                    const { data: { user } } = await employeeSupabase.auth.getUser();
+                    if (user) showEmployeePortal(user);
+                })();
+
+                window.employeeLogin = async function() {
+                    const email = document.getElementById('employee-email').value;
+                    const password = document.getElementById('employee-password').value;
+                    const { data, error } = await employeeSupabase.auth.signInWithPassword({ email, password });
+                    if (error) {
+                        alert(error.message);
+                    } else {
+                        showEmployeePortal(data.user);
+                    }
+                }
+
+                window.showEmployeePortal = function(user) {
+                    document.getElementById('login-section').classList.add('hidden');
+                    document.getElementById('portal-section').classList.remove('hidden');
+                    document.getElementById('welcome-msg').innerText = `Hello, ${user.email}`;
+                }
+
+                window.handleTimeEntry = async function(actionType) {
+                    const { data: { user } } = await employeeSupabase.auth.getUser();
+                    const status = document.getElementById('status-msg');
+                    if (!user) {
+                        status.innerText = "Please log in first.";
+                        return;
+                    }
+                    status.innerText = "Recording...";
+                    const { error } = await employeeSupabase
+                        .from('time_logs')
+                        .insert([
+                            { 
+                                employee_id: user.id, 
+                                employee_email: user.email, 
+                                action_type: actionType 
+                            }
+                        ]);
+                    if (error) {
+                        console.error(error);
+                        status.innerText = "Error saving log: " + error.message;
+                    } else {
+                        status.innerText = `Success! ${actionType} recorded at ${new Date().toLocaleTimeString()}`;
+                    }
+                }
+
+                window.employeeLogout = async function() {
+                    await employeeSupabase.auth.signOut();
+                    document.getElementById('login-section').classList.remove('hidden');
+                    document.getElementById('portal-section').classList.add('hidden');
+                    document.getElementById('welcome-msg').innerText = 'Welcome!';
+                    document.getElementById('status-msg').innerText = '';
+                }
         const SB_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
         const SB_KEY = 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN';
         const GS_URL = 'https://script.google.com/macros/s/AKfycbx49FnNhO6K4Ns1TYrcjCQKDzcLF_95YE3dBQlk6t1mgxobGVJTAQ-TEK_nFZTSYAAiuw/exec';
