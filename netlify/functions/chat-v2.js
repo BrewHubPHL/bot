@@ -48,7 +48,18 @@ exports.handler = async (event) => {
         });
 
         const geminiData = JSON.parse(responseText);
-        const reply = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "No reply.";
+        
+        // Better error handling to see why it fails
+        if (geminiData.error) {
+            console.error("Gemini API Error:", geminiData.error);
+            return {
+                statusCode: 200, // Return 200 so frontend displays the error message
+                headers,
+                body: JSON.stringify({ choices: [{ message: { content: `API Error: ${geminiData.error.message}` } }] })
+            };
+        }
+
+        const reply = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || `No reply from AI. Raw: ${responseText.substring(0, 100)}...`;
 
         return {
             statusCode: 200,
