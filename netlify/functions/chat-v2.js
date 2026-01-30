@@ -33,6 +33,38 @@ exports.handler = async (event) => {
                 role: msg.role === 'assistant' ? 'model' : 'user',
                 parts: [{ text: msg.content }]
             }));
+
+            // SANITIZE HISTORY: Gemini crashes if history is not User, Model, User, Model...
+            // If we have User, User -> Merge them.
+            // If the last message in history is User, it will crash because we are about to add ANOTHER User message (lastUserMessage).
+            // So we must ensure history ends with Model (or is empty).
+            
+            const cleanHistory = [];
+            for (const msg of history) {
+                if (cleanHistory.length === 0) {
+                    cleanHistory.push(msg);
+                } else {
+                    const prev = cleanHistory[cleanHistory.length - 1];
+                    if (prev.role === msg.role) {
+                        // Merge text into previous message
+                        prev.parts[0].text += "\n\n" + msg.parts[0].text;
+                    } else {
+                        cleanHistory.push(msg);
+                    }
+                }
+            }
+            
+            // Critical Check: If the history ends with USER, we are in trouble because we are about to send a USER message.
+            // Gemini requires User -> Model -> User -> Model.
+            // If history ends in User, we must fake a Model response or merge current input.
+            // Simplest fix: If history ends in User, drop that last user message from history and prepend it to the current input.
+            if (cleanHistory.length > 0 && cleanHistory[cleanHistory.length - 1].role === 'user') {
+                const popped = cleanHistory.pop();
+                lastUserMessage = popped.parts[0].text + "\n\n" + lastUserMessage;
+            }
+
+            history = cleanHistory;
+
         } else {
             lastUserMessage = data.message || "Hello";
         }
