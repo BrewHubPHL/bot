@@ -100,7 +100,7 @@
     <header style="position: relative;">
         <img src="logo.png" alt="BrewHub PHL" id="logo">
         <p>COFFEE • PARCELS • COMMUNITY</p>
-        <button id="employee-login-tab" style="position: absolute; top: 20px; right: 30px; background: var(--hub-tan); color: var(--hub-brown); border: none; border-radius: 6px; padding: 10px 22px; font-weight: bold; cursor: pointer; font-size: 1em;">Login</button>
+        <button id="employee-login-tab" style="position: absolute; top: 20px; right: 30px; background: var(--hub-tan); color: var(--hub-brown); border: none; border-radius: 6px; padding: 10px 22px; font-weight: bold; cursor: pointer; font-size: 1em;">Employee Portal</button>
     </header>
 
     <main>
@@ -130,6 +130,11 @@
                     <button class="btn-clock-in" onclick="handleTimeEntry('CLOCK_IN')">Clock In</button>
                     <button class="btn-clock-out" onclick="handleTimeEntry('CLOCK_OUT')">Clock Out</button>
                     <button onclick="employeeLogout()" style="background:none; color:blue; text-decoration:underline; font-size: 0.8em;">Logout</button>
+                </div>
+                <div id="update-password-section" class="hidden">
+                    <p>Set New Password</p>
+                    <input type="password" id="new-password" placeholder="New Password">
+                    <button class="btn-login" onclick="updatePassword()">Save Password</button>
                 </div>
                 <p id="status-msg"></p>
             </div>
@@ -197,6 +202,16 @@
                 // Employee Portal Modal Logic & JS
                 const employeeSupabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
 
+                employeeSupabase.auth.onAuthStateChange(async (event, session) => {
+                    if (event === 'PASSWORD_RECOVERY') {
+                        // Open modal and show password update
+                        document.getElementById('employee-portal-modal').style.display = 'flex';
+                        document.getElementById('login-section').classList.add('hidden');
+                        document.getElementById('portal-section').classList.add('hidden');
+                        document.getElementById('update-password-section').classList.remove('hidden');
+                    }
+                });
+
                 // Modal logic
                 const loginTab = document.getElementById('employee-login-tab');
                 const portalModal = document.getElementById('employee-portal-modal');
@@ -254,6 +269,28 @@
                         status.innerText = "Error saving log: " + error.message;
                     } else {
                         status.innerText = `Success! ${actionType} recorded at ${new Date().toLocaleTimeString()}`;
+                    }
+                }
+
+                window.updatePassword = async function() {
+                    const newPassword = document.getElementById('new-password').value;
+                    const status = document.getElementById('status-msg');
+                    
+                    if (!newPassword) {
+                        alert("Please enter a new password.");
+                        return;
+                    }
+
+                    const { data, error } = await employeeSupabase.auth.updateUser({ password: newPassword });
+
+                    if (error) {
+                        status.innerText = "Error updating password: " + error.message;
+                    } else {
+                        status.innerText = "Password updated successfully! Logging you in...";
+                        setTimeout(() => {
+                            document.getElementById('update-password-section').classList.add('hidden');
+                            showEmployeePortal(data.user);
+                        }, 1500);
                     }
                 }
 
