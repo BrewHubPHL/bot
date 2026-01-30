@@ -129,6 +129,7 @@
                     <p id="welcome-msg">Welcome!</p>
                     <button class="btn-clock-in" onclick="handleTimeEntry('CLOCK_IN')">Clock In</button>
                     <button class="btn-clock-out" onclick="handleTimeEntry('CLOCK_OUT')">Clock Out</button>
+                    <a id="manager-link" href="manager.html" target="_blank" style="display:none; color: #dc3545; font-weight:bold; margin: 10px 0; text-decoration: none; border: 1px solid #dc3545; padding: 5px; border-radius: 4px;">Manager Dashboard</a>
                     <button onclick="employeeLogout()" style="background:none; color:blue; text-decoration:underline; font-size: 0.8em;">Logout</button>
                 </div>
                 <div id="update-password-section" class="hidden">
@@ -241,10 +242,15 @@
                     }
                 }
 
-                window.showEmployeePortal = function(user) {
+                window.showEmployeePortal = async function(user) {
                     document.getElementById('login-section').classList.add('hidden');
                     document.getElementById('portal-section').classList.remove('hidden');
                     document.getElementById('welcome-msg').innerText = `Hello, ${user.email}`;
+
+                    // Check for Manager Access (Email based for Thomas)
+                    if (user.email === 'thomas@brewhubphl.com') {
+                        document.getElementById('manager-link').style.display = 'block';
+                    }
                 }
 
                 window.handleTimeEntry = async function(actionType) {

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Manager Dashboard | BrewHub PHL</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 40px; background: #f8f4f0; color: #3c2f2f; }
+        h1 { border-bottom: 2px solid #d4b59e; padding-bottom: 10px; }
+        .card { background: white; padding: 20px; margin-top: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        button { padding: 10px 20px; cursor: pointer; background: #3c2f2f; color: white; border: none; border-radius: 5px; }
+    </style>
+    <script>
+        // --- SECURITY CHECK (BOUNCER) ---
+        const sb = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
+
+        (async () => {
+            const { data: { user } } = await sb.auth.getUser();
+            
+            if (!user) {
+                alert("Access Denied: Please log in at the portal first.");
+                window.location.href = "index.html"; // Kick them out
+                return;
+            }
+
+            // Security Check: Specific Email
+            if (user.email !== 'thomas@brewhubphl.com') {
+                alert("Access Denied: You are not authorized.");
+                window.location.href = "index.html"; // Kick them out
+                return;
+            }
+            
+            // If we get here, they are safe. Load the dashboard.
+            document.getElementById('app').style.display = 'block';
+            document.getElementById('user-email').innerText = user.email;
+        })();
+    </script>
+</head>
+<body id="main-body">
+    <div id="app" style="display:none;">
+        <h1>Manager Dashboard</h1>
+        <p>Welcome, <span id="user-email"></span></p>
+        
+        <div class="card">
+            <h3>Payroll & Reporting</h3>
+            <p>Secure area for payroll management.</p>
+            <button id="payroll-btn">Run Payroll</button>
+            <div id="payroll-results" style="margin-top: 20px; font-family: monospace;"></div>
+        </div>
+
+    <script>
+        async function calculatePayroll() {
+            // Use 'sb' from the head script
+            // 1. Fetch both logs and profile rates
+            const { data: logs, error: logError } = await sb.from('time_logs').select('*').order('created_at', { ascending: true });
+            const { data: profiles, error: profileError } = await sb.from('employee_profiles').select('employee_email, pay_rate');
+
+            if (logError) return alert("Error fetching logs: " + logError.message);
+            if (profileError) console.warn("Error fetching profiles:", profileError.message);
+
+            // Create a quick lookup map for rates
+            const rateMap = {};
+            if (profiles) {
+                profiles.forEach(p => rateMap[p.employee_email] = p.pay_rate || 15.00);
+            }
+
+            let report = {};
+
+            logs.forEach(log => {
+                const email = log.employee_email || 'Unknown';
+                if (!report[email]) {
+                    report[email] = { totalMs: 0, lastIn: null };
+                }
+
+                if (log.action_type === 'CLOCK_IN') {
+                    report[email].lastIn = new Date(log.created_at);
+                } else if (log.action_type === 'CLOCK_OUT' && report[email].lastIn) {
+                    const duration = new Date(log.created_at) - report[email].lastIn;
+                    report[email].totalMs += duration;
+                    report[email].lastIn = null; // Reset for next shift
+                }
+            });
+
+            // 2. Display results with $$$
+            let output = "<h3>Payroll Summary</h3><table border='1' style='width:100%; border-collapse: collapse; text-align: left;'>";
+            output += "<tr style='background:#ccc;'><th>Email</th><th>Hours</th><th>Rate</th><th>Total Pay</th><th>Status</th></tr>";
+
+            for (const email in report) {
+                const hours = (report[email].totalMs / (1000 * 60 * 60)).toFixed(2);
+                const rate = rateMap[email] || 15.00;
+                const totalPay = (hours * rate).toFixed(2);
+                const status = report[email].lastIn ? '<span style="color:red; font-weight:bold;">Clocked In</span>' : 'Clocked Out';
+                
+                output += `<tr>
+                    <td style="padding:8px;">${email}</td>
+                    <td style="padding:8px;">${hours}</td>
+                    <td style="padding:8px;">$${rate}</td>
+                    <td style="padding:8px;"><strong>$${totalPay}</strong></td>
+                    <td style="padding:8px;">${status}</td>
+                </tr>`;
+            }
+            output += "</table>";
+            
+            document.getElementById('payroll-results').innerHTML = output;
+        }
+
+        // Attach the function to your button
+        document.getElementById('payroll-btn').addEventListener('click', calculatePayroll);
+    </script>
+    </div>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<div id="manager-dashboard">
+  <h2>BrewHub Command Center</h2>
+  
+  <div class="stats-grid">
+    <div class="card">
+      <h3>On the Clock Now</h3>
+      <ul id="active-staff"> </ul>
+    </div>
+    
+    <div class="card">
+      <h3>New Customer Waitlist</h3>
+      <ul id="customer-leads"> </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+  async function loadManagerData() {
+    // 1. Get everyone who is currently "CLOCKED_IN"
+    const { data: activeLogs } = await sbClient
+      .from('time_logs')
+      .select('employee_email, action_type, created_at')
+      .order('created_at', { ascending: false });
+
+    // Filter for the most recent action per person (Real-time status)
+    // Display in 'active-staff' div...
+
+    // 2. Get the new neighborhood leads
+    const { data: leads } = await sbClient
+      .from('waitlist') // Or whatever your leads table is named
+      .select('email, created_at');
+    
+    // Display in 'customer-leads' div...
+  }
+  loadManagerData();
+</script>
