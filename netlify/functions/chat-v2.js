@@ -16,10 +16,24 @@ exports.handler = async (event) => {
         const messages = body.messages || [];
 
         // Simple Format
-        const geminiMessages = messages.map(msg => ({
-             role: msg.role === 'assistant' ? 'model' : 'user',
-             parts: [{ text: msg.content }]
+        // Remove system messages (Gemini Flash doesn't support 'system' role in this simple payload)
+        // Ensure alternating user/model roles if possible, but mainly just map them rights
+        const geminiMessages = messages
+            .filter(msg => msg.role !== 'system') 
+            .map(msg => ({
+                role: msg.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: msg.content }]
         }));
+
+        // Add a System Prompt as the very first "user" message if needed
+        const systemPrompt = "You are BrewBot, a helpful assistant for BrewHub PHL (a coffee shop and parcel pickup spot). Be friendly, concise, and helpful. Current date: " + new Date().toDateString();
+        
+        // Prepend system prompt to the first user message or add as new one
+        if (geminiMessages.length > 0 && geminiMessages[0].role === 'user') {
+            geminiMessages[0].parts[0].text = systemPrompt + "\n\nUser: " + geminiMessages[0].parts[0].text;
+        } else {
+             geminiMessages.unshift({ role: 'user', parts: [{ text: systemPrompt }] });
+        }
 
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) return { statusCode: 500, headers, body: JSON.stringify({ error: "Missing Key" }) };
@@ -28,11 +42,11 @@ exports.handler = async (event) => {
             contents: geminiMessages,
             generationConfig: { temperature: 0.7, maxOutputTokens: 300 },
              safetySettings: [
-                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
+                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
+                { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_ONLY_HIGH" }
             ]
         });
 
