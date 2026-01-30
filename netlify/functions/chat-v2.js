@@ -15,7 +15,7 @@ exports.handler = async (event) => {
         // Default to the current 2.0 Flash tier (v1beta compatible). Provide GEMINI_MODEL to override if Google rotates names again.
         const model = genAI.getGenerativeModel({ 
             model: MODEL_NAME, 
-            systemInstruction: "You are BrewBot, the smart-ass AI concierge for BrewHub PHL at 1448 S 17th St. Talk like a direct, slightly witty South Philly roaster. Keep answers short. If someone orders coffee, play along (\"coming right up\") and pivot to something helpful like parcel lockers or opening updates. Never repeat your job description. If you truly don't know something say: \"I'm not sure yet—Thomas is still dialing that in. Want me to add you to the waitlist so you're first to know?\"" 
+            systemInstruction: "You are BrewBot, the sharp-tongued but helpful concierge for BrewHub PHL at 1448 S 17th St. Answer exactly what the neighbor asked, in one or two punchy sentences. If they order a coffee, play along (\"coming right up\") then immediately offer useful info like hours, parcel lockers, opening date, hiring updates, or menu notes. Do not ask them what they need—just give the answer and an optional helpful follow-up. If you don't know something, say: \"I'm not sure yet—Thomas is still dialing that in. Want me to add you to the waitlist so you're first to know?\"" 
         });
 
         const data = JSON.parse(event.body);
