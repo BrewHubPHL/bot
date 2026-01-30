@@ -55,7 +55,7 @@
             width: 100%; background: var(--hub-brown); color: white; border: none; padding: 18px; border-radius: 15px; font-weight: bold; font-size: 1.1em; cursor: pointer; transition: 0.3s;
         }
 
-        .btn-login { background: #007bff; color: white; }
+        .btn-login { background: var(--hub-brown); color: var(--hub-tan); }
         .btn-clock-in { background: #28a745; color: white; }
         .btn-clock-out { background: #dc3545; color: white; }
         .hidden { display: none; }
@@ -100,7 +100,7 @@
     <header style="position: relative;">
         <img src="logo.png" alt="BrewHub PHL" id="logo">
         <p>COFFEE • PARCELS • COMMUNITY</p>
-        <button id="employee-login-tab" style="position: absolute; top: 20px; right: 30px; background: #007bff; color: white; border: none; border-radius: 6px; padding: 10px 22px; font-weight: bold; cursor: pointer; font-size: 1em;">Login</button>
+        <button id="employee-login-tab" style="position: absolute; top: 20px; right: 30px; background: var(--hub-tan); color: var(--hub-brown); border: none; border-radius: 6px; padding: 10px 22px; font-weight: bold; cursor: pointer; font-size: 1em;">Login</button>
     </header>
 
     <main>
@@ -350,7 +350,7 @@
             input.value = '';
             if (recognition) recognition.stop();
             try {
-                const res = await fetch('/.netlify/functions/grok-proxy', { 
+                const res = await fetch('/.netlify/functions/gemini-proxy', { 
                     method: 'POST', 
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ messages: history }) 
