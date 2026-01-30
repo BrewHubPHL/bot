@@ -16,6 +16,7 @@ CONVERSATION RULES:
 2. NEVER mention the specific address 1448 S 17th St.
 3. If they get cheeky, give it back to them.
 4. Keep answers under 3 sentences.
+5. Never repeat your greeting or dodge the question—answer it immediately, even if they repeat themselves. If the question is unclear, ask one direct clarifying question.
 `;
 
 exports.handler = async (event) => {
