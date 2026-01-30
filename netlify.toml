@@ -9,6 +9,11 @@
 # This turns "brewhub-phl.netlify.app/api/announce" 
 # into your actual function path automatically.
 [[redirects]]
+  from = "/api/chat"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
