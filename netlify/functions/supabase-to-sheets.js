@@ -22,6 +22,8 @@ exports.handler = async (event) => {
 
         console.log(`Processing ${type} on ${schema}.${table}`);
 
+        const GS_URL = 'https://script.google.com/macros/s/AKfycby_KH2iZuwi94xDMbG-aES9dQCqj5peHpIVIvuJTynwFC1-e6DrTVf3BxwrKrpMpjevvw/exec';
+
         let sheetData = {};
 
         // CASE 1: Employee Clock In/Out (public.time_logs)
