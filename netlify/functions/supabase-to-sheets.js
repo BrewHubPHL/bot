@@ -22,7 +22,7 @@ exports.handler = async (event) => {
 
         console.log(`Processing ${type} on ${schema}.${table}`);
 
-        const GS_URL = 'https://script.google.com/macros/s/AKfycby_KH2iZuwi94xDMbG-aES9dQCqj5peHpIVIvuJTynwFC1-e6DrTVf3BxwrKrpMpjevvw/exec';
+        const GS_URL = 'https://script.google.com/macros/s/AKfycbxYO7QiPDxUTc7cxV5T5g8RZ4Fd2UWBcUdTvZfhU7AFXGNFtkr1y6ABtA_4eaG1hLLkng/exec';
 
         let sheetData = {};
 
