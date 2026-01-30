@@ -1,7 +1,10 @@
+const fetch = require('node-fetch');
+
 exports.handler = async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     try {
+        console.log("Gemini Proxy Invoked");
         const { messages } = JSON.parse(event.body);
 
         // Map messages to Gemini format if necessary, or just send the last user message
