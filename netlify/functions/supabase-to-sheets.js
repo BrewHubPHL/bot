@@ -1,19 +1,26 @@
+const fetch = require('node-fetch');
+
 // This function receives a webhook from Supabase (time_logs table) and forwards it to Google Sheets
 exports.handler = async (event) => {
     // Only allow POST
     if (event.httpMethod !== 'POST') {
+        console.log('Method Not Allowed:', event.httpMethod);
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
 
     try {
+        console.log('Incoming Webhook Body:', event.body);
         const payload = JSON.parse(event.body);
         
         // Supabase webhook payload structure: { type: 'INSERT', table: 'time_logs', record: { ... }, ... }
         const { record, type } = payload;
 
         if (!record || type !== 'INSERT') {
+            console.log('Ignored event type:', type);
             return { statusCode: 200, body: 'Not an INSERT event or missing record' };
         }
+
+        console.log('Processing record:', record.id, record.employee_email);
 
         // Your Google Script URL (from index.html)
         const GS_URL = 'https://script.google.com/macros/s/AKfycbx49FnNhO6K4Ns1TYrcjCQKDzcLF_95YE3dBQlk6t1mgxobGVJTAQ-TEK_nFZTSYAAiuw/exec';
