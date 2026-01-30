@@ -59,13 +59,32 @@ exports.handler = async (event) => {
         if (geminiData.error) {
             console.error("Gemini API Error:", geminiData.error);
             return {
-                statusCode: 200, // Return 200 so frontend displays the error message
+                statusCode: 200, 
                 headers,
                 body: JSON.stringify({ choices: [{ message: { content: `API Error: ${geminiData.error.message}` } }] })
             };
         }
 
-        const reply = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || `No reply from AI. Raw: ${responseText.substring(0, 100)}...`;
+        const candidate = geminiData.candidates?.[0];
+        if (candidate && candidate.finishReason && candidate.finishReason !== 'STOP') {
+             return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({ choices: [{ message: { content: `AI refused to answer. Finish Reason: ${candidate.finishReason}` } }] })
+            };
+        }
+
+        const reply = candidate?.content?.parts?.[0]?.text;
+        
+        if (!reply) {
+             // If we get here, valid JSON but no text. Dump the whole structure for debugging.
+             const debugStr = JSON.stringify(geminiData).substring(0, 500); 
+             return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({ choices: [{ message: { content: `Empty Response. Debug Data: ${debugStr}` } }] })
+             };
+        }
 
         return {
             statusCode: 200,
