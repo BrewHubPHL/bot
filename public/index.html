@@ -397,7 +397,10 @@
                 history.push({ role: 'assistant', content: reply });
                 render('assistant', reply);
                 speak(reply);
-            } catch (err) { render('assistant', "I hit a snag. Mind repeating that?"); }
+            } catch (err) { 
+                console.error("Chat Error:", err);
+                render('assistant', "I hit a snag. Mind repeating that? (Check console for details)"); 
+            }
         };
 
         function render(role, text) {

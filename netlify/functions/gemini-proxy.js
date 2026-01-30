@@ -25,7 +25,12 @@ exports.handler = async (event) => {
         // Ensure system prompt (if any) is at the start (already handled by main history array order usually)
         
         const apiKey = process.env.GEMINI_API_KEY;
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+        if (!apiKey) {
+            console.error("Missing GEMINI_API_KEY environment variable");
+            return { statusCode: 500, body: JSON.stringify({ error: "Server Configuration Error: Missing API Key" }) };
+        }
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
         // Gemini stateless request (send whole history)
         const response = await fetch(url, {
