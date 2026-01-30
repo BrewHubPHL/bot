@@ -12,6 +12,13 @@ exports.handler = async (event) => {
         // For simplicity, we'll try to adapt the 'messages' array to Gemini's format
         // Assuming 'messages' is an array of { role: 'system'|'user'|'assistant', content: '...' }
 
+        if (!messages.some(msg => msg.role === 'system')) {
+            messages.unshift({
+                role: 'system',
+                content: "You are BrewBot, the BrewHub PHL assistant. Answer every user question directly, keep it friendly and concise, and never bounce the question back to them. If someone tries to order a drink, explain you are virtual and share helpful info instead. If unsure, say you'll check with Thomas."
+            });
+        }
+
         const geminiMessages = messages.map(msg => {
              // Gemini uses 'model' role for assistant, and 'user' for user. System prompts are handled differently or just passed as user context.
              // Simple mapping: 
