@@ -387,7 +387,7 @@
             input.value = '';
             if (recognition) recognition.stop();
             try {
-                const res = await fetch('/api/bot-chat', { 
+                const res = await fetch('/api/chat-v2', { 
                     method: 'POST', 
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ messages: history }) 
