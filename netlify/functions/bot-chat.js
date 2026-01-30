@@ -1,7 +1,7 @@
-const fetch = require('node-fetch');
+const https = require('https');
 
 exports.handler = async (event) => {
-    // Enable CORS for testing if needed
+    // Enable CORS
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type',
@@ -17,53 +17,64 @@ exports.handler = async (event) => {
     }
 
     try {
-        console.log("Chat Function Invoked");
-        const { messages } = JSON.parse(event.body);
+        const body = JSON.parse(event.body);
+        const messages = body.messages || [];
 
+        // Helper: Format for Gemini
         const geminiMessages = messages.map(msg => {
              let role = 'user';
              if (msg.role === 'assistant') role = 'model';
-             return {
-                 role: role,
-                 parts: [{ text: msg.content }]
-             };
+             return { role: role, parts: [{ text: msg.content }] };
         });
 
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
-            console.error("Missing GEMINI_API_KEY");
             return { statusCode: 500, headers, body: JSON.stringify({ error: "Missing API Key" }) };
         }
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
-        // Add System Instruction at the start if needed, or rely on system message mapping above
-        
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: geminiMessages,
-                generationConfig: {
-                    temperature: 0.7,
-                    maxOutputTokens: 300
-                }
-            })
+        const dataString = JSON.stringify({
+            contents: geminiMessages,
+            generationConfig: { temperature: 0.7, maxOutputTokens: 300 }
         });
 
-        const data = await response.json();
+        const options = {
+            hostname: 'generativelanguage.googleapis.com',
+            path: `/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': dataString.length
+            }
+        };
 
-         if (!response.ok) {
-             console.error('Gemini API Error:', data);
-             return {
-                 statusCode: response.status,
-                 headers,
-                 body: JSON.stringify({ error: data.error?.message || 'Gemini API Error' })
-             };
-         }
+        // Promisify the HTTPS request (Native Node.js - No Dependencies)
+        const responseBody = await new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let chunks = [];
+                res.on('data', (chunk) => chunks.push(chunk));
+                res.on('end', () => {
+                    const buffer = Buffer.concat(chunks);
+                    resolve({
+                        status: res.statusCode,
+                        data: buffer.toString()
+                    });
+                });
+            });
 
-        const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
-        
+            req.on('error', (e) => reject(e));
+            req.write(dataString);
+            req.end();
+        });
+
+        const geminiData = JSON.parse(responseBody.data);
+
+        if (responseBody.status !== 200) {
+            console.error("Gemini Error:", geminiData);
+            return { statusCode: responseBody.status, headers, body: JSON.stringify(geminiData) };
+        }
+
+        const replyText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "No response.";
+
         return {
             statusCode: 200,
             headers,
@@ -73,11 +84,7 @@ exports.handler = async (event) => {
         };
 
     } catch (error) {
-        console.error('Function Error:', error);
-        return {
-            statusCode: 500,
-            headers,
-            body: JSON.stringify({ error: error.message })
-        };
+        console.error("Handler Error:", error);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: error.message }) };
     }
 };
