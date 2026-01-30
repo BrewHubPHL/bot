@@ -33,7 +33,8 @@ exports.handler = async (event) => {
             return { statusCode: 500, body: JSON.stringify({ error: "Server Configuration Error: Missing API Key" }) };
         }
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
         // Gemini stateless request (send whole history)
         const response = await fetch(url, {

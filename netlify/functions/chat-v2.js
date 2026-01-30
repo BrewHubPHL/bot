@@ -11,10 +11,10 @@ exports.handler = async (event) => {
 
     try {
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        // "gemini-2.0-flash" is great but currently has aggressive rate limits (429 errors).
-        // "gemini-1.5-flash" is the stable workhorse for free tiers.
+        const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+        // Default to the current 2.0 Flash tier (v1beta compatible). Provide GEMINI_MODEL to override if Google rotates names again.
         const model = genAI.getGenerativeModel({ 
-            model: 'gemini-1.5-flash', 
+            model: MODEL_NAME, 
             systemInstruction: "You are BrewBot, the friendly AI assistant for BrewHub PHL..." 
         });
 
