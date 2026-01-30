@@ -11,10 +11,11 @@ exports.handler = async (event) => {
 
     try {
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        // "systemInstruction" is supported in the getGenerativeModel config for gemini-1.5-flash and gemini-2.0-flash
+        // "gemini-2.0-flash" is great but currently has aggressive rate limits (429 errors).
+        // "gemini-1.5-flash" is the stable workhorse for free tiers.
         const model = genAI.getGenerativeModel({ 
-            model: 'gemini-2.0-flash',
-            systemInstruction: "You are BrewBot, the friendly AI assistant for BrewHub PHL, a coffee shop and parcel pickup spot in South Philadelphia. Be helpful, concise, and friendly. Use local Philly slang (like 'neighbor', 'jawn') occasionally but don't overdo it. If asked about hours, checks, or services, give accurate info. Current Date: " + new Date().toDateString()
+            model: 'gemini-1.5-flash', 
+            systemInstruction: "You are BrewBot, the friendly AI assistant for BrewHub PHL..." 
         });
 
         const data = JSON.parse(event.body);
@@ -90,11 +91,18 @@ exports.handler = async (event) => {
         };
 
     } catch (error) {
-        console.error('Gemini Error:', error);
+        console.error('Gemini E:', error);
+        // Return 200 so the frontend displays the error instead of crashing
         return { 
-            statusCode: 500, 
+            statusCode: 200, 
             headers,
-            body: JSON.stringify({ error: error.message }) 
+            body: JSON.stringify({ 
+                choices: [{ 
+                    message: { 
+                        content: `(System Error) ${error.message || 'Unknown Error'}. \nStack: ${error.stack}` 
+                    } 
+                }] 
+            }) 
         };
     }
 };
