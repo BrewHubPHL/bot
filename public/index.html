@@ -211,7 +211,19 @@
 
     <script>
                 // Employee Portal Modal Logic & JS
-                const employeeSupabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
+                const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxYO7QiPDxUTc7cxV5T5g8RZ4Fd2UWBcUdTvZfhU7AFXGNFtkr1y6ABtA_4eaG1hLLkng/exec';
+
+                const employeeSupabase = supabase.createClient(
+                    'https://rruionkpgswvncypweiv.supabase.co',
+                    'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN',
+                    {
+                        auth: {
+                            storageKey: 'employee-portal-auth',
+                            persistSession: true,
+                            autoRefreshToken: true
+                        }
+                    }
+                );
 
                 employeeSupabase.auth.onAuthStateChange(async (event, session) => {
                     if (event === 'PASSWORD_RECOVERY') {
@@ -241,6 +253,26 @@
                     if (user) showEmployeePortal(user);
                 })();
 
+                async function syncToSheets(email, action) {
+                    try {
+                        await fetch(GOOGLE_SCRIPT_URL, {
+                            method: 'POST',
+                            mode: 'no-cors',
+                            headers: { 'Content-Type': 'text/plain' },
+                            body: JSON.stringify({
+                                auth_key: 'BrewHub-Sync-2027-Secure',
+                                target_sheet: 'Logs',
+                                email,
+                                action,
+                                status: action === 'CLOCK_IN' ? 'Pending' : 'Calculated'
+                            })
+                        });
+                        console.log('Sheets Sync Sent:', action);
+                    } catch (err) {
+                        console.error('Sheets Sync Failed:', err);
+                    }
+                }
+
                 window.employeeLogin = async function() {
                     const email = document.getElementById('employee-email').value;
                     const password = document.getElementById('employee-password').value;
@@ -265,27 +297,51 @@
 
                 window.handleTimeEntry = async function(actionType) {
                     const { data: { user } } = await employeeSupabase.auth.getUser();
-                    const status = document.getElementById('status-msg');
+                    const statusEl = document.getElementById('status-msg');
                     if (!user) {
-                        status.innerText = "Please log in first.";
+                        statusEl.innerText = "Please log in first.";
                         return;
                     }
-                    status.innerText = "Recording...";
+
+                    statusEl.innerText = "Recording...";
+                    const desiredStatus = actionType === 'CLOCK_IN' ? 'PENDING' : 'COMPLETED';
                     const { error } = await employeeSupabase
                         .from('time_logs')
                         .insert([
-                            { 
-                                employee_id: user.id, 
-                                employee_email: user.email, 
-                                action_type: actionType 
+                            {
+                                employee_id: user.id,
+                                employee_email: user.email,
+                                action_type: actionType,
+                                status: desiredStatus
                             }
                         ]);
+
                     if (error) {
                         console.error(error);
-                        status.innerText = "Error saving log: " + error.message;
-                    } else {
-                        status.innerText = `Success! ${actionType} recorded at ${new Date().toLocaleTimeString()}`;
+                        statusEl.innerText = "Error saving log: " + error.message;
+                        return;
                     }
+
+                    const gasPayload = {
+                        auth_key: 'BrewHub-Sync-2027-Secure',
+                        target_sheet: 'Logs',
+                        email: user.email,
+                        action: actionType,
+                        status: desiredStatus
+                    };
+
+                    try {
+                        await fetch(GS_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(gasPayload)
+                        });
+                    } catch (syncError) {
+                        console.error('Google Script sync failed:', syncError);
+                    }
+
+                    await syncToSheets(user.email, actionType);
+                    statusEl.innerText = `Success! ${actionType} recorded at ${new Date().toLocaleTimeString()}`;
                 }
 
                 window.updatePassword = async function() {

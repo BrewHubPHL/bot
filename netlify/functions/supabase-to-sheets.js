@@ -27,9 +27,10 @@ exports.handler = async (event) => {
         // 2. DATA ROUTING
         if (table === 'time_logs') {
             sheetData.target_sheet = 'Logs';
+            sheetData.timestamp = record.created_at;
             sheetData.email = record.employee_email;
             sheetData.action = record.action_type;
-            sheetData.timestamp = record.created_at;
+            sheetData.status = record.status;
         } 
         
         else if (table === 'employee_profiles') {

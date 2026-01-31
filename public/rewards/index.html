@@ -6,6 +6,7 @@
     <title>BrewHub Rewards</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
         :root { --coffee: #4b3621; --cream: #fdfaf6; --gold: #d4af37; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--cream); text-align: center; margin: 0; padding: 20px; }
@@ -20,6 +21,7 @@
         #cardView { display: none; }
         svg { width: 100%; margin: 20px 0; }
         #barcodeCanvas { background: white; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
+        #qrcode { width: 200px; height: 200px; margin: 10px auto; padding: 10px; background: #fff; border-radius: 10px; border: 1px solid #ddd; box-sizing: border-box; }
     </style>
 </head>
 <body>
@@ -50,6 +52,7 @@
         <h2>Welcome back, <span id="displayName"></span>!</h2>
         <p style="font-size: 1.2em;">Points: <strong id="displayPoints"></strong></p>
         <svg id="barcodeCanvas"></svg>
+        <div id="qrcode"></div>
         <p style="color: #666; font-size: 0.9em;">Show this to your barista to earn points!</p>
         <button onclick="location.reload()" style="background:#888;">Logout</button>
         </div>
@@ -72,6 +75,18 @@
         document.getElementById('displayName').innerText = user.first_name;
         document.getElementById('displayPoints').innerText = user.loyalty_points || 0;
         JsBarcode("#barcodeCanvas", user.barcode_id, { format: "CODE128", displayValue: true });
+        const qrBox = document.getElementById('qrcode');
+        if (qrBox) {
+            qrBox.innerHTML = '';
+            new QRCode(qrBox, {
+                text: user.barcode_id || '',
+                width: 200,
+                height: 200,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.H
+            });
+        }
     }
 
     async function handleLogin() {
