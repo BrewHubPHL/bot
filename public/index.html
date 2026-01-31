@@ -19,6 +19,7 @@
     
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
 
     <style>
         :root { 
@@ -58,7 +59,11 @@
         .btn-login { background: var(--hub-brown); color: var(--hub-tan); }
         .btn-clock-in { background: #28a745; color: white; }
         .btn-clock-out { background: #dc3545; color: white; }
+        .btn-scan { background: #f39c12; color: var(--hub-brown); }
         .hidden { display: none; }
+        #scanner-wrapper { margin-top: 15px; padding: 15px; border: 1px solid #eee; border-radius: 14px; background: #fafafa; width: 100%; box-sizing: border-box; }
+        #reader { width: 100%; max-width: 280px; margin: 10px auto; border-radius: 12px; overflow: hidden; border: 2px solid #ccc; background: #000; }
+        #scan-result { margin-top: 10px; font-weight: 600; color: var(--hub-brown); }
         #status-msg { margin-top: 15px; font-size: 0.9em; color: #555; }
 
         /* Floating BrewBot UI */
@@ -129,6 +134,11 @@
                     <p id="welcome-msg">Welcome!</p>
                     <button class="btn-clock-in" onclick="handleTimeEntry('CLOCK_IN')">Clock In</button>
                     <button class="btn-clock-out" onclick="handleTimeEntry('CLOCK_OUT')">Clock Out</button>
+                    <button class="btn-scan" id="toggle-scan-btn" onclick="toggleScanner()">Start Loyalty Scan</button>
+                    <div id="scanner-wrapper" class="hidden">
+                        <div id="reader"></div>
+                        <p id="scan-result"></p>
+                    </div>
                     <a id="manager-link" href="manager.html" target="_blank" style="display:none; color: #dc3545; font-weight:bold; margin: 10px 0; text-decoration: none; border: 1px solid #dc3545; padding: 5px; border-radius: 4px;">Manager Dashboard</a>
                     <button onclick="employeeLogout()" style="background:none; color:blue; text-decoration:underline; font-size: 0.8em;">Logout</button>
                 </div>
@@ -300,12 +310,132 @@
                     }
                 }
 
+                let loyaltyScanner = null;
+                let loyaltyScannerActive = false;
+                let scanCooldown = false;
+                const loyaltyScannerConfig = {
+                    fps: 10,
+                    qrbox: { width: 320, height: 180 },
+                    disableFlip: true,
+                    formatsToSupport: [
+                        Html5QrcodeSupportedFormats.CODE_128,
+                        Html5QrcodeSupportedFormats.CODE_39,
+                        Html5QrcodeSupportedFormats.QR_CODE
+                    ],
+                    experimentalFeatures: {
+                        useBarCodeDetectorIfSupported: true
+                    }
+                };
+
+                const ensureScannerInstance = () => {
+                    if (!loyaltyScanner) {
+                        loyaltyScanner = new Html5Qrcode('reader');
+                    }
+                    return loyaltyScanner;
+                };
+
+                async function handleLoyaltyScan(decodedText) {
+                    if (scanCooldown) return;
+                    scanCooldown = true;
+
+                    const scanResultEl = document.getElementById('scan-result');
+                    scanResultEl.innerText = "Checking ID: " + decodedText;
+
+                    const { data, error } = await employeeSupabase
+                        .from('loyalty_customers')
+                        .select('*')
+                        .eq('barcode_id', decodedText)
+                        .single();
+
+                    if (error) {
+                        alert("Database error. Please try again.");
+                        scanResultEl.innerText = '';
+                        scanCooldown = false;
+                        return;
+                    }
+
+                    if (data) {
+                        const newPoints = (data.loyalty_points || 0) + 50;
+                        await employeeSupabase
+                            .from('loyalty_customers')
+                            .update({ loyalty_points: newPoints })
+                            .eq('id', data.id);
+
+                        await employeeSupabase.from('loyalty_transactions').insert({
+                            customer_id: data.id,
+                            points_earned: 50,
+                            type: 'EARN'
+                        });
+
+                        if (navigator.vibrate) navigator.vibrate(200);
+
+                        document.getElementById('customer-name').innerText = data.first_name;
+                        document.getElementById('points-added').innerText = `+50 (Total: ${newPoints})`;
+                        scanResultEl.innerText = `✅ Success! 50 points added to ${data.first_name}`;
+                        alert(`✅ Success! 50 points added to ${data.first_name}`);
+                    } else {
+                        alert("❌ Customer ID not found.");
+                        scanResultEl.innerText = 'Customer not found.';
+                    }
+
+                    setTimeout(() => {
+                        scanCooldown = false;
+                        scanResultEl.innerText = '';
+                    }, 2000);
+                }
+
+                window.toggleScanner = async function() {
+                    const wrapper = document.getElementById('scanner-wrapper');
+                    const button = document.getElementById('toggle-scan-btn');
+                    if (!wrapper || !button) return;
+
+                    if (!loyaltyScannerActive) {
+                        wrapper.classList.remove('hidden');
+                        button.disabled = true;
+                        try {
+                            await ensureScannerInstance().start(
+                                { facingMode: 'environment' },
+                                loyaltyScannerConfig,
+                                handleLoyaltyScan
+                            );
+                            loyaltyScannerActive = true;
+                            button.innerText = 'Stop Loyalty Scan';
+                        } catch (err) {
+                            alert('Camera error: ' + err.message);
+                            wrapper.classList.add('hidden');
+                        } finally {
+                            button.disabled = false;
+                        }
+                    } else {
+                        button.disabled = true;
+                        await ensureScannerInstance().stop();
+                        loyaltyScannerActive = false;
+                        wrapper.classList.add('hidden');
+                        document.getElementById('scan-result').innerText = '';
+                        button.innerText = 'Start Loyalty Scan';
+                        button.disabled = false;
+                    }
+                }
+
                 window.employeeLogout = async function() {
                     await employeeSupabase.auth.signOut();
                     document.getElementById('login-section').classList.remove('hidden');
                     document.getElementById('portal-section').classList.add('hidden');
                     document.getElementById('welcome-msg').innerText = 'Welcome!';
                     document.getElementById('status-msg').innerText = '';
+                    const wrapper = document.getElementById('scanner-wrapper');
+                    const scanBtn = document.getElementById('toggle-scan-btn');
+                    const resultEl = document.getElementById('scan-result');
+                    if (loyaltyScannerActive && loyaltyScanner) {
+                        await loyaltyScanner.stop();
+                        loyaltyScannerActive = false;
+                    }
+                    if (wrapper) wrapper.classList.add('hidden');
+                    if (scanBtn) {
+                        scanBtn.innerText = 'Start Loyalty Scan';
+                        scanBtn.disabled = false;
+                    }
+                    if (resultEl) resultEl.innerText = '';
                 }
         const SB_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
         const SB_KEY = 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN';

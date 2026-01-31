@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrewHub Staff Scanner</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; background: #121212; color: white; text-align: center; margin: 0; padding: 20px; }
+        #reader { width: 100%; max-width: 450px; margin: auto; border: 2px solid #333; border-radius: 20px; overflow: hidden; background: #000; display: none; }
+        .info { margin-top: 20px; padding: 15px; background: #1e1e1e; border-radius: 12px; border: 1px solid #333; }
+        h2 { color: #f39c12; margin-bottom: 5px; }
+        #status { color: #888; font-size: 0.9em; }
+        #scan-result { margin-top: 10px; font-weight: 600; }
+        button { margin-top: 15px; padding: 10px 18px; border: none; border-radius: 8px; background: #f39c12; color: #121212; font-weight: 600; cursor: pointer; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <h2>☕ BrewHub Staff</h2>
+    <p id="status">Scanner idle. Tap start to begin.</p>
+    
+    <div id="reader"></div>
+
+    <button id="toggle-button" onclick="toggleScanner()">Start Scanner</button>
+    <p id="scan-result"></p>
+
+    <div class="info" id="last-scan">
+        <strong>Last Scan:</strong> <span id="customer-name">None</span><br>
+        <strong>Points Added:</strong> <span id="points-added">0</span>
+    </div>
+
+    <script>
+        const supabaseClient = supabase.createClient(
+            "https://rruionkpgswvncypweiv.supabase.co",
+            "sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN"
+        );
+
+        const scanner = new Html5Qrcode("reader");
+        const scannerConfig = {
+            fps: 10,
+            qrbox: { width: 320, height: 180 },
+            disableFlip: true,
+            formatsToSupport: [
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.QR_CODE
+            ],
+            experimentalFeatures: {
+                useBarCodeDetectorIfSupported: true
+            }
+        };
+        let scannerActive = false;
+        let scanCooldown = false;
+
+        async function handleLoyaltyScan(decodedText) {
+            if (scanCooldown) {
+                return;
+            }
+
+            scanCooldown = true;
+            document.getElementById('scan-result').innerText = "Checking ID: " + decodedText;
+
+            const { data, error } = await supabaseClient
+                .from('loyalty_customers')
+                .select('*')
+                .eq('barcode_id', decodedText)
+                .single();
+
+            if (error) {
+                alert("Database error. Please try again.");
+            }
+
+            if (data) {
+                const newPoints = (data.loyalty_points || 0) + 50;
+                await supabaseClient
+                    .from('loyalty_customers')
+                    .update({ loyalty_points: newPoints })
+                    .eq('id', data.id);
+
+                await supabaseClient.from('loyalty_transactions').insert({
+                    customer_id: data.id,
+                    points_earned: 50,
+                    type: 'EARN'
+                });
+
+                if (navigator.vibrate) {
+                    navigator.vibrate(200);
+                }
+
+                document.getElementById('customer-name').innerText = data.first_name;
+                document.getElementById('points-added').innerText = "+50 (Total: " + newPoints + ")";
+                document.getElementById('status').innerText = "✅ Success!";
+            } else {
+                alert("❌ Customer ID not found.");
+                document.getElementById('status').innerText = "Ready for next scan.";
+            }
+
+            setTimeout(() => {
+                scanCooldown = false;
+                document.getElementById('scan-result').innerText = '';
+            }, 1500);
+        }
+
+        async function toggleScanner() {
+            const scannerDiv = document.getElementById('reader');
+            const statusEl = document.getElementById('status');
+            const button = document.getElementById('toggle-button');
+
+            if (!scannerActive) {
+                scannerDiv.style.display = 'block';
+                button.disabled = true;
+                statusEl.innerText = 'Initializing camera...';
+
+                try {
+                    await scanner.start(
+                        { facingMode: 'environment' },
+                        scannerConfig,
+                        handleLoyaltyScan
+                    );
+                    scannerActive = true;
+                    statusEl.innerText = 'Scanner active. Point at barcode.';
+                    button.innerText = 'Stop Scanner';
+                } catch (err) {
+                    statusEl.innerText = 'Camera error: ' + err.message;
+                    scannerDiv.style.display = 'none';
+                } finally {
+                    button.disabled = false;
+                }
+            } else {
+                button.disabled = true;
+                await scanner.stop();
+                scannerDiv.style.display = 'none';
+                scannerActive = false;
+                button.disabled = false;
+                button.innerText = 'Start Scanner';
+                statusEl.innerText = 'Scanner idle. Tap start to begin.';
+                document.getElementById('scan-result').innerText = '';
+            }
+        }
+    </script>
+</body>
+</html>
