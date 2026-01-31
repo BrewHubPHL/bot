@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrewHub Rewards</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
+    <style>
+        :root { --coffee: #4b3621; --cream: #fdfaf6; --gold: #d4af37; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--cream); text-align: center; margin: 0; padding: 20px; }
+        .container { background: var(--cream); max-width: 380px; margin: auto; border: 2px solid var(--coffee); padding: 0; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); overflow: hidden; }
+        .card-header { background: var(--coffee); color: var(--gold); padding: 20px; text-transform: uppercase; letter-spacing: 2px; }
+        .card-body { padding: 20px; }
+        .tabs { display: flex; margin-bottom: 20px; border-bottom: 2px solid #eee; }
+        .tab { flex: 1; padding: 10px; cursor: pointer; color: #888; font-weight: bold; }
+        .tab.active { color: var(--coffee); border-bottom: 3px solid var(--coffee); }
+        input { width: 90%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
+        button { width: 95%; background: var(--coffee); color: white; padding: 15px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        #cardView { display: none; }
+        svg { width: 100%; margin: 20px 0; }
+        #barcodeCanvas { background: white; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card-header">☕ BrewHub Rewards</div>
+    <div class="card-body">
+        <div id="authBox">
+        <div class="tabs">
+            <div id="loginTab" class="tab active" onclick="switchTab('login')">LOGIN</div>
+            <div id="joinTab" class="tab" onclick="switchTab('join')">JOIN</div>
+        </div>
+
+        <div id="loginForm">
+            <input type="email" id="loginEmail" placeholder="Enter your email">
+            <button onclick="handleLogin()">View My Card</button>
+        </div>
+
+        <div id="joinForm" style="display:none;">
+            <input type="text" id="fname" placeholder="First Name">
+            <input type="text" id="lname" placeholder="Last Name">
+            <input type="email" id="joinEmail" placeholder="Email Address">
+            <button onclick="handleJoin()">Create My Account</button>
+        </div>
+        </div>
+
+        <div id="cardView">
+        <h2>Welcome back, <span id="displayName"></span>!</h2>
+        <p style="font-size: 1.2em;">Points: <strong id="displayPoints"></strong></p>
+        <svg id="barcodeCanvas"></svg>
+        <p style="color: #666; font-size: 0.9em;">Show this to your barista to earn points!</p>
+        <button onclick="location.reload()" style="background:#888;">Logout</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const _supabase = supabase.createClient("https://rruionkpgswvncypweiv.supabase.co", "sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN");
+
+    function switchTab(type) {
+        document.getElementById('loginForm').style.display = type === 'login' ? 'block' : 'none';
+        document.getElementById('joinForm').style.display = type === 'join' ? 'block' : 'none';
+        document.getElementById('loginTab').className = type === 'login' ? 'tab active' : 'tab';
+        document.getElementById('joinTab').className = type === 'join' ? 'tab active' : 'tab';
+    }
+
+    function showCard(user) {
+        document.getElementById('authBox').style.display = 'none';
+        document.getElementById('cardView').style.display = 'block';
+        document.getElementById('displayName').innerText = user.first_name;
+        document.getElementById('displayPoints').innerText = user.loyalty_points || 0;
+        JsBarcode("#barcodeCanvas", user.barcode_id, { format: "CODE128", displayValue: true });
+    }
+
+    async function handleLogin() {
+        const email = document.getElementById('loginEmail').value;
+        const { data } = await _supabase.from('loyalty_customers').select('*').eq('email', email).single();
+        if (data) showCard(data); else alert("Email not found. Tap 'JOIN' to register!");
+    }
+
+    async function handleJoin() {
+        const email = document.getElementById('joinEmail').value;
+        const fname = document.getElementById('fname').value;
+        const lname = document.getElementById('lname').value;
+        
+        // Generate a random 5-digit barcode
+        const newBarcode = Math.floor(10000 + Math.random() * 90000).toString();
+
+        const { data, error } = await _supabase.from('loyalty_customers').insert([
+            { first_name: fname, last_name: lname, email: email, barcode_id: newBarcode, loyalty_points: 0 }
+        ]).select().single();
+
+        if (data) showCard(data);
+        else if (error) alert("Error: " + error.message);
+    }
+</script>
+</body>
+</html>

@@ -34,6 +34,7 @@ exports.handler = async (event) => {
         
         else if (table === 'employee_profiles') {
             sheetData.target_sheet = 'Employees';
+            sheetData.name = record.full_name;
             sheetData.email = record.email; // Matches your log: "email": "samantharoze..."
             sheetData.role = record.role;
             sheetData.pay_rate = record.pay_rate;

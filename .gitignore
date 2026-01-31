@@ -5,3 +5,7 @@ node_modules/
 .DS_Store
 .git-rewrite.txt
 supabase/.temp/
+analytics.py
+loyalty_app.py
+.venv/
+terminal.py
