@@ -258,7 +258,6 @@
                         await fetch(GOOGLE_SCRIPT_URL, {
                             method: 'POST',
                             mode: 'no-cors',
-                            headers: { 'Content-Type': 'text/plain' },
                             body: JSON.stringify({
                                 auth_key: 'BrewHub-Sync-2027-Secure',
                                 target_sheet: 'Logs',
@@ -267,7 +266,7 @@
                                 status: action === 'CLOCK_IN' ? 'Pending' : 'Calculated'
                             })
                         });
-                        console.log('Sheets Sync Sent:', action);
+                        console.log('Direct Sync Sent to Google Sheets');
                     } catch (err) {
                         console.error('Sheets Sync Failed:', err);
                     }
@@ -320,24 +319,6 @@
                         console.error(error);
                         statusEl.innerText = "Error saving log: " + error.message;
                         return;
-                    }
-
-                    const gasPayload = {
-                        auth_key: 'BrewHub-Sync-2027-Secure',
-                        target_sheet: 'Logs',
-                        email: user.email,
-                        action: actionType,
-                        status: desiredStatus
-                    };
-
-                    try {
-                        await fetch(GS_URL, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(gasPayload)
-                        });
-                    } catch (syncError) {
-                        console.error('Google Script sync failed:', syncError);
                     }
 
                     await syncToSheets(user.email, actionType);
