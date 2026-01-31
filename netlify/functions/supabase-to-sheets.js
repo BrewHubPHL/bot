@@ -1,70 +1,63 @@
-const fetch = require('node-fetch');
-
-// This function receives a webhook from Supabase (time_logs table) and forwards it to Google Sheets
 exports.handler = async (event) => {
     // Only allow POST
     if (event.httpMethod !== 'POST') {
-        console.log('Method Not Allowed:', event.httpMethod);
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
 
     try {
-        console.log('Incoming Webhook Body:', event.body);
         const payload = JSON.parse(event.body);
-        
-        // Supabase webhook payload structure: { type: 'INSERT', table: 'time_logs', record: { ... }, ... }
-        const { record, type, table, schema } = payload;
+        const { record, type, table, auth_key } = payload;
 
-        if (!record || type !== 'INSERT') {
+        console.log(`Incoming Webhook: Table=${table}, Type=${type}`);
+
+        // 1. THE UPDATED BOUNCER
+        // Allow INSERT for anything, but also allow UPDATE for employee_profiles
+        const isAllowedType = (type === 'INSERT' || (type === 'UPDATE' && table === 'employee_profiles'));
+
+        if (!record || !isAllowedType) {
             console.log('Ignored event type:', type);
-            return { statusCode: 200, body: 'Not an INSERT event or missing record' };
+            return { statusCode: 200, body: `Event type ${type} on table ${table} ignored.` };
         }
 
-        console.log(`Processing ${type} on ${schema}.${table}`);
+        const GS_URL = process.env.GOOGLE_SCRIPT_URL;
+        let sheetData = {
+            auth_key: auth_key || "BrewHub-Sync-2027-Secure", // Use key from payload or fallback
+        };
 
-        const GS_URL = 'https://script.google.com/macros/s/AKfycbxYO7QiPDxUTc7cxV5T5g8RZ4Fd2UWBcUdTvZfhU7AFXGNFtkr1y6ABtA_4eaG1hLLkng/exec';
-
-        let sheetData = {};
-
-        // CASE 1: Employee Clock In/Out (public.time_logs)
+        // 2. DATA ROUTING
         if (table === 'time_logs') {
-            sheetData = {
-                email: record.employee_email,
-                action: record.action_type, // "CLOCK_IN" or "CLOCK_OUT"
-                name: record.employee_email,
-                timestamp: record.created_at,
-                source: 'supabase_time_Log'
-            };
+            sheetData.target_sheet = 'Logs';
+            sheetData.email = record.employee_email;
+            sheetData.action = record.action_type;
+            sheetData.timestamp = record.created_at;
         } 
-        // CASE 2: New Employee Created (auth.users)
-        else if (table === 'users' && schema === 'auth') {
-            sheetData = {
-                email: record.email,
-                action: 'EMPLOYEE_CREATED',
-                name: record.email, // Auth table doesn't have a name field by default, defaulting to email
-                timestamp: record.created_at,
-                source: 'supabase_auth'
-            };
-        }
-        else {
-            console.log('Unknown table/schema:', schema, table);
-            return { statusCode: 200, body: 'Table not supported by this webhook handler' };
+        
+        else if (table === 'employee_profiles') {
+            sheetData.target_sheet = 'Employees';
+            sheetData.email = record.email; // Matches your log: "email": "samantharoze..."
+            sheetData.role = record.role;
+            sheetData.pay_rate = record.pay_rate;
+            sheetData.action = type;
         }
 
-        // Send to Google Sheets
+        // 3. SEND TO GOOGLE
+        console.log('Forwarding to Google Sheets:', sheetData.target_sheet);
+        
         const response = await fetch(GS_URL, {
             method: 'POST',
             body: JSON.stringify(sheetData),
             headers: { 'Content-Type': 'application/json' }
         });
 
+        const result = await response.text();
+
         return {
-            statusCode: response.status,
-            body: JSON.stringify({ message: 'Forwarded to Google Sheets' })
+            statusCode: 200,
+            body: JSON.stringify({ message: 'Success', google_response: result })
         };
 
     } catch (error) {
-        console.error('Error forwarding to sheets:', error);
+        console.error('Error in Netlify Function:', error);
         return {
             statusCode: 500,
             body: JSON.stringify({ error: error.message })
