@@ -6,8 +6,12 @@ exports.handler = async (event) => {
   };
 
   try {
-    const agentId = 'agent_8101kgb3bznyf1japgwxsfv43h5p';
+    const agentId = process.env.ELEVENLABS_AGENT_ID;
     const apiKey = process.env.ELEVENLABS_API_KEY;
+
+    if (!agentId) {
+      throw new Error('Missing ELEVENLABS_AGENT_ID');
+    }
 
     // We removed the 'node-fetch' requirement and used the native fetch
     const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`, {
