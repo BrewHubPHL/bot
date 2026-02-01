@@ -1,553 +1,178 @@
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-0TYLTJRWT1"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-0TYLTJRWT1');
-</script>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-0TYLTJRWT1"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-0TYLTJRWT1');
+    </script>
 
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BrewHub PHL | Cafe & Parcel Hub</title>
-    <link rel="icon" type="image/png" href="favicon-96x96.png?v=20250131" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20250131" />
-    <link rel="shortcut icon" href="favicon.ico?v=20250131" />
-    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=20250131" />
-    <meta name="apple-mobile-web-app-title" content="BrewHubPHL " />
-    <link rel="manifest" href="site.webmanifest?v=20250131" />
+    
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="BrewHubPHL" />
+    <link rel="manifest" href="/site.webmanifest" />
     
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
 
     <style>
-        :root { 
-            --hub-brown: #3c2f2f; 
-            --hub-tan: #d4b59e; 
-            --hub-light: #f8f4f0; 
-            --glass: rgba(255, 255, 255, 0.95);
-        }
+        :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; --glass: rgba(255, 255, 255, 0.95); }
 
-        body { 
-            font-family: 'Segoe UI', sans-serif; 
-            background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%);
-            margin: 0; color: var(--hub-brown); display: flex; flex-direction: column; min-height: 100vh; 
-        }
+        html, body { height: 100%; overflow: hidden; margin: 0; font-family: 'Segoe UI', sans-serif; background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%); color: var(--hub-brown); }
+        body { display: flex; flex-direction: column; }
         
-        header { background: var(--hub-brown); color: #fff; padding: 55px 20px 25px; text-align: center; border-bottom: 6px solid var(--hub-tan); position: relative; }
-        #logo { max-width: 300px; width: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
+        header { background: var(--hub-brown); color: #fff; padding: 40px 20px 20px; text-align: center; border-bottom: 5px solid var(--hub-tan); position: relative; flex-shrink: 0; }
+        #logo { max-width: 240px; width: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
 
-        main { flex: 1; display: flex; justify-content: center; align-items: center; padding: 40px 20px; }
-        .hero-card { 
-            background: var(--glass); padding: 50px; border-radius: 30px; box-shadow: 0 15px 45px rgba(60,47,47,0.08); 
-            max-width: 450px; width: 100%; text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px);
-        }
+        main { flex: 1; display: flex; justify-content: center; align-items: center; padding: 10px; }
+        .hero-card { background: var(--glass); padding: 30px; border-radius: 25px; box-shadow: 0 10px 30px rgba(60,47,47,0.06); max-width: 400px; width: 100%; text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px); }
 
-        h1 { font-size: 2.2em; margin-bottom: 10px; }
-        .subtitle { color: #7a6a6a; margin: 18px 0 30px; line-height: 1.5; }
-        #employee-login-tab {
-            position: absolute;
-            top: 18px;
-            right: 28px;
-            background: var(--hub-tan);
-            color: var(--hub-brown);
-            border: none;
-            border-radius: 6px;
-            padding: 8px 18px;
-            font-weight: bold;
-            cursor: pointer;
-            font-size: 0.95em;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-        }
-        elevenlabs-convai {
-            position: fixed;
-            top: 70px;
-            right: 18px;
-            transform: scale(0.74);
-            transform-origin: top right;
-            z-index: 3000;
-        }
+        #employee-login-tab { position: absolute; top: 15px; right: 15px; background: var(--hub-tan); color: var(--hub-brown); border: none; border-radius: 6px; padding: 6px 14px; font-weight: bold; cursor: pointer; font-size: 0.85em; z-index: 100; }
 
-        .hub-form input { 
-            width: 100%; padding: 18px; border: 2px solid #eee; border-radius: 15px; font-size: 1.1em; margin-bottom: 15px; box-sizing: border-box; transition: 0.3s;
-        }
-        .hub-form input:focus { border-color: var(--hub-tan); outline: none; }
+        /* ElevenLabs Widget Fix */
+        elevenlabs-convai { position: fixed; bottom: 20px; right: 20px; z-index: 3000; }
 
-        .primary-btn { 
-            width: 100%; background: var(--hub-brown); color: white; border: none; padding: 18px; border-radius: 15px; font-weight: bold; font-size: 1.1em; cursor: pointer; transition: 0.3s;
-        }
+        /* Modal styling */
+        .modal { display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(60,47,47,0.9); align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 30px; border-radius: 20px; width: 320px; text-align: center; max-height: 80vh; overflow-y: auto; }
+        .modal input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 15px; border-radius: 12px; font-weight: bold; cursor: pointer; margin-top: 5px; }
 
-        .btn-login { background: var(--hub-brown); color: var(--hub-tan); }
-        .btn-clock-in { background: #28a745; color: white; }
-        .btn-clock-out { background: #dc3545; color: white; }
-        .btn-scan { background: #f39c12; color: var(--hub-brown); }
+        #reader { width: 100%; border-radius: 10px; overflow: hidden; margin-top: 10px; border: 2px solid var(--hub-tan); }
         .hidden { display: none; }
-        #scanner-wrapper { margin-top: 15px; padding: 15px; border: 1px solid #eee; border-radius: 14px; background: #fafafa; width: 100%; box-sizing: border-box; }
-        #reader { width: 100%; max-width: 280px; margin: 10px auto; border-radius: 12px; overflow: hidden; border: 2px solid #ccc; background: #000; }
-        #scan-result { margin-top: 10px; font-weight: 600; color: var(--hub-brown); }
-        #status-msg { margin-top: 15px; font-size: 0.9em; color: #555; }
+        footer { padding: 15px; font-size: 11px; color: #999; text-align: center; flex-shrink: 0; }
+        .footer-links a { color: #7a6a6a; text-decoration: none; margin: 0 8px; }
 
-        footer { text-align: center; padding: 20px; font-size: 12px; color: #999; text-transform: uppercase; letter-spacing: 2px; }
-        footer a { color: inherit; text-decoration: underline; }
-        .instagram-link {
-            position: fixed;
-            left: 8px;
-            bottom: 6px;
-            width: 30px;
-            height: 30px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: #7a6a6a;
-            text-decoration: none;
-            background: rgba(255, 255, 255, 0.85);
-            border-radius: 10px;
-            border: 1px solid rgba(212, 181, 158, 0.5);
-            box-shadow: 0 6px 16px rgba(60, 47, 47, 0.08);
-        }
-        .instagram-link:hover { color: var(--hub-brown); }
-        .instagram-link svg { width: 16px; height: 16px; display: block; }
-        .facebook-link {
-            position: fixed;
-            right: 8px;
-            bottom: 6px;
-            width: 30px;
-            height: 30px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: #7a6a6a;
-            text-decoration: none;
-            background: rgba(255, 255, 255, 0.85);
-            border-radius: 10px;
-            border: 1px solid rgba(212, 181, 158, 0.5);
-            box-shadow: 0 6px 16px rgba(60, 47, 47, 0.08);
-        }
-        .facebook-link:hover { color: var(--hub-brown); }
-        .facebook-link svg { width: 16px; height: 16px; display: block; }
         @media (max-width: 600px) {
-            body { overflow: hidden; }
-            header { padding: 32px 14px 16px; }
-            #logo { width: 58vw; max-width: 160px; margin: 0 auto 4px; display: block; }
-            #employee-login-tab {
-                position: absolute;
-                top: 12px;
-                right: 12px;
-                font-size: 0.78em;
-                padding: 6px 14px;
-            }
-            main { padding: 8px; }
-            .hero-card { padding: 20px 16px; border-radius: 18px; }
-            h1 { font-size: 1.5em; margin-bottom: 6px; }
-            .subtitle { font-size: 0.9em; margin: 16px 0; }
-            .hub-form input, .primary-btn { padding: 12px; font-size: 0.92em; }
-            elevenlabs-convai {
-                position: fixed;
-                top: 60px;
-                right: 10px;
-                transform: scale(0.45);
-                transform-origin: top right;
-            }
+            header { padding: 30px 10px 15px; }
+            #logo { width: 45vw; }
+            elevenlabs-convai { transform: scale(0.6); transform-origin: bottom right; }
         }
     </style>
 </head>
 <body>
 
-
-    <header style="position: relative;">
+    <header>
         <img src="logo.png" alt="BrewHub PHL" id="logo">
-        <p>COFFEE • PARCELS • COMMUNITY</p>
-        <button id="employee-login-tab">Employee Portal</button>
+        <p style="margin: 5px 0 0; font-size: 0.8em; letter-spacing: 1px;">COFFEE • PARCELS • COMMUNITY</p>
+        <button id="employee-login-tab">Staff</button>
         <elevenlabs-convai agent-id="agent_8101kgb3bznyf1japgwxsfv43h5p"></elevenlabs-convai>
     </header>
 
     <main>
         <section class="hero-card">
-            <p class="subtitle">Join the neighborhub for opening alerts and seamless parcel management in Point Breeze.</p>
-            <form class="hub-form" id="waitlist-form">
-                <input type="email" id="email" placeholder="Your favorite email address" required>
+            <p style="color: #7a6a6a; margin: 0 0 20px; line-height: 1.4;">Join the neighborhub for opening alerts and parcel management in Point Breeze.</p>
+            <form id="waitlist-form">
+                <input type="email" id="email" placeholder="Email address" required style="width:100%; padding:15px; border:2px solid #eee; border-radius:12px; margin-bottom:12px; box-sizing:border-box;">
                 <button type="submit" class="primary-btn">JOIN THE WAITLIST</button>
             </form>
-            <p id="form-msg" style="display:none; color: #4a7c44; margin-top: 15px; font-weight: bold;">Brewing your welcome... hang tight!</p>
+            <p id="form-msg" style="display:none; color: #4a7c44; margin-top: 10px; font-weight: bold;">Brewing your welcome...</p>
         </section>
-
-        <!-- Employee Portal Modal -->
-        <div id="employee-portal-modal" style="display:none; position:fixed; z-index:2000; left:0; top:0; width:100vw; height:100vh; background:rgba(60,47,47,0.85); align-items:center; justify-content:center;">
-            <div style="background:#fff; border-radius:16px; max-width:90vw; max-height:90vh; width:350px; box-shadow:0 8px 32px rgba(0,0,0,0.18); position:relative; display:flex; flex-direction:column; align-items:center; padding: 30px 20px;">
-                <button id="close-employee-portal" style="position:absolute; top:10px; right:16px; background:none; border:none; font-size:1.7em; color:#3c2f2f; cursor:pointer;">&times;</button>
-                <h2>Employee Portal</h2>
-                <div id="login-section">
-                    <p>Employee Login</p>
-                    <input type="email" id="employee-email" placeholder="Email">
-                    <input type="password" id="employee-password" placeholder="Password">
-                    <button class="btn-login" onclick="employeeLogin()">Sign In</button>
-                </div>
-                <div id="portal-section" class="hidden">
-                    <p id="welcome-msg">Welcome!</p>
-                    <button class="btn-clock-in" onclick="handleTimeEntry('CLOCK_IN')">Clock In</button>
-                    <button class="btn-clock-out" onclick="handleTimeEntry('CLOCK_OUT')">Clock Out</button>
-                    <button class="btn-scan" id="toggle-scan-btn" onclick="toggleScanner()">Start Loyalty Scan</button>
-                    <div id="scanner-wrapper" class="hidden">
-                        <div id="reader"></div>
-                        <p id="scan-result"></p>
-                    </div>
-                    <a id="manager-link" href="manager.html" target="_blank" style="display:none; color: #dc3545; font-weight:bold; margin: 10px 0; text-decoration: none; border: 1px solid #dc3545; padding: 5px; border-radius: 4px;">Manager Dashboard</a>
-                    <button onclick="employeeLogout()" style="background:none; color:blue; text-decoration:underline; font-size: 0.8em;">Logout</button>
-                </div>
-                <div id="update-password-section" class="hidden">
-                    <p>Set New Password</p>
-                    <input type="password" id="new-password" placeholder="New Password">
-                    <button class="btn-login" onclick="updatePassword()">Save Password</button>
-                </div>
-                <p id="status-msg"></p>
-            </div>
-        </div>
     </main>
 
-
-        <footer>
-            South Philadelphia • Point Breeze<br>
-            <a href="#" id="fair-chance-link" style="font-size:10px; text-decoration: underline;">Fair Chance Hiring Notice</a>
-        </footer>
-
-        <a class="instagram-link" href="https://instagram.com/brewhubphl" target="_blank" rel="noopener noreferrer" aria-label="BrewHub PHL on Instagram">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor">
-                <path d="M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H7zm5 2.5A5.5 5.5 0 1 1 6.5 13 5.5 5.5 0 0 1 12 7.5zm0 2A3.5 3.5 0 1 0 15.5 13 3.5 3.5 0 0 0 12 9.5zm6-3.25a1 1 0 1 1-1-1 1 1 0 0 1 1 1z"/>
-            </svg>
-        </a>
-        <a class="facebook-link" href="https://facebook.com/thebrewhubphl" target="_blank" rel="noopener noreferrer" aria-label="BrewHub PHL on Facebook">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor">
-                <path d="M13.5 9H16V6.5h-2.5c-2.2 0-3.5 1.4-3.5 3.6V12H8v2.5h2V20h2.7v-5.5h2.3L16 12h-3.3v-1.7c0-.9.3-1.3 1.3-1.3z"/>
-            </svg>
-        </a>
-
-        <!-- Modal for PDF viewer -->
-        <div id="pdf-modal" style="display:none; position:fixed; z-index:1000; left:0; top:0; width:100vw; height:100vh; background:rgba(60,47,47,0.85); align-items:center; justify-content:center;">
-            <div style="background:#fff; border-radius:16px; max-width:90vw; max-height:90vh; width:600px; box-shadow:0 8px 32px rgba(0,0,0,0.18); position:relative; display:flex; flex-direction:column;">
-                <button id="close-pdf-modal" style="position:absolute; top:10px; right:16px; background:none; border:none; font-size:1.7em; color:#3c2f2f; cursor:pointer;">&times;</button>
-                <iframe src="https://www.phila.gov/media/20210423160847/Fair-Chance-Hiring-law-poster.pdf" title="Fair Chance Hiring Notice" style="flex:1; width:100%; height:70vh; border:none; border-radius:0 0 16px 16px;"></iframe>
-            </div>
+    <div id="staff-modal" class="modal">
+        <div class="modal-content" id="modal-body">
+            <h2 style="margin-top:0">Staff Portal</h2>
+            <input type="email" id="staff-email" placeholder="Email">
+            <input type="password" id="staff-password" placeholder="Password">
+            <button class="primary-btn" onclick="staffLogin()">Sign In</button>
+            <button style="background:none; border:none; margin-top:15px; cursor:pointer; color:#999" onclick="closeModal()">Cancel</button>
         </div>
+    </div>
 
-        <script>
-            // Modal open/close logic for Fair Chance Hiring Notice
-            document.getElementById('fair-chance-link').addEventListener('click', function(e) {
-                e.preventDefault();
-                document.getElementById('pdf-modal').style.display = 'flex';
-            });
-            document.getElementById('close-pdf-modal').addEventListener('click', function() {
-                document.getElementById('pdf-modal').style.display = 'none';
-            });
-            // Optional: close modal on background click
-            document.getElementById('pdf-modal').addEventListener('click', function(e) {
-                if (e.target === this) {
-                    this.style.display = 'none';
-                }
-            });
-        </script>
+    <footer>
+        South Philadelphia • Point Breeze
+        <div class="footer-links">
+            <a href="https://instagram.com/brewhubphl" target="_blank">Instagram</a> • 
+            <a href="https://facebook.com/thebrewhubphl" target="_blank">Facebook</a>
+        </div>
+    </footer>
 
     <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
-
     <script>
-                // Employee Portal Modal Logic & JS
-                const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxYO7QiPDxUTc7cxV5T5g8RZ4Fd2UWBcUdTvZfhU7AFXGNFtkr1y6ABtA_4eaG1hLLkng/exec';
+        const _supabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
+        
+        const modal = document.getElementById('staff-modal');
+        document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
+        const closeModal = () => modal.style.display = 'none';
 
-                const employeeSupabase = supabase.createClient(
-                    'https://rruionkpgswvncypweiv.supabase.co',
-                    'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN',
-                    {
-                        auth: {
-                            storageKey: 'employee-portal-auth',
-                            persistSession: true,
-                            autoRefreshToken: true
-                        }
-                    }
-                );
+        let html5QrCode = null;
 
-                employeeSupabase.auth.onAuthStateChange(async (event, session) => {
-                    if (event === 'PASSWORD_RECOVERY') {
-                        // Open modal and show password update
-                        document.getElementById('employee-portal-modal').style.display = 'flex';
-                        document.getElementById('login-section').classList.add('hidden');
-                        document.getElementById('portal-section').classList.add('hidden');
-                        document.getElementById('update-password-section').classList.remove('hidden');
-                    }
-                });
+       async function staffLogin() {
+    const emailInput = document.getElementById('staff-email').value.trim().toLowerCase();
+    const passwordInput = document.getElementById('staff-password').value;
+    
+    // Attempt the login
+    const { data, error } = await _supabase.auth.signInWithPassword({ 
+        email: emailInput, 
+        password: passwordInput 
+    });
+    
+    if (error) {
+        // This will tell us EXACTLY what Supabase is complaining about
+        console.error("Supabase Auth Error:", error.message);
+        alert("Login Failed: " + error.message);
+    } else {
+        renderPortal(data.user);
+    }
+}
 
-                // Modal logic
-                const loginTab = document.getElementById('employee-login-tab');
-                const portalModal = document.getElementById('employee-portal-modal');
-                const closePortalBtn = document.getElementById('close-employee-portal');
-                if (loginTab && portalModal && closePortalBtn) {
-                    loginTab.onclick = () => { portalModal.style.display = 'flex'; };
-                    closePortalBtn.onclick = () => { portalModal.style.display = 'none'; };
-                    portalModal.addEventListener('click', function(e) {
-                        if (e.target === this) this.style.display = 'none';
-                    });
-                }
+        function renderPortal(user) {
+    // Check if the logged-in person is the Boss
+    const isManager = user.email === 'thomas@brewhubphl.com';
+    
+    document.getElementById('modal-body').innerHTML = `
+        <h2 style="margin-top:0">Hi, ${user.email.split('@')[0]}</h2>
+        
+        <div style="display:flex; flex-direction:column; gap:10px;">
+            <button class="primary-btn" style="background:#28a745" onclick="staffAction('CLOCK_IN')">Clock In</button>
+            <button class="primary-btn" style="background:#dc3545" onclick="staffAction('CLOCK_OUT')">Clock Out</button>
+            
+            <button class="primary-btn" style="background:#3c2f2f; color:#d4b59e" onclick="startScanner()">Start Loyalty Scan</button>
+            <div id="reader"></div>
 
-                // Check if employee is already logged in on page load
-                (async () => {
-                    const { data: { user } } = await employeeSupabase.auth.getUser();
-                    if (user) showEmployeePortal(user);
-                })();
+            ${isManager ? `
+                <hr style="margin:15px 0; border:0; border-top:1px solid #eee;">
+                <button class="primary-btn" style="background:#f39c12; color:#3c2f2f" onclick="window.location.href='manager.html'">Manager Dashboard</button>
+            ` : ''}
+        </div>
+        
+        <button style="background:none; border:none; margin-top:20px; cursor:pointer; color:#999; text-decoration:underline" onclick="location.reload()">Logout</button>
+    `;
+}
 
-                async function syncToSheets(email, action) {
-                    try {
-                        await fetch(GOOGLE_SCRIPT_URL, {
-                            method: 'POST',
-                            mode: 'no-cors',
-                            body: JSON.stringify({
-                                auth_key: 'BrewHub-Sync-2027-Secure',
-                                target_sheet: 'Logs',
-                                email,
-                                action,
-                                status: action === 'CLOCK_IN' ? 'Pending' : 'Calculated'
-                            })
-                        });
-                        console.log('Direct Sync Sent to Google Sheets');
-                    } catch (err) {
-                        console.error('Sheets Sync Failed:', err);
-                    }
-                }
+        async function staffAction(type) {
+            const { data: { user } } = await _supabase.auth.getUser();
+            await _supabase.from('time_logs').insert([{ employee_email: user.email, action_type: type }]);
+            fetch('https://script.google.com/macros/s/AKfycbxYO7QiPDxUTc7cxV5T5g8RZ4Fd2UWBcUdTvZfhU7AFXGNFtkr1y6ABtA_4eaG1hLLkng/exec', {
+                method: 'POST', mode: 'no-cors', body: JSON.stringify({ email: user.email, action: type, auth_key: 'BrewHub-Sync-2027-Secure' })
+            });
+            alert(`✅ ${type} Recorded`);
+        }
 
-                window.employeeLogin = async function() {
-                    const email = document.getElementById('employee-email').value;
-                    const password = document.getElementById('employee-password').value;
-                    const { data, error } = await employeeSupabase.auth.signInWithPassword({ email, password });
-                    if (error) {
-                        alert(error.message);
-                    } else {
-                        showEmployeePortal(data.user);
-                    }
-                }
-
-                window.showEmployeePortal = async function(user) {
-                    document.getElementById('login-section').classList.add('hidden');
-                    document.getElementById('portal-section').classList.remove('hidden');
-                    document.getElementById('welcome-msg').innerText = `Hello, ${user.email}`;
-
-                    // Check for Manager Access (Email based for Thomas)
-                    if (user.email === 'thomas@brewhubphl.com') {
-                        document.getElementById('manager-link').style.display = 'block';
-                    }
-                }
-
-                window.handleTimeEntry = async function(actionType) {
-                    const { data: { user } } = await employeeSupabase.auth.getUser();
-                    const statusEl = document.getElementById('status-msg');
-                    if (!user) {
-                        statusEl.innerText = "Please log in first.";
-                        return;
-                    }
-
-                    statusEl.innerText = "Recording...";
-                    const desiredStatus = actionType === 'CLOCK_IN' ? 'PENDING' : 'COMPLETED';
-                    const { error } = await employeeSupabase
-                        .from('time_logs')
-                        .insert([
-                            {
-                                employee_id: user.id,
-                                employee_email: user.email,
-                                action_type: actionType,
-                                status: desiredStatus
-                            }
-                        ]);
-
-                    if (error) {
-                        console.error(error);
-                        statusEl.innerText = "Error saving log: " + error.message;
-                        return;
-                    }
-
-                    await syncToSheets(user.email, actionType);
-                    statusEl.innerText = `Success! ${actionType} recorded at ${new Date().toLocaleTimeString()}`;
-                }
-
-                window.updatePassword = async function() {
-                    const newPassword = document.getElementById('new-password').value;
-                    const status = document.getElementById('status-msg');
-                    
-                    if (!newPassword) {
-                        alert("Please enter a new password.");
-                        return;
-                    }
-
-                    const { data, error } = await employeeSupabase.auth.updateUser({ password: newPassword });
-
-                    if (error) {
-                        status.innerText = "Error updating password: " + error.message;
-                    } else {
-                        status.innerText = "Password updated successfully! Logging you in...";
-                        setTimeout(() => {
-                            document.getElementById('update-password-section').classList.add('hidden');
-                            showEmployeePortal(data.user);
-                        }, 1500);
-                    }
-                }
-
-                let loyaltyScanner = null;
-                let loyaltyScannerActive = false;
-                let scanCooldown = false;
-                const loyaltyScannerConfig = {
-                    fps: 10,
-                    qrbox: { width: 320, height: 180 },
-                    disableFlip: true,
-                    formatsToSupport: [
-                        Html5QrcodeSupportedFormats.CODE_128,
-                        Html5QrcodeSupportedFormats.CODE_39,
-                        Html5QrcodeSupportedFormats.QR_CODE
-                    ],
-                    experimentalFeatures: {
-                        useBarCodeDetectorIfSupported: true
-                    }
-                };
-
-                const ensureScannerInstance = () => {
-                    if (!loyaltyScanner) {
-                        loyaltyScanner = new Html5Qrcode('reader');
-                    }
-                    return loyaltyScanner;
-                };
-
-                async function handleLoyaltyScan(decodedText) {
-                    if (scanCooldown) return;
-                    scanCooldown = true;
-
-                    const scanResultEl = document.getElementById('scan-result');
-                    scanResultEl.innerText = "Checking ID: " + decodedText;
-
-                    const { data, error } = await employeeSupabase
-                        .from('loyalty_customers')
-                        .select('*')
-                        .eq('barcode_id', decodedText)
-                        .single();
-
-                    if (error) {
-                        alert("Database error. Please try again.");
-                        scanResultEl.innerText = '';
-                        scanCooldown = false;
-                        return;
-                    }
-
-                    if (data) {
-                        const newPoints = (data.loyalty_points || 0) + 50;
-                        await employeeSupabase
-                            .from('loyalty_customers')
-                            .update({ loyalty_points: newPoints })
-                            .eq('id', data.id);
-
-                        await employeeSupabase.from('loyalty_transactions').insert({
-                            customer_id: data.id,
-                            points_earned: 50,
-                            type: 'EARN'
-                        });
-
-                        if (navigator.vibrate) navigator.vibrate(200);
-
-                        document.getElementById('customer-name').innerText = data.first_name;
-                        document.getElementById('points-added').innerText = `+50 (Total: ${newPoints})`;
-                        scanResultEl.innerText = `✅ Success! 50 points added to ${data.first_name}`;
-                        alert(`✅ Success! 50 points added to ${data.first_name}`);
-                    } else {
-                        alert("❌ Customer ID not found.");
-                        scanResultEl.innerText = 'Customer not found.';
-                    }
-
-                    setTimeout(() => {
-                        scanCooldown = false;
-                        scanResultEl.innerText = '';
-                    }, 2000);
-                }
-
-                window.toggleScanner = async function() {
-                    const wrapper = document.getElementById('scanner-wrapper');
-                    const button = document.getElementById('toggle-scan-btn');
-                    if (!wrapper || !button) return;
-
-                    if (!loyaltyScannerActive) {
-                        wrapper.classList.remove('hidden');
-                        button.disabled = true;
-                        try {
-                            await ensureScannerInstance().start(
-                                { facingMode: 'environment' },
-                                loyaltyScannerConfig,
-                                handleLoyaltyScan
-                            );
-                            loyaltyScannerActive = true;
-                            button.innerText = 'Stop Loyalty Scan';
-                        } catch (err) {
-                            alert('Camera error: ' + err.message);
-                            wrapper.classList.add('hidden');
-                        } finally {
-                            button.disabled = false;
-                        }
-                    } else {
-                        button.disabled = true;
-                        await ensureScannerInstance().stop();
-                        loyaltyScannerActive = false;
-                        wrapper.classList.add('hidden');
-                        document.getElementById('scan-result').innerText = '';
-                        button.innerText = 'Start Loyalty Scan';
-                        button.disabled = false;
-                    }
-                }
-
-                window.employeeLogout = async function() {
-                    await employeeSupabase.auth.signOut();
-                    document.getElementById('login-section').classList.remove('hidden');
-                    document.getElementById('portal-section').classList.add('hidden');
-                    document.getElementById('welcome-msg').innerText = 'Welcome!';
-                    document.getElementById('status-msg').innerText = '';
-                    const wrapper = document.getElementById('scanner-wrapper');
-                    const scanBtn = document.getElementById('toggle-scan-btn');
-                    const resultEl = document.getElementById('scan-result');
-                    if (loyaltyScannerActive && loyaltyScanner) {
-                        await loyaltyScanner.stop();
-                        loyaltyScannerActive = false;
-                    }
-                    if (wrapper) wrapper.classList.add('hidden');
-                    if (scanBtn) {
-                        scanBtn.innerText = 'Start Loyalty Scan';
-                        scanBtn.disabled = false;
-                    }
-                    if (resultEl) resultEl.innerText = '';
-                }
-        const SB_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
-        const SB_KEY = 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN';
-        const GS_URL = 'https://script.google.com/macros/s/AKfycbxYO7QiPDxUTc7cxV5T5g8RZ4Fd2UWBcUdTvZfhU7AFXGNFtkr1y6ABtA_4eaG1hLLkng/exec';
-
-        const _supabase = supabase.createClient(SB_URL, SB_KEY);
+        function startScanner() {
+            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, 
+                (decodedText) => { alert("Scanned ID: " + decodedText); html5QrCode.stop(); }
+            );
+        }
 
         document.getElementById('waitlist-form').onsubmit = async function(e) {
             e.preventDefault();
             const email = document.getElementById('email').value;
-
-            confetti({ 
-                particleCount: 150, spread: 70, origin: { y: 0.6 },
-                colors: ['#3c2f2f', '#d4b59e', '#ffffff'] 
-            });
-
-            try {
-                await _supabase.from('waitlist').insert([{ email }]);
-                fetch(GS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ email }) });
-                
-                // Redirect to Thank You page for GA4 Conversion Tracking
-                setTimeout(() => { window.location.href = "thank-you.html"; }, 1500);
-            } catch (err) { 
-                console.error("Sync Error:", err); 
-                window.location.href = "thank-you.html";
-            }
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+            await _supabase.from('waitlist').insert([{ email }]);
+            document.getElementById('form-msg').style.display = 'block';
         };
-
-        // Legacy BrewBot chat UI removed in favor of ElevenLabs widget
     </script>
 </body>
 </html>
