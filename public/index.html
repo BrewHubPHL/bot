@@ -13,64 +13,114 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BrewHub PHL | Cafe & Parcel Hub</title>
     
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="shortcut icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <meta name="apple-mobile-web-app-title" content="BrewHubPHL" />
     <link rel="manifest" href="/site.webmanifest" />
     
+    <link rel="apple-touch-startup-image" href="/apple-touch-icon.png">
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-    <script src="https://unpkg.com/html5-qrcode"></script>
 
     <style>
-        :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; --glass: rgba(255, 255, 255, 0.95); }
+        :root { 
+            --hub-brown: #3c2f2f; 
+            --hub-tan: #d4b59e; 
+            --hub-light: #f8f4f0; 
+            --glass: rgba(255, 255, 255, 0.95);
+        }
 
-        html, body { height: 100%; overflow: hidden; margin: 0; font-family: 'Segoe UI', sans-serif; background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%); color: var(--hub-brown); }
+        /* Zero-Scroll Layout */
+        html, body { 
+            height: 100%; overflow: hidden; margin: 0;
+            font-family: 'Segoe UI', sans-serif; 
+            background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%);
+            color: var(--hub-brown);
+        }
         body { display: flex; flex-direction: column; }
         
-        header { background: var(--hub-brown); color: #fff; padding: 40px 20px 20px; text-align: center; border-bottom: 5px solid var(--hub-tan); position: relative; flex-shrink: 0; }
+        header { 
+            background: var(--hub-brown); color: #fff; padding: 40px 20px 20px; 
+            text-align: center; border-bottom: 5px solid var(--hub-tan); position: relative; flex-shrink: 0;
+        }
         #logo { max-width: 240px; width: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
 
         main { flex: 1; display: flex; justify-content: center; align-items: center; padding: 10px; }
-        .hero-card { background: var(--glass); padding: 30px; border-radius: 25px; box-shadow: 0 10px 30px rgba(60,47,47,0.06); max-width: 400px; width: 100%; text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px); }
+        .hero-card { 
+            background: var(--glass); padding: 30px; border-radius: 25px; 
+            box-shadow: 0 10px 30px rgba(60,47,47,0.06); max-width: 400px; width: 100%; 
+            text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px);
+        }
 
-        #employee-login-tab { position: absolute; top: 15px; right: 15px; background: var(--hub-tan); color: var(--hub-brown); border: none; border-radius: 6px; padding: 6px 14px; font-weight: bold; cursor: pointer; font-size: 0.85em; z-index: 100; }
+        /* Splash Overlay */
+        #splash-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: var(--hub-brown); z-index: 10000; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: opacity 0.5s ease;
+        }
+        .spinner {
+            margin-top: 20px; width: 30px; height: 30px; 
+            border: 3px solid var(--hub-tan); border-top: 3px solid white; 
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* ElevenLabs Widget Fix */
-        elevenlabs-convai { position: fixed; bottom: 20px; right: 20px; z-index: 3000; }
+        /* ElevenLabs Widget Nudge */
+        elevenlabs-convai { 
+            position: fixed; top: 80px; right: 20px; z-index: 3000; 
+            transform: scale(0.85); transform-origin: top right;
+        }
 
-        /* Modal styling */
-        .modal { display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(60,47,47,0.9); align-items: center; justify-content: center; }
-        .modal-content { background: white; padding: 30px; border-radius: 20px; width: 320px; text-align: center; max-height: 80vh; overflow-y: auto; }
+        #employee-login-tab {
+            position: absolute; top: 15px; right: 15px; background: var(--hub-tan);
+            color: var(--hub-brown); border: none; border-radius: 6px; padding: 6px 14px;
+            font-weight: bold; cursor: pointer; font-size: 0.85em; z-index: 100;
+        }
+
+        .modal {
+            display: none; position: fixed; z-index: 4000; left: 0; top: 0; 
+            width: 100%; height: 100%; background: rgba(60,47,47,0.9);
+            align-items: center; justify-content: center;
+        }
+        .modal-content { background: white; padding: 30px; border-radius: 20px; width: 320px; text-align: center; }
         .modal input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
-        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 15px; border-radius: 12px; font-weight: bold; cursor: pointer; margin-top: 5px; }
+        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 15px; border-radius: 12px; font-weight: bold; cursor: pointer; margin-top: 10px; }
 
-        #reader { width: 100%; border-radius: 10px; overflow: hidden; margin-top: 10px; border: 2px solid var(--hub-tan); }
-        .hidden { display: none; }
         footer { padding: 15px; font-size: 11px; color: #999; text-align: center; flex-shrink: 0; }
         .footer-links a { color: #7a6a6a; text-decoration: none; margin: 0 8px; }
 
         @media (max-width: 600px) {
             header { padding: 30px 10px 15px; }
             #logo { width: 45vw; }
-            elevenlabs-convai { transform: scale(0.6); transform-origin: bottom right; }
+            elevenlabs-convai { 
+                top: auto !important; bottom: 50px !important; right: 15px !important;
+                transform: scale(0.65) !important; transform-origin: bottom right !important; 
+            }
         }
     </style>
 </head>
 <body>
 
+    <div id="splash-overlay">
+        <img src="logo.png" alt="BrewHub" style="width:180px;">
+        <div class="spinner"></div>
+    </div>
+
     <header>
         <img src="logo.png" alt="BrewHub PHL" id="logo">
-        <p style="margin: 5px 0 0; font-size: 0.8em; letter-spacing: 1px;">COFFEE • PARCELS • COMMUNITY</p>
+        <p style="margin: 5px 0 0; font-size: 0.7em; letter-spacing: 1px;">COFFEE • PARCELS • COMMUNITY</p>
         <button id="employee-login-tab">Staff</button>
         <elevenlabs-convai agent-id="agent_8101kgb3bznyf1japgwxsfv43h5p"></elevenlabs-convai>
     </header>
 
     <main>
         <section class="hero-card">
-            <p style="color: #7a6a6a; margin: 0 0 20px; line-height: 1.4;">Join the neighborhub for opening alerts and parcel management in Point Breeze.</p>
+            <p style="color: #7a6a6a; margin: 0 0 20px; line-height: 1.4; font-size: 0.95em;">Join the neighborhub for opening alerts and parcel management in Point Breeze.</p>
             <form id="waitlist-form">
                 <input type="email" id="email" placeholder="Email address" required style="width:100%; padding:15px; border:2px solid #eee; border-radius:12px; margin-bottom:12px; box-sizing:border-box;">
                 <button type="submit" class="primary-btn">JOIN THE WAITLIST</button>
@@ -100,70 +150,44 @@
     <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
     <script>
         const _supabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
+
+        // Splash screen dismissal
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                const splash = document.getElementById('splash-overlay');
+                splash.style.opacity = '0';
+                setTimeout(() => splash.style.display = 'none', 500);
+            }, 1200); 
+        });
         
         const modal = document.getElementById('staff-modal');
         document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
         const closeModal = () => modal.style.display = 'none';
 
-        let html5QrCode = null;
-
-       async function staffLogin() {
-    const emailInput = document.getElementById('staff-email').value.trim().toLowerCase();
-    const passwordInput = document.getElementById('staff-password').value;
-    
-    // Attempt the login
-    const { data, error } = await _supabase.auth.signInWithPassword({ 
-        email: emailInput, 
-        password: passwordInput 
-    });
-    
-    if (error) {
-        // This will tell us EXACTLY what Supabase is complaining about
-        console.error("Supabase Auth Error:", error.message);
-        alert("Login Failed: " + error.message);
-    } else {
-        renderPortal(data.user);
-    }
-}
+        async function staffLogin() {
+            const email = document.getElementById('staff-email').value.trim().toLowerCase();
+            const password = document.getElementById('staff-password').value;
+            const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+            if (error) alert(error.message);
+            else renderPortal(data.user);
+        }
 
         function renderPortal(user) {
-    // Check if the logged-in person is the Boss
-    const isManager = user.email === 'thomas@brewhubphl.com';
-    
-    document.getElementById('modal-body').innerHTML = `
-        <h2 style="margin-top:0">Hi, ${user.email.split('@')[0]}</h2>
-        
-        <div style="display:flex; flex-direction:column; gap:10px;">
-            <button class="primary-btn" style="background:#28a745" onclick="staffAction('CLOCK_IN')">Clock In</button>
-            <button class="primary-btn" style="background:#dc3545" onclick="staffAction('CLOCK_OUT')">Clock Out</button>
-            
-            <button class="primary-btn" style="background:#3c2f2f; color:#d4b59e" onclick="startScanner()">Start Loyalty Scan</button>
-            <div id="reader"></div>
-
-            ${isManager ? `
-                <hr style="margin:15px 0; border:0; border-top:1px solid #eee;">
-                <button class="primary-btn" style="background:#f39c12; color:#3c2f2f" onclick="window.location.href='manager.html'">Manager Dashboard</button>
-            ` : ''}
-        </div>
-        
-        <button style="background:none; border:none; margin-top:20px; cursor:pointer; color:#999; text-decoration:underline" onclick="location.reload()">Logout</button>
-    `;
-}
+            const isManager = user.email === 'thomas@brewhubphl.com';
+            document.getElementById('modal-body').innerHTML = `
+                <h2 style="margin-top:0">Hi, ${user.email.split('@')[0]}</h2>
+                <button class="primary-btn" style="background:#28a745" onclick="staffAction('CLOCK_IN')">Clock In</button>
+                <button class="primary-btn" style="background:#dc3545" onclick="staffAction('CLOCK_OUT')">Clock Out</button>
+                <button class="primary-btn" style="background:#3c2f2f; color:#d4b59e" onclick="alert('Scanner Active')">Scan Loyalty</button>
+                ${isManager ? `<button class="primary-btn" style="background:#f39c12; color:#3c2f2f" onclick="window.location.href='manager.html'">Manager Dash</button>` : ''}
+                <button style="background:none; border:none; margin-top:15px; cursor:pointer; color:#999; text-decoration:underline" onclick="location.reload()">Logout</button>
+            `;
+        }
 
         async function staffAction(type) {
             const { data: { user } } = await _supabase.auth.getUser();
             await _supabase.from('time_logs').insert([{ employee_email: user.email, action_type: type }]);
-            fetch('https://script.google.com/macros/s/AKfycbxYO7QiPDxUTc7cxV5T5g8RZ4Fd2UWBcUdTvZfhU7AFXGNFtkr1y6ABtA_4eaG1hLLkng/exec', {
-                method: 'POST', mode: 'no-cors', body: JSON.stringify({ email: user.email, action: type, auth_key: 'BrewHub-Sync-2027-Secure' })
-            });
             alert(`✅ ${type} Recorded`);
-        }
-
-        function startScanner() {
-            html5QrCode = new Html5Qrcode("reader");
-            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, 
-                (decodedText) => { alert("Scanned ID: " + decodedText); html5QrCode.stop(); }
-            );
         }
 
         document.getElementById('waitlist-form').onsubmit = async function(e) {
