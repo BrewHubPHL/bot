@@ -180,12 +180,15 @@
             }
 
             try {
-                logChat('System', 'Connecting...');
-                // IMPORTANT: This calls your Netlify function bridge
-                const resp = await fetch('/.netlify/functions/get-voice-session');
+                logChat('System', 'Connecting to BrewBot...');
+
+                // 1. Get the ticket from your new Netlify function
+                const resp = await fetch('/api/get-voice-session');
+                if (!resp.ok) throw new Error('Could not get session ticket');
+
                 const { signedUrl } = await resp.json();
 
-                // Note: The library usually exposes ElevenLabsConvAI or similar global
+                // 2. Start the ElevenLabs session using the ticket
                 conversation = await ElevenLabsConvAI.Conversation.startSession({
                     signedUrl: signedUrl,
                     onConnect: () => {
@@ -204,7 +207,8 @@
                 });
             } catch (err) {
                 console.error(err);
-                alert("Check microphone permissions or Netlify Function status.");
+                logChat('System', 'Connection failed. Try again.');
+                alert("Make sure to allow microphone access!");
             }
         };
 
