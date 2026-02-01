@@ -33,7 +33,6 @@
             --glass: rgba(255, 255, 255, 0.95);
         }
 
-        /* Prevent Scroll & Force Native App Feel */
         html, body { 
             height: 100%; overflow: hidden; margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -56,7 +55,6 @@
             display: flex; flex-direction: column; gap: 10px;
         }
 
-        /* Splash Screen */
         #splash-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             background: var(--hub-brown); z-index: 10000; 
@@ -66,7 +64,6 @@
         .spinner { margin-top: 20px; width: 25px; height: 25px; border: 3px solid var(--hub-tan); border-top: 3px solid white; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* Chat UI */
         #chat-section { display: block; width: 100%; margin-top: 5px; }
         .chat-display { 
             height: 90px; overflow-y: auto; text-align: left; 
@@ -91,8 +88,6 @@
 
         footer { padding: 10px; font-size: 10px; color: #999; text-align: center; flex-shrink: 0; }
         .footer-links a { color: #7a6a6a; text-decoration: none; margin: 0 8px; }
-
-        @media (max-width: 600px) { header { padding: 35px 10px 15px; } #logo { width: 40vw; } }
     </style>
 </head>
 <body>
@@ -147,9 +142,9 @@
     </footer>
 
     <script>
-        const _supabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
+        // Use a consistent client name
+        const supabaseClient = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
 
-        // Splash dismissal
         window.addEventListener('load', () => {
             setTimeout(() => {
                 const splash = document.getElementById('splash-overlay');
@@ -160,7 +155,6 @@
             }, 1200); 
         });
 
-        // --- ElevenLabs Client Logic ---
         let conversation = null;
         const voiceBtn = document.getElementById('voice-btn');
         const chatBox = document.getElementById('chat-box');
@@ -181,14 +175,11 @@
 
             try {
                 logChat('System', 'Connecting to BrewBot...');
-
-                // 1. Get the ticket from your new Netlify function
                 const resp = await fetch('/api/get-voice-session');
-                if (!resp.ok) throw new Error('Could not get session ticket');
+                if (!resp.ok) throw new Error('Network response was not ok');
 
                 const { signedUrl } = await resp.json();
 
-                // 2. Start the ElevenLabs session using the ticket
                 conversation = await ElevenLabsConvAI.Conversation.startSession({
                     signedUrl: signedUrl,
                     onConnect: () => {
@@ -207,12 +198,12 @@
                 });
             } catch (err) {
                 console.error(err);
-                logChat('System', 'Connection failed. Try again.');
-                alert("Make sure to allow microphone access!");
+                logChat('System', 'Connection failed. Try Safari!');
+                alert("Microphone access is required for BrewBot.");
             }
         };
 
-        // --- Staff Portal Logic ---
+        // Staff Logic
         const modal = document.getElementById('staff-modal');
         document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
         const closeModal = () => modal.style.display = 'none';
@@ -220,7 +211,7 @@
         async function staffLogin() {
             const email = document.getElementById('staff-email').value.trim().toLowerCase();
             const password = document.getElementById('staff-password').value;
-            const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
             if (error) alert(error.message);
             else renderPortal(data.user);
         }
@@ -231,31 +222,32 @@
                 <h3 style="margin-top:0">Hi, ${user.email.split('@')[0]}</h3>
                 <button class="primary-btn" style="background:#28a745; margin-bottom:8px;" onclick="staffAction('CLOCK_IN')">Clock In</button>
                 <button class="primary-btn" style="background:#dc3545; margin-bottom:8px;" onclick="staffAction('CLOCK_OUT')">Clock Out</button>
-                <button class="primary-btn" style="background:var(--hub-brown); color:var(--hub-tan)" onclick="alert('Scanner Active')">Loyalty Scan</button>
                 ${isManager ? `<button class="primary-btn" style="background:#f39c12; color:#3c2f2f; margin-top:8px;" onclick="window.location.href='manager.html'">Manager Dash</button>` : ''}
                 <button style="background:none; border:none; margin-top:15px; cursor:pointer; color:#999; text-decoration:underline" onclick="location.reload()">Logout</button>
             `;
         }
 
         async function staffAction(type) {
-            const { data: { user } } = await _supabase.auth.getUser();
-            await _supabase.from('time_logs').insert([{ employee_email: user.email, action_type: type }]);
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            await supabaseClient.from('time_logs').insert([{ employee_email: user.email, action_type: type }]);
             alert(`✅ ${type} Recorded`);
         }
 
         // Waitlist Form
         document.getElementById('waitlist-form').onsubmit = async function(e) {
             e.preventDefault();
-            const email = document.getElementById('email').value;
+            const emailValue = document.getElementById('email').value;
             confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-            await _supabase.from('waitlist').insert([{ email }]);
-            document.getElementById('tagline').innerText = "Welcome to the hub! Check your email.";
-            this.style.display = 'none';
+            
+            const { error } = await supabaseClient.from('waitlist').insert([{ email: emailValue }]);
+            
+            if (error) {
+                alert("Error: " + error.message);
+            } else {
+                document.getElementById('tagline').innerText = "Welcome! Check your email.";
+                this.style.display = 'none';
+            }
         };
-
-        // --- Debug Logger ---
-        console.log("BrewHub App Initialized");
-        if(!document.getElementById('voice-btn')) console.error("UI ERROR: Voice button not found!");
     </script>
 </body>
 </html>
