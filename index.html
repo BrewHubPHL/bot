@@ -19,7 +19,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="shortcut icon" href="favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
-    <link rel="manifest" href="site.webmanifest" />
+    <link rel="manifest" href="public/site.webmanifest" />
     
     <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/convai@latest/dist/index.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -33,26 +33,60 @@
             --glass: rgba(255, 255, 255, 0.95);
         }
 
+        /* 1. LAYOUT FIX: Allow full page scrolling for mobile visibility */
         html, body { 
-            height: 100%; overflow: hidden; margin: 0;
+            height: 100%; margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%);
             color: var(--hub-brown);
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
         }
-        body { display: flex; flex-direction: column; }
         
         header { 
-            background: var(--hub-brown); color: #fff; padding: 40px 20px 20px; 
-            text-align: center; border-bottom: 5px solid var(--hub-tan); position: relative; flex-shrink: 0;
+            background: var(--hub-brown); 
+            color: #fff; 
+            padding: 10px 15px; /* Shrunk from 40px/20px */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-bottom: 3px solid var(--hub-tan); 
+            position: relative; 
+            flex-shrink: 0;
+            min-height: 60px;
         }
-        #logo { max-width: 200px; width: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
+        #logo { 
+            max-width: 130px; /* Shrunk from 200px */
+            width: 100%; 
+            filter: drop-shadow(0 2px 5px rgba(0,0,0,0.2)); 
+        }
 
-        main { flex: 1; display: flex; justify-content: center; align-items: center; padding: 10px; }
+        main { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column;
+            align-items: center; 
+            padding: 20px 15px;
+            overflow-y: auto; 
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* 2. HERO CARD FIX: Responsive height that doesn't hide content */
         .hero-card { 
-            background: var(--glass); padding: 20px; border-radius: 25px; 
-            box-shadow: 0 10px 30px rgba(60,47,47,0.08); max-width: 380px; width: 100%; 
-            text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px);
-            display: flex; flex-direction: column; gap: 10px;
+            background: var(--glass); 
+            padding: 30px 20px; 
+            border-radius: 25px; 
+            box-shadow: 0 10px 30px rgba(60,47,47,0.08); 
+            max-width: 380px; 
+            width: 100%; 
+            text-align: center; 
+            border: 1px solid rgba(212,181,158,0.3); 
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            box-sizing: border-box;
         }
 
         #splash-overlay {
@@ -61,33 +95,73 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             transition: opacity 0.5s ease;
         }
+
+        /* 3. CHAT AREA FIX: Explicit sizing to prevent disappearing */
+        #chat-section { 
+            display: flex; 
+            flex-direction: column;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .chat-display { 
+            height: 160px; 
+            min-height: 160px;
+            overflow-y: auto; 
+            text-align: left; 
+            font-size: 0.85em; 
+            padding: 12px; 
+            background: #fff; 
+            border-radius: 12px; 
+            border: 1px solid #eee;
+            margin-bottom: 12px;
+        }
+
+        .chat-input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+        .chat-input-row input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; }
+        
+        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 14px; border-radius: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .primary-btn:active { transform: scale(0.98); }
+        .voice-btn { background: var(--hub-tan); color: var(--hub-brown); }
+
+        #employee-login-tab {
+            position: absolute; 
+            right: 10px; 
+            background: var(--hub-tan);
+            color: var(--hub-brown); 
+            border: none; 
+            border-radius: 4px; 
+            padding: 4px 8px;
+            font-weight: bold; 
+            cursor: pointer; 
+            font-size: 0.65em; /* Smaller font for a tighter button */
+        }
+
+        /* 4. FOOTER FIX: Ensure links are always visible and tapable */
+        footer { 
+            padding: 30px 10px; 
+            font-size: 11px; 
+            color: #7a6a6a; 
+            text-align: center; 
+            flex-shrink: 0;
+        }
+        .footer-links { margin-top: 10px; }
+        .footer-links a { 
+            color: var(--hub-brown); 
+            text-decoration: none; 
+            font-weight: bold; 
+            padding: 12px; 
+            display: inline-block; 
+        }
+
         .spinner { margin-top: 20px; width: 25px; height: 25px; border: 3px solid var(--hub-tan); border-top: 3px solid white; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        #chat-section { display: block; width: 100%; margin-top: 5px; }
-        .chat-display { 
-            height: 90px; overflow-y: auto; text-align: left; 
-            font-size: 0.8em; margin-bottom: 8px; padding: 10px; 
-            background: #fff; border-radius: 12px; border: 1px solid #eee;
-        }
-        .chat-input-row { display: flex; gap: 8px; margin-bottom: 8px; }
-        .chat-input-row input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; }
-        
-        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 14px; border-radius: 12px; font-weight: bold; cursor: pointer; }
-        .voice-btn { background: var(--hub-tan); color: var(--hub-brown); }
-        .voice-btn.active { background: #e74c3c; color: white; }
-
-        #employee-login-tab {
-            position: absolute; top: 15px; right: 15px; background: var(--hub-tan);
-            color: var(--hub-brown); border: none; border-radius: 6px; padding: 6px 12px;
-            font-weight: bold; cursor: pointer; font-size: 0.7em;
-        }
-
         .modal { display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(60,47,47,0.9); align-items: center; justify-content: center; }
         .modal-content { background: white; padding: 25px; border-radius: 20px; width: 85%; max-width: 320px; text-align: center; }
-
-        footer { padding: 10px; font-size: 10px; color: #999; text-align: center; flex-shrink: 0; }
-        .footer-links a { color: #7a6a6a; text-decoration: none; margin: 0 8px; }
+        
+        .user-message { margin-bottom: 8px; color: var(--hub-brown); }
+        .ai-message { margin-bottom: 8px; color: #2c3e50; font-style: italic; }
     </style>
 </head>
 <body>
@@ -104,25 +178,33 @@
 
     <main>
         <section class="hero-card">
-            <p id="tagline" style="margin:0; font-size: 0.85em;">Join the Point Breeze neighborhub.</p>
+            <p id="tagline" style="margin:0; font-size: 1em; font-weight: 500;">Join the Point Breeze neighborhub.</p>
             
             <form id="waitlist-form">
-                <input type="email" id="email" placeholder="Email for alerts" required style="width:100%; padding:12px; border:2px solid #eee; border-radius:10px; margin-bottom:8px; box-sizing:border-box; outline:none;">
+                <input type="email" id="email" placeholder="Email for alerts" required style="width:100%; padding:12px; border:2px solid #eee; border-radius:10px; margin-bottom:10px; box-sizing:border-box; outline:none;">
                 <button type="submit" class="primary-btn">JOIN WAITLIST</button>
             </form>
 
             <div id="chat-section">
                 <div id="chat-box" class="chat-display">
-                    <b>BrewBot:</b> Talk or type to ask about parcels & coffee!
+                    <b>BrewBot:</b> Ask me anything about BrewHub!
                 </div>
                 <div class="chat-input-row">
-                    <input type="text" id="user-text" placeholder="Ask BrewBot...">
-                    <button id="send-text" style="background:var(--hub-brown); color:white; border:none; border-radius:8px; padding:0 12px;">↑</button>
+                    <input type="text" id="user-text" placeholder="Type a message...">
+                    <button id="send-btn" style="background:var(--hub-brown); color:white; border:none; border-radius:8px; padding:0 15px; cursor:pointer;">↑</button>
                 </div>
-                <button id="voice-btn" class="primary-btn voice-btn">START VOICE CHAT</button>
+                <button id="voice-btn" class="primary-btn voice-btn">🎤 START VOICE CHAT</button>
             </div>
-        </section>
+            </section>
     </main>
+
+    <footer>
+        South Philadelphia • Point Breeze
+        <div class="footer-links">
+            <a href="https://instagram.com/brewhubphl" target="_blank">Instagram</a> • 
+            <a href="https://facebook.com/thebrewhubphl" target="_blank">Facebook</a>
+        </div>
+    </footer>
 
     <div id="staff-modal" class="modal">
         <div class="modal-content" id="modal-body">
@@ -134,17 +216,19 @@
         </div>
     </div>
 
-    <footer>
-        South Philadelphia • Point Breeze
-        <div class="footer-links">
-            <a href="https://instagram.com/brewhubphl" target="_blank">Instagram</a> • <a href="https://facebook.com/thebrewhubphl" target="_blank">Facebook</a>
-        </div>
-    </footer>
-
     <script>
-        // Use a consistent client name
-        const supabaseClient = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
+        // Initialize Supabase
+        const supabaseClient = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN', {
+            auth: {
+                persistSession: true,
+                autoRefreshToken: true,
+                detectSessionInUrl: true,
+                storageKey: 'brewhub-auth-key',
+                flowType: 'pkce'
+            }
+        });
 
+        // Splash screen cleanup
         window.addEventListener('load', () => {
             setTimeout(() => {
                 const splash = document.getElementById('splash-overlay');
@@ -155,55 +239,86 @@
             }, 1200); 
         });
 
-        let conversation = null;
-        const voiceBtn = document.getElementById('voice-btn');
-        const chatBox = document.getElementById('chat-box');
+        // TEXT CHAT LOGIC
+        document.getElementById('send-btn').addEventListener('click', async () => {
+            const input = document.getElementById('user-text');
+            const message = input.value.trim();
+            const chatBox = document.getElementById('chat-box');
 
-        function logChat(role, msg) {
-            const div = document.createElement('div');
-            div.innerHTML = `<b>${role}:</b> ${msg}`;
-            chatBox.appendChild(div);
+            if (!message) return;
+
+            // Show User Message
+            const userDiv = document.createElement('div');
+            userDiv.className = 'user-message';
+            userDiv.innerHTML = `<b>You:</b> ${message}`;
+            chatBox.appendChild(userDiv);
+            input.value = '';
             chatBox.scrollTop = chatBox.scrollHeight;
-        }
-
-        voiceBtn.onclick = async () => {
-            if (conversation) {
-                await conversation.endSession();
-                conversation = null;
-                return;
-            }
 
             try {
-                logChat('System', 'Connecting to BrewBot...');
-                const resp = await fetch('/api/get-voice-session');
-                if (!resp.ok) throw new Error('Network response was not ok');
+                // Determine if we need the full URL for local testing
+                const baseUrl = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') 
+                                ? 'https://brewhubphl.netlify.app' 
+                                : '';
 
-                const { signedUrl } = await resp.json();
-
-                conversation = await ElevenLabsConvAI.Conversation.startSession({
-                    signedUrl: signedUrl,
-                    onConnect: () => {
-                        voiceBtn.innerText = "END VOICE SESSION";
-                        voiceBtn.classList.add('active');
-                        logChat('System', 'BrewBot is active.');
-                    },
-                    onDisconnect: () => {
-                        voiceBtn.innerText = "START VOICE CHAT";
-                        voiceBtn.classList.remove('active');
-                        conversation = null;
-                    },
-                    onMessage: (msg) => {
-                        if (msg.source === 'ai') logChat('BrewBot', msg.message);
-                    }
+                const response = await fetch(`${baseUrl}/.netlify/functions/get-voice-session`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: message, type: 'text' })
                 });
+
+                if (!response.ok) throw new Error('API unreachable');
+
+                const data = await response.json();
+                
+                // Show AI Message
+                const aiDiv = document.createElement('div');
+                aiDiv.className = 'ai-message';
+                aiDiv.innerHTML = `<b>BrewBot:</b> ${data.choices?.[0]?.message?.content || "I'm processing that. One moment!"}`;
+                chatBox.appendChild(aiDiv);
+                chatBox.scrollTop = chatBox.scrollHeight;
+
             } catch (err) {
-                console.error(err);
-                logChat('System', 'Connection failed. Try Safari!');
-                alert("Microphone access is required for BrewBot.");
+                console.error("Chat Error:", err);
+                const errDiv = document.createElement('div');
+                errDiv.style.color = 'red';
+                errDiv.innerHTML = `<b>System:</b> Busy. Please check your connection.`;
+                chatBox.appendChild(errDiv);
+            }
+        });
+
+        // VOICE CHAT LOGIC (Microphone trigger)
+        document.getElementById('voice-btn').addEventListener('click', async () => {
+            const voiceBtn = document.getElementById('voice-btn');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                voiceBtn.style.backgroundColor = '#e74c3c';
+                voiceBtn.innerText = "🎤 LISTENING...";
+                
+                // Trigger your OpenAI/Realtime code here
+                
+            } catch (err) {
+                alert("Please allow microphone access to use voice chat.");
+            }
+        });
+
+        // WAITLIST FORM LOGIC
+        document.getElementById('waitlist-form').onsubmit = async function(e) {
+            e.preventDefault();
+            const emailValue = document.getElementById('email').value;
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+            
+            const { error } = await supabaseClient.from('waitlist').insert([{ email: emailValue }]);
+            
+            if (error) {
+                alert("Error: " + error.message);
+            } else {
+                document.getElementById('tagline').innerText = "Welcome to the Hub! Check your email.";
+                this.style.display = 'none';
             }
         };
 
-        // Staff Logic
+        // STAFF PORTAL LOGIC
         const modal = document.getElementById('staff-modal');
         document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
         const closeModal = () => modal.style.display = 'none';
@@ -232,22 +347,6 @@
             await supabaseClient.from('time_logs').insert([{ employee_email: user.email, action_type: type }]);
             alert(`✅ ${type} Recorded`);
         }
-
-        // Waitlist Form
-        document.getElementById('waitlist-form').onsubmit = async function(e) {
-            e.preventDefault();
-            const emailValue = document.getElementById('email').value;
-            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-            
-            const { error } = await supabaseClient.from('waitlist').insert([{ email: emailValue }]);
-            
-            if (error) {
-                alert("Error: " + error.message);
-            } else {
-                document.getElementById('tagline').innerText = "Welcome! Check your email.";
-                this.style.display = 'none';
-            }
-        };
     </script>
 </body>
 </html>
