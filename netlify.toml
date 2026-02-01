@@ -1,5 +1,4 @@
 [build]
-  command = "echo 'building functions'"
   publish = "public"
   functions = "netlify/functions"
 
