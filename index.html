@@ -201,7 +201,7 @@
 
             try {
                 // Text chat via ElevenLabs proxy
-                const response = await fetch('/.netlify/functions/elevenlabs-chat', {
+                const response = await fetch('/api/elevenlabs-chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message })
