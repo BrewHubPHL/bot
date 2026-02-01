@@ -38,6 +38,8 @@ exports.handler = async (event) => {
     });
 
     const raw = await response.text();
+    console.log('ElevenLabs status:', response.status);
+    console.log('ElevenLabs raw response:', raw);
     if (!response.ok) {
       return { statusCode: response.status, headers, body: JSON.stringify({ error: raw || response.statusText }) };
     }
