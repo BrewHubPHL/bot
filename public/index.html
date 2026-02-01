@@ -11,18 +11,17 @@
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>BrewHub PHL | Cafe & Parcel Hub</title>
+    <title>BrewHub PHL | Hub</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="shortcut icon" href="favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+    <link rel="manifest" href="site.webmanifest" />
     
-    <link rel="apple-touch-startup-image" href="/apple-touch-icon.png">
-
+    <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/convai@latest/dist/index.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
@@ -34,10 +33,10 @@
             --glass: rgba(255, 255, 255, 0.95);
         }
 
-        /* Zero-Scroll Layout */
+        /* Prevent Scroll & Force Native App Feel */
         html, body { 
             height: 100%; overflow: hidden; margin: 0;
-            font-family: 'Segoe UI', sans-serif; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%);
             color: var(--hub-brown);
         }
@@ -47,119 +46,169 @@
             background: var(--hub-brown); color: #fff; padding: 40px 20px 20px; 
             text-align: center; border-bottom: 5px solid var(--hub-tan); position: relative; flex-shrink: 0;
         }
-        #logo { max-width: 240px; width: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
+        #logo { max-width: 200px; width: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
 
         main { flex: 1; display: flex; justify-content: center; align-items: center; padding: 10px; }
         .hero-card { 
-            background: var(--glass); padding: 30px; border-radius: 25px; 
-            box-shadow: 0 10px 30px rgba(60,47,47,0.06); max-width: 400px; width: 100%; 
+            background: var(--glass); padding: 20px; border-radius: 25px; 
+            box-shadow: 0 10px 30px rgba(60,47,47,0.08); max-width: 380px; width: 100%; 
             text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px);
+            display: flex; flex-direction: column; gap: 10px;
         }
 
-        /* Splash Overlay */
+        /* Splash Screen */
         #splash-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             background: var(--hub-brown); z-index: 10000; 
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             transition: opacity 0.5s ease;
         }
-        .spinner {
-            margin-top: 20px; width: 30px; height: 30px; 
-            border: 3px solid var(--hub-tan); border-top: 3px solid white; 
-            border-radius: 50%; animation: spin 1s linear infinite;
-        }
+        .spinner { margin-top: 20px; width: 25px; height: 25px; border: 3px solid var(--hub-tan); border-top: 3px solid white; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* ElevenLabs Widget Nudge */
-        elevenlabs-convai { 
-            position: fixed; top: 80px; right: 20px; z-index: 3000; 
-            transform: scale(0.85); transform-origin: top right;
+        /* Chat UI */
+        #chat-section { display: block; width: 100%; margin-top: 5px; }
+        .chat-display { 
+            height: 90px; overflow-y: auto; text-align: left; 
+            font-size: 0.8em; margin-bottom: 8px; padding: 10px; 
+            background: #fff; border-radius: 12px; border: 1px solid #eee;
         }
+        .chat-input-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        .chat-input-row input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; }
+        
+        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 14px; border-radius: 12px; font-weight: bold; cursor: pointer; }
+        .voice-btn { background: var(--hub-tan); color: var(--hub-brown); }
+        .voice-btn.active { background: #e74c3c; color: white; }
 
         #employee-login-tab {
             position: absolute; top: 15px; right: 15px; background: var(--hub-tan);
-            color: var(--hub-brown); border: none; border-radius: 6px; padding: 6px 14px;
-            font-weight: bold; cursor: pointer; font-size: 0.85em; z-index: 100;
+            color: var(--hub-brown); border: none; border-radius: 6px; padding: 6px 12px;
+            font-weight: bold; cursor: pointer; font-size: 0.7em;
         }
 
-        .modal {
-            display: none; position: fixed; z-index: 4000; left: 0; top: 0; 
-            width: 100%; height: 100%; background: rgba(60,47,47,0.9);
-            align-items: center; justify-content: center;
-        }
-        .modal-content { background: white; padding: 30px; border-radius: 20px; width: 320px; text-align: center; }
-        .modal input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
-        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 15px; border-radius: 12px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .modal { display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(60,47,47,0.9); align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 25px; border-radius: 20px; width: 85%; max-width: 320px; text-align: center; }
 
-        footer { padding: 15px; font-size: 11px; color: #999; text-align: center; flex-shrink: 0; }
+        footer { padding: 10px; font-size: 10px; color: #999; text-align: center; flex-shrink: 0; }
         .footer-links a { color: #7a6a6a; text-decoration: none; margin: 0 8px; }
 
-        @media (max-width: 600px) {
-            header { padding: 30px 10px 15px; }
-            #logo { width: 45vw; }
-            elevenlabs-convai { 
-                top: auto !important; bottom: 50px !important; right: 15px !important;
-                transform: scale(0.65) !important; transform-origin: bottom right !important; 
-            }
-        }
+        @media (max-width: 600px) { header { padding: 35px 10px 15px; } #logo { width: 40vw; } }
     </style>
 </head>
 <body>
 
     <div id="splash-overlay">
-        <img src="logo.png" alt="BrewHub" style="width:180px;">
+        <img src="logo.png" alt="BrewHub" style="width:160px;">
         <div class="spinner"></div>
     </div>
 
     <header>
         <img src="logo.png" alt="BrewHub PHL" id="logo">
-        <p style="margin: 5px 0 0; font-size: 0.7em; letter-spacing: 1px;">COFFEE • PARCELS • COMMUNITY</p>
         <button id="employee-login-tab">Staff</button>
-        <elevenlabs-convai agent-id="agent_8101kgb3bznyf1japgwxsfv43h5p"></elevenlabs-convai>
     </header>
 
     <main>
         <section class="hero-card">
-            <p style="color: #7a6a6a; margin: 0 0 20px; line-height: 1.4; font-size: 0.95em;">Join the neighborhub for opening alerts and parcel management in Point Breeze.</p>
+            <p id="tagline" style="margin:0; font-size: 0.85em;">Join the Point Breeze neighborhub.</p>
+            
             <form id="waitlist-form">
-                <input type="email" id="email" placeholder="Email address" required style="width:100%; padding:15px; border:2px solid #eee; border-radius:12px; margin-bottom:12px; box-sizing:border-box;">
-                <button type="submit" class="primary-btn">JOIN THE WAITLIST</button>
+                <input type="email" id="email" placeholder="Email for alerts" required style="width:100%; padding:12px; border:2px solid #eee; border-radius:10px; margin-bottom:8px; box-sizing:border-box; outline:none;">
+                <button type="submit" class="primary-btn">JOIN WAITLIST</button>
             </form>
-            <p id="form-msg" style="display:none; color: #4a7c44; margin-top: 10px; font-weight: bold;">Brewing your welcome...</p>
+
+            <div id="chat-section">
+                <div id="chat-box" class="chat-display">
+                    <b>BrewBot:</b> Talk or type to ask about parcels & coffee!
+                </div>
+                <div class="chat-input-row">
+                    <input type="text" id="user-text" placeholder="Ask BrewBot...">
+                    <button id="send-text" style="background:var(--hub-brown); color:white; border:none; border-radius:8px; padding:0 12px;">↑</button>
+                </div>
+                <button id="voice-btn" class="primary-btn voice-btn">START VOICE CHAT</button>
+            </div>
         </section>
     </main>
 
     <div id="staff-modal" class="modal">
         <div class="modal-content" id="modal-body">
-            <h2 style="margin-top:0">Staff Portal</h2>
-            <input type="email" id="staff-email" placeholder="Email">
-            <input type="password" id="staff-password" placeholder="Password">
+            <h3 style="margin-top:0">Staff Portal</h3>
+            <input type="email" id="staff-email" placeholder="Email" style="width:100%; padding:10px; margin-bottom:8px; border:1px solid #ddd; border-radius:8px;">
+            <input type="password" id="staff-password" placeholder="Password" style="width:100%; padding:10px; margin-bottom:8px; border:1px solid #ddd; border-radius:8px;">
             <button class="primary-btn" onclick="staffLogin()">Sign In</button>
-            <button style="background:none; border:none; margin-top:15px; cursor:pointer; color:#999" onclick="closeModal()">Cancel</button>
+            <button style="background:none; border:none; margin-top:12px; cursor:pointer; color:#999" onclick="closeModal()">Cancel</button>
         </div>
     </div>
 
     <footer>
         South Philadelphia • Point Breeze
         <div class="footer-links">
-            <a href="https://instagram.com/brewhubphl" target="_blank">Instagram</a> • 
-            <a href="https://facebook.com/thebrewhubphl" target="_blank">Facebook</a>
+            <a href="https://instagram.com/brewhubphl" target="_blank">Instagram</a> • <a href="https://facebook.com/thebrewhubphl" target="_blank">Facebook</a>
         </div>
     </footer>
 
-    <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
     <script>
         const _supabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
 
-        // Splash screen dismissal
+        // Splash dismissal
         window.addEventListener('load', () => {
             setTimeout(() => {
                 const splash = document.getElementById('splash-overlay');
-                splash.style.opacity = '0';
-                setTimeout(() => splash.style.display = 'none', 500);
+                if(splash) {
+                    splash.style.opacity = '0';
+                    setTimeout(() => splash.style.display = 'none', 500);
+                }
             }, 1200); 
         });
-        
+
+        // --- ElevenLabs Client Logic ---
+        let conversation = null;
+        const voiceBtn = document.getElementById('voice-btn');
+        const chatBox = document.getElementById('chat-box');
+
+        function logChat(role, msg) {
+            const div = document.createElement('div');
+            div.innerHTML = `<b>${role}:</b> ${msg}`;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        voiceBtn.onclick = async () => {
+            if (conversation) {
+                await conversation.endSession();
+                conversation = null;
+                return;
+            }
+
+            try {
+                logChat('System', 'Connecting...');
+                // IMPORTANT: This calls your Netlify function bridge
+                const resp = await fetch('/.netlify/functions/get-voice-session');
+                const { signedUrl } = await resp.json();
+
+                // Note: The library usually exposes ElevenLabsConvAI or similar global
+                conversation = await ElevenLabsConvAI.Conversation.startSession({
+                    signedUrl: signedUrl,
+                    onConnect: () => {
+                        voiceBtn.innerText = "END VOICE SESSION";
+                        voiceBtn.classList.add('active');
+                        logChat('System', 'BrewBot is active.');
+                    },
+                    onDisconnect: () => {
+                        voiceBtn.innerText = "START VOICE CHAT";
+                        voiceBtn.classList.remove('active');
+                        conversation = null;
+                    },
+                    onMessage: (msg) => {
+                        if (msg.source === 'ai') logChat('BrewBot', msg.message);
+                    }
+                });
+            } catch (err) {
+                console.error(err);
+                alert("Check microphone permissions or Netlify Function status.");
+            }
+        };
+
+        // --- Staff Portal Logic ---
         const modal = document.getElementById('staff-modal');
         document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
         const closeModal = () => modal.style.display = 'none';
@@ -175,11 +224,11 @@
         function renderPortal(user) {
             const isManager = user.email === 'thomas@brewhubphl.com';
             document.getElementById('modal-body').innerHTML = `
-                <h2 style="margin-top:0">Hi, ${user.email.split('@')[0]}</h2>
-                <button class="primary-btn" style="background:#28a745" onclick="staffAction('CLOCK_IN')">Clock In</button>
-                <button class="primary-btn" style="background:#dc3545" onclick="staffAction('CLOCK_OUT')">Clock Out</button>
-                <button class="primary-btn" style="background:#3c2f2f; color:#d4b59e" onclick="alert('Scanner Active')">Scan Loyalty</button>
-                ${isManager ? `<button class="primary-btn" style="background:#f39c12; color:#3c2f2f" onclick="window.location.href='manager.html'">Manager Dash</button>` : ''}
+                <h3 style="margin-top:0">Hi, ${user.email.split('@')[0]}</h3>
+                <button class="primary-btn" style="background:#28a745; margin-bottom:8px;" onclick="staffAction('CLOCK_IN')">Clock In</button>
+                <button class="primary-btn" style="background:#dc3545; margin-bottom:8px;" onclick="staffAction('CLOCK_OUT')">Clock Out</button>
+                <button class="primary-btn" style="background:var(--hub-brown); color:var(--hub-tan)" onclick="alert('Scanner Active')">Loyalty Scan</button>
+                ${isManager ? `<button class="primary-btn" style="background:#f39c12; color:#3c2f2f; margin-top:8px;" onclick="window.location.href='manager.html'">Manager Dash</button>` : ''}
                 <button style="background:none; border:none; margin-top:15px; cursor:pointer; color:#999; text-decoration:underline" onclick="location.reload()">Logout</button>
             `;
         }
@@ -190,13 +239,19 @@
             alert(`✅ ${type} Recorded`);
         }
 
+        // Waitlist Form
         document.getElementById('waitlist-form').onsubmit = async function(e) {
             e.preventDefault();
             const email = document.getElementById('email').value;
             confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
             await _supabase.from('waitlist').insert([{ email }]);
-            document.getElementById('form-msg').style.display = 'block';
+            document.getElementById('tagline').innerText = "Welcome to the hub! Check your email.";
+            this.style.display = 'none';
         };
+
+        // --- Debug Logger ---
+        console.log("BrewHub App Initialized");
+        if(!document.getElementById('voice-btn')) console.error("UI ERROR: Voice button not found!");
     </script>
 </body>
 </html>

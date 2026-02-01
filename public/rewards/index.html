@@ -1,115 +1,255 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-0TYLTJRWT1"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-0TYLTJRWT1');
+    </script>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BrewHub Rewards</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BrewHub PHL | Hub</title>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    
+    <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/convai@latest/dist/index.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.0/dist/JsBarcode.all.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
     <style>
-        :root { --coffee: #4b3621; --cream: #fdfaf6; --gold: #d4af37; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--cream); text-align: center; margin: 0; padding: 20px; }
-        .container { background: var(--cream); max-width: 380px; margin: auto; border: 2px solid var(--coffee); padding: 0; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); overflow: hidden; }
-        .card-header { background: var(--coffee); color: var(--gold); padding: 20px; text-transform: uppercase; letter-spacing: 2px; }
-        .card-body { padding: 20px; }
-        .tabs { display: flex; margin-bottom: 20px; border-bottom: 2px solid #eee; }
-        .tab { flex: 1; padding: 10px; cursor: pointer; color: #888; font-weight: bold; }
-        .tab.active { color: var(--coffee); border-bottom: 3px solid var(--coffee); }
-        input { width: 90%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
-        button { width: 95%; background: var(--coffee); color: white; padding: 15px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-        #cardView { display: none; }
-        svg { width: 100%; margin: 20px 0; }
-        #barcodeCanvas { background: white; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
-        #qrcode { width: 200px; height: 200px; margin: 10px auto; padding: 10px; background: #fff; border-radius: 10px; border: 1px solid #ddd; box-sizing: border-box; }
+        :root { 
+            --hub-brown: #3c2f2f; 
+            --hub-tan: #d4b59e; 
+            --hub-light: #f8f4f0; 
+            --glass: rgba(255, 255, 255, 0.95);
+        }
+
+        /* Prevent Scroll & Force Native App Feel */
+        html, body { 
+            height: 100%; overflow: hidden; margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%);
+            color: var(--hub-brown);
+            -webkit-tap-highlight-color: transparent;
+        }
+        body { display: flex; flex-direction: column; }
+        
+        header { 
+            background: var(--hub-brown); color: #fff; padding: 40px 20px 20px; 
+            text-align: center; border-bottom: 5px solid var(--hub-tan); position: relative; flex-shrink: 0;
+        }
+        #logo { max-width: 220px; width: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
+
+        main { flex: 1; display: flex; justify-content: center; align-items: center; padding: 10px; }
+        .hero-card { 
+            background: var(--glass); padding: 25px; border-radius: 25px; 
+            box-shadow: 0 10px 30px rgba(60,47,47,0.08); max-width: 400px; width: 100%; 
+            text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px);
+        }
+
+        /* Splash Screen */
+        #splash-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: var(--hub-brown); z-index: 10000; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: opacity 0.5s ease;
+        }
+        .spinner {
+            margin-top: 20px; width: 30px; height: 30px; 
+            border: 3px solid var(--hub-tan); border-top: 3px solid white; 
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Chat UI */
+        .chat-display { 
+            height: 100px; overflow-y: auto; text-align: left; 
+            font-size: 0.85em; margin: 15px 0 10px; padding: 10px; 
+            background: #fff; border-radius: 12px; border: 1px solid #eee;
+        }
+        .chat-input-row { display: flex; gap: 8px; margin-bottom: 10px; }
+        .chat-input-row input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 10px; outline: none; }
+        
+        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 15px; border-radius: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .voice-btn { background: var(--hub-tan); color: var(--hub-brown); }
+        .voice-btn.active { background: #e74c3c; color: white; }
+
+        /* Sound Wave Animation */
+        .wave { display: inline-block; width: 3px; height: 15px; background: white; margin: 0 1px; animation: bounce 0.5s infinite alternate; display: none; }
+        @keyframes bounce { from { height: 5px; } to { height: 20px; } }
+
+        #employee-login-tab {
+            position: absolute; top: 15px; right: 15px; background: var(--hub-tan);
+            color: var(--hub-brown); border: none; border-radius: 6px; padding: 6px 12px;
+            font-weight: bold; cursor: pointer; font-size: 0.75em;
+        }
+
+        .modal { display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(60,47,47,0.9); align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 30px; border-radius: 20px; width: 85%; max-width: 320px; text-align: center; }
+
+        footer { padding: 15px; font-size: 11px; color: #999; text-align: center; flex-shrink: 0; }
+        .footer-links a { color: #7a6a6a; text-decoration: none; margin: 0 8px; }
+
+        @media (max-width: 600px) { header { padding: 35px 10px 15px; } #logo { width: 45vw; } }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="card-header">☕ BrewHub Rewards</div>
-    <div class="card-body">
-        <div id="authBox">
-        <div class="tabs">
-            <div id="loginTab" class="tab active" onclick="switchTab('login')">LOGIN</div>
-            <div id="joinTab" class="tab" onclick="switchTab('join')">JOIN</div>
-        </div>
+    <div id="splash-overlay">
+        <img src="logo.png" style="width:180px;">
+        <div class="spinner"></div>
+    </div>
 
-        <div id="loginForm">
-            <input type="email" id="loginEmail" placeholder="Enter your email">
-            <button onclick="handleLogin()">View My Card</button>
-        </div>
+    <header>
+        <img src="logo.png" alt="BrewHub PHL" id="logo">
+        <button id="employee-login-tab">Staff</button>
+    </header>
 
-        <div id="joinForm" style="display:none;">
-            <input type="text" id="fname" placeholder="First Name">
-            <input type="text" id="lname" placeholder="Last Name">
-            <input type="email" id="joinEmail" placeholder="Email Address">
-            <button onclick="handleJoin()">Create My Account</button>
-        </div>
-        </div>
+    <main>
+        <section class="hero-card">
+            <p id="tagline" style="margin-top:0; font-size: 0.9em;">Join the Point Breeze neighborhub.</p>
+            
+            <form id="waitlist-form">
+                <input type="email" id="email" placeholder="Email for updates" required style="width:100%; padding:14px; border:2px solid #eee; border-radius:12px; margin-bottom:10px; box-sizing:border-box; outline:none;">
+                <button type="submit" class="primary-btn">JOIN WAITLIST</button>
+            </form>
 
-        <div id="cardView">
-        <h2>Welcome back, <span id="displayName"></span>!</h2>
-        <p style="font-size: 1.2em;">Points: <strong id="displayPoints"></strong></p>
-        <svg id="barcodeCanvas"></svg>
-        <div id="qrcode"></div>
-        <p style="color: #666; font-size: 0.9em;">Show this to your barista to earn points!</p>
-        <button onclick="location.reload()" style="background:#888;">Logout</button>
+            <div id="chat-section">
+                <div id="chat-box" class="chat-display">
+                    <b>BrewBot:</b> Use the button below to talk to me, or type a question!
+                </div>
+                <div class="chat-input-row">
+                    <input type="text" id="user-text" placeholder="Ask anything...">
+                    <button id="send-text" style="background:var(--hub-brown); color:white; border:none; border-radius:10px; padding:0 15px;">↑</button>
+                </div>
+                <button id="voice-btn" class="primary-btn voice-btn">START VOICE CHAT</button>
+            </div>
+        </section>
+    </main>
+
+    <div id="staff-modal" class="modal">
+        <div class="modal-content" id="modal-body">
+            <h2 style="margin-top:0">Staff Portal</h2>
+            <input type="email" id="staff-email" placeholder="Email" style="width:100%; padding:12px; margin-bottom:10px; border:1px solid #ddd; border-radius:8px;">
+            <input type="password" id="staff-password" placeholder="Password" style="width:100%; padding:12px; margin-bottom:10px; border:1px solid #ddd; border-radius:8px;">
+            <button class="primary-btn" onclick="staffLogin()">Sign In</button>
+            <button style="background:none; border:none; margin-top:15px; cursor:pointer; color:#999" onclick="closeModal()">Cancel</button>
         </div>
     </div>
-</div>
 
-<script>
-    const _supabase = supabase.createClient("https://rruionkpgswvncypweiv.supabase.co", "sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN");
+    <footer>
+        South Philadelphia • Point Breeze
+        <div class="footer-links">
+            <a href="https://instagram.com/brewhubphl" target="_blank">Instagram</a> • <a href="https://facebook.com/thebrewhubphl" target="_blank">Facebook</a>
+        </div>
+    </footer>
 
-    function switchTab(type) {
-        document.getElementById('loginForm').style.display = type === 'login' ? 'block' : 'none';
-        document.getElementById('joinForm').style.display = type === 'join' ? 'block' : 'none';
-        document.getElementById('loginTab').className = type === 'login' ? 'tab active' : 'tab';
-        document.getElementById('joinTab').className = type === 'join' ? 'tab active' : 'tab';
-    }
+    <script>
+        const _supabase = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
 
-    function showCard(user) {
-        document.getElementById('authBox').style.display = 'none';
-        document.getElementById('cardView').style.display = 'block';
-        document.getElementById('displayName').innerText = user.first_name;
-        document.getElementById('displayPoints').innerText = user.loyalty_points || 0;
-        JsBarcode("#barcodeCanvas", user.barcode_id, { format: "CODE128", displayValue: true });
-        const qrBox = document.getElementById('qrcode');
-        if (qrBox) {
-            qrBox.innerHTML = '';
-            new QRCode(qrBox, {
-                text: user.barcode_id || '',
-                width: 200,
-                height: 200,
-                colorDark: "#000000",
-                colorLight: "#ffffff",
-                correctLevel: QRCode.CorrectLevel.H
-            });
+        // Splash dismissal
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                const splash = document.getElementById('splash-overlay');
+                splash.style.opacity = '0';
+                setTimeout(() => splash.style.display = 'none', 500);
+            }, 1200); 
+        });
+
+        // --- ElevenLabs Client Logic ---
+        let conversation = null;
+        const voiceBtn = document.getElementById('voice-btn');
+        const chatBox = document.getElementById('chat-box');
+
+        function logChat(role, msg) {
+            const div = document.createElement('div');
+            div.innerHTML = `<b>${role}:</b> ${msg}`;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
         }
-    }
 
-    async function handleLogin() {
-        const email = document.getElementById('loginEmail').value;
-        const { data } = await _supabase.from('loyalty_customers').select('*').eq('email', email).single();
-        if (data) showCard(data); else alert("Email not found. Tap 'JOIN' to register!");
-    }
+        voiceBtn.onclick = async () => {
+            if (conversation) {
+                await conversation.endSession();
+                conversation = null;
+                return;
+            }
 
-    async function handleJoin() {
-        const email = document.getElementById('joinEmail').value;
-        const fname = document.getElementById('fname').value;
-        const lname = document.getElementById('lname').value;
-        
-        // Generate a random 5-digit barcode
-        const newBarcode = Math.floor(10000 + Math.random() * 90000).toString();
+            try {
+                // Fetch the secure ticket from your Netlify function
+                const resp = await fetch('/.netlify/functions/get-voice-session');
+                const { signedUrl } = await resp.json();
 
-        const { data, error } = await _supabase.from('loyalty_customers').insert([
-            { first_name: fname, last_name: lname, email: email, barcode_id: newBarcode, loyalty_points: 0 }
-        ]).select().single();
+                conversation = await ElevenLabsConvAI.Conversation.startSession({
+                    signedUrl: signedUrl,
+                    onConnect: () => {
+                        voiceBtn.innerText = "END VOICE SESSION";
+                        voiceBtn.classList.add('active');
+                        logChat('System', 'Connected to BrewBot.');
+                    },
+                    onDisconnect: () => {
+                        voiceBtn.innerText = "START VOICE CHAT";
+                        voiceBtn.classList.remove('active');
+                        conversation = null;
+                    },
+                    onMessage: (msg) => {
+                        if (msg.source === 'ai') logChat('BrewBot', msg.message);
+                    }
+                });
+            } catch (err) {
+                alert("Please check microphone permissions.");
+            }
+        };
 
-        if (data) showCard(data);
-        else if (error) alert("Error: " + error.message);
-    }
-</script>
+        // --- Staff Portal Logic ---
+        const modal = document.getElementById('staff-modal');
+        document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
+        const closeModal = () => modal.style.display = 'none';
+
+        async function staffLogin() {
+            const email = document.getElementById('staff-email').value.trim().toLowerCase();
+            const password = document.getElementById('staff-password').value;
+            const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+            if (error) alert(error.message);
+            else renderPortal(data.user);
+        }
+
+        function renderPortal(user) {
+            const isManager = user.email === 'thomas@brewhubphl.com';
+            document.getElementById('modal-body').innerHTML = `
+                <h3 style="margin-top:0">Hi, ${user.email.split('@')[0]}</h3>
+                <button class="primary-btn" style="background:#28a745; margin-bottom:10px;" onclick="staffAction('CLOCK_IN')">Clock In</button>
+                <button class="primary-btn" style="background:#dc3545; margin-bottom:10px;" onclick="staffAction('CLOCK_OUT')">Clock Out</button>
+                <button class="primary-btn" style="background:var(--hub-brown); color:var(--hub-tan)" onclick="alert('Scanner Launching...')">Loyalty Scan</button>
+                ${isManager ? `<button class="primary-btn" style="background:#f39c12; color:#3c2f2f; margin-top:10px;" onclick="window.location.href='manager.html'">Manager Dash</button>` : ''}
+                <button style="background:none; border:none; margin-top:20px; cursor:pointer; color:#999; text-decoration:underline" onclick="location.reload()">Logout</button>
+            `;
+        }
+
+        async function staffAction(type) {
+            const { data: { user } } = await _supabase.auth.getUser();
+            await _supabase.from('time_logs').insert([{ employee_email: user.email, action_type: type }]);
+            alert(`✅ ${type} Recorded`);
+        }
+
+        // Waitlist
+        document.getElementById('waitlist-form').onsubmit = async function(e) {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+            await _supabase.from('waitlist').insert([{ email }]);
+            document.getElementById('tagline').innerText = "Brewing your welcome... check your email soon!";
+            this.style.display = 'none';
+        };
+    </script>
 </body>
 </html>
