@@ -23,7 +23,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <link rel="manifest" href="public/site.webmanifest" />
     
-    <script src="https://elevenlabs.io/convai-widget/index.js" async type="text/javascript"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/client/dist/index.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
@@ -267,39 +267,30 @@
             }
         });
 
-        // 2. Voice Chat Handler (ElevenLabs Widget SDK)
-        let conversation;
-        document.getElementById('voice-btn').addEventListener('click', async () => {
-            const btn = document.getElementById('voice-btn');
+        // 2. Voice Chat Handler (ElevenLabs Client SDK)
+        async function startVoiceChat() {
             try {
-                if (conversation) {
-                    await conversation.endSession();
-                    conversation = null;
-                    return;
-                }
+                // 1. Get the Signed URL from your Netlify Function
+                const response = await fetch('/.netlify/functions/get-voice-session');
+                const data = await response.json();
 
-                // Initialize the voice session via signed URL
-                const resp = await fetch('/api/get-voice-session');
-                if (!resp.ok) throw new Error('Could not get session ticket');
+                if (!data.signedUrl) throw new Error("No signed URL received");
 
-                const { signedUrl } = await resp.json();
-
-                conversation = await window.ElevenLabsConvAI.Conversation.startSession({
-                    signedUrl,
-                    onMessage: (msg) => {
-                        const div = document.createElement('div');
-                        div.innerHTML = `<b>BrewBot:</b> ${msg.message}`;
-                        document.getElementById('chat-box').appendChild(div);
-                    },
-                    onStatusChange: (status) => {
-                        btn.innerText = (status.status === 'connected') ? "🎤 Listening..." : "🎤 Start Voice Chat";
-                        btn.style.backgroundColor = (status.status === 'connected') ? "#e74c3c" : "var(--hub-tan)";
-                    }
+                // 2. Start the conversation using the Client SDK
+                const conversation = await ElevenLabsClient.Conversation.startSession({
+                    signedUrl: data.signedUrl,
+                    onConnect: () => console.log("Connected to Elise!"),
+                    onDisconnect: () => console.log("Disconnected."),
+                    onMessage: (message) => console.log("Elise said:", message),
+                    onError: (error) => alert("Microphone Error: " + error)
                 });
-            } catch (err) {
-                alert("Microphone error. Please allow access.");
+
+            } catch (error) {
+                console.error("Failed to start session:", error);
             }
-        });
+        }
+
+        document.getElementById('voice-btn').addEventListener('click', startVoiceChat);
 
         // Waitlist
         document.getElementById('waitlist-form').onsubmit = async function(e) {
