@@ -2,111 +2,108 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Manager Dashboard | BrewHub PHL</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrewHub | Payroll</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 40px; background: #f8f4f0; color: #3c2f2f; }
-        h1 { border-bottom: 2px solid #d4b59e; padding-bottom: 10px; }
-        .card { background: white; padding: 20px; margin-top: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        button { padding: 10px 20px; cursor: pointer; background: #3c2f2f; color: white; border: none; border-radius: 5px; }
+        :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; }
+        body { font-family: -apple-system, sans-serif; background: var(--hub-light); color: var(--hub-brown); padding: 20px; }
+        .card { background: white; padding: 25px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); max-width: 1000px; margin: auto; }
+        h2 { border-bottom: 2px solid var(--hub-tan); padding-bottom: 10px; display: flex; justify-content: space-between; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { background: var(--hub-brown); color: white; padding: 12px; text-align: left; }
+        td { padding: 12px; border-bottom: 1px solid #eee; }
+        .pill { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; }
+        .btn-back { text-decoration: none; color: var(--hub-brown); font-weight: bold; font-size: 13px; }
     </style>
-    <script>
-        // --- SECURITY CHECK (BOUNCER) ---
-        const sb = supabase.createClient('https://rruionkpgswvncypweiv.supabase.co', 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN');
-
-        (async () => {
-            const { data: { user } } = await sb.auth.getUser();
-            
-            if (!user) {
-                alert("Access Denied: Please log in at the portal first.");
-                window.location.href = "index.html"; // Kick them out
-                return;
-            }
-
-            // Security Check: Specific Email
-            if (user.email !== 'thomas@brewhubphl.com') {
-                alert("Access Denied: You are not authorized.");
-                window.location.href = "index.html"; // Kick them out
-                return;
-            }
-            
-            // If we get here, they are safe. Load the dashboard.
-            document.getElementById('app').style.display = 'block';
-            document.getElementById('user-email').innerText = user.email;
-        })();
-    </script>
 </head>
-<body id="main-body">
-    <div id="app" style="display:none;">
-        <h1>Manager Dashboard</h1>
-        <p>Welcome, <span id="user-email"></span></p>
+<body>
+
+    <div class="card">
+        <a href="index.html" class="btn-back">← Back to Hub</a>
+        <h2>
+            Payroll Tally
+            <span id="grand-total" style="color: #28a745;">$0.00</span>
+        </h2>
         
-        <div class="card">
-            <h3>Payroll & Reporting</h3>
-            <p>Secure area for payroll management.</p>
-            <button id="payroll-btn">Run Payroll</button>
-            <div id="payroll-results" style="margin-top: 20px; font-family: monospace;"></div>
-        </div>
+        <div id="loader">Processing logs...</div>
+        
+        <table id="payroll-table" style="display:none;">
+            <thead>
+                <tr>
+                    <th>Staff</th>
+                    <th>Rate</th>
+                    <th>Hours</th>
+                    <th>Earned</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="payroll-list"></tbody>
+        </table>
+    </div>
 
     <script>
+        const supabaseClient = window.supabase.createClient(
+            'https://rruionkpgswvncypweiv.supabase.co', 
+            'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN',
+            { auth: { persistSession: true } }
+        );
+
         async function calculatePayroll() {
-            // Use 'sb' from the head script
-            // 1. Fetch both logs and profile rates
-            const { data: logs, error: logError } = await sb.from('time_logs').select('*').order('created_at', { ascending: true });
-            const { data: profiles, error: profileError } = await sb.from('employee_profiles').select('employee_email, pay_rate');
+            const list = document.getElementById('payroll-list');
+            let grandTotal = 0;
 
-            if (logError) return alert("Error fetching logs: " + logError.message);
-            if (profileError) console.warn("Error fetching profiles:", profileError.message);
+            try {
+                const [pRes, lRes] = await Promise.all([
+                    supabaseClient.from('employee_profiles').select('*'),
+                    supabaseClient.from('time_logs').select('*').order('created_at', { ascending: true })
+                ]);
 
-            // Create a quick lookup map for rates
-            const rateMap = {};
-            if (profiles) {
-                profiles.forEach(p => rateMap[p.employee_email] = p.pay_rate || 15.00);
-            }
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('payroll-table').style.display = 'table';
+                list.innerHTML = "";
 
-            let report = {};
+                pRes.data.forEach(emp => {
+                    let totalHours = 0;
+                    const logs = lRes.data.filter(l => l.employee_email === emp.email);
+                    
+                    // Calculation Logic: Pairing INs with OUTs
+                    let startTime = null;
+                    logs.forEach(log => {
+                        const type = log.action_type?.toLowerCase();
+                        if (type === 'in') {
+                            startTime = new Date(log.clock_in || log.created_at);
+                        } else if (type === 'out' && startTime) {
+                            const endTime = new Date(log.clock_out || log.created_at);
+                            totalHours += (endTime - startTime) / 3600000;
+                            startTime = null; // Reset pair
+                        }
+                    });
 
-            logs.forEach(log => {
-                const email = log.employee_email || 'Unknown';
-                if (!report[email]) {
-                    report[email] = { totalMs: 0, lastIn: null };
-                }
+                    const earned = totalHours * (emp.pay_rate || 0);
+                    grandTotal += earned;
 
-                if (log.action_type === 'CLOCK_IN') {
-                    report[email].lastIn = new Date(log.created_at);
-                } else if (log.action_type === 'CLOCK_OUT' && report[email].lastIn) {
-                    const duration = new Date(log.created_at) - report[email].lastIn;
-                    report[email].totalMs += duration;
-                    report[email].lastIn = null; // Reset for next shift
-                }
-            });
+                    const lastLog = logs[logs.length - 1];
+                    const status = lastLog?.action_type?.toUpperCase() || 'OFF';
+                    const color = status === 'IN' ? '#28a745' : '#dc3545';
 
-            // 2. Display results with $$$
-            let output = "<h3>Payroll Summary</h3><table border='1' style='width:100%; border-collapse: collapse; text-align: left;'>";
-            output += "<tr style='background:#ccc;'><th>Email</th><th>Hours</th><th>Rate</th><th>Total Pay</th><th>Status</th></tr>";
+                    list.innerHTML += `
+                        <tr>
+                            <td><strong>${emp.full_name || 'Staff'}</strong></td>
+                            <td>$${(emp.pay_rate || 0).toFixed(2)}</td>
+                            <td>${totalHours.toFixed(2)}</td>
+                            <td style="color: #28a745; font-weight: bold;">$${earned.toFixed(2)}</td>
+                            <td><span class="pill" style="background:${color}">${status}</span></td>
+                        </tr>
+                    `;
+                });
 
-            for (const email in report) {
-                const hours = (report[email].totalMs / (1000 * 60 * 60)).toFixed(2);
-                const rate = rateMap[email] || 15.00;
-                const totalPay = (hours * rate).toFixed(2);
-                const status = report[email].lastIn ? '<span style="color:red; font-weight:bold;">Clocked In</span>' : 'Clocked Out';
-                
-                output += `<tr>
-                    <td style="padding:8px;">${email}</td>
-                    <td style="padding:8px;">${hours}</td>
-                    <td style="padding:8px;">$${rate}</td>
-                    <td style="padding:8px;"><strong>$${totalPay}</strong></td>
-                    <td style="padding:8px;">${status}</td>
-                </tr>`;
-            }
-            output += "</table>";
-            
-            document.getElementById('payroll-results').innerHTML = output;
+                document.getElementById('grand-total').innerText = `Total: $${grandTotal.toFixed(2)}`;
+
+            } catch (e) { console.error(e); }
         }
 
-        // Attach the function to your button
-        document.getElementById('payroll-btn').addEventListener('click', calculatePayroll);
+        calculatePayroll();
     </script>
-    </div>
 </body>
 </html>
