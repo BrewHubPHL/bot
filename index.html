@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/client/dist/index.bundle.js"></script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-0TYLTJRWT1"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -23,7 +24,6 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <link rel="manifest" href="public/site.webmanifest" />
     
-    <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/client/dist/index.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
@@ -269,24 +269,26 @@
 
         // 2. Voice Chat Handler (ElevenLabs Client SDK)
         async function startVoiceChat() {
+            // Check if the library is actually loaded first
+            const lib = window.ElevenLabs || window.ElevenLabsClient;
+
+            if (!lib) {
+                alert("Wait a second! The voice library is still loading. Try again in 3... 2... 1...");
+                return;
+            }
+
             try {
-                // 1. Get the Signed URL from your Netlify Function
                 const response = await fetch('/.netlify/functions/get-voice-session');
                 const data = await response.json();
 
-                if (!data.signedUrl) throw new Error("No signed URL received");
-
-                // 2. Start the conversation using the Client SDK
-                const conversation = await ElevenLabsClient.Conversation.startSession({
+                const conversation = await lib.Conversation.startSession({
                     signedUrl: data.signedUrl,
-                    onConnect: () => console.log("Connected to Elise!"),
-                    onDisconnect: () => console.log("Disconnected."),
-                    onMessage: (message) => console.log("Elise said:", message),
-                    onError: (error) => alert("Microphone Error: " + error)
+                    onConnect: () => console.log("Connected!"),
+                    onMessage: (msg) => console.log("Elise:", msg),
+                    onError: (err) => console.error("Mic error:", err)
                 });
-
             } catch (error) {
-                console.error("Failed to start session:", error);
+                console.error("Error:", error);
             }
         }
 
