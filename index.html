@@ -185,7 +185,66 @@
             }, 1200); 
         });
 
-        // 1. Text Chat Handler
+        // 1. Text Chat Handler (WebSocket)
+        let textSocket = null;
+        let textSocketConnecting = null;
+
+        const appendBotMessage = (text) => {
+            const chatBox = document.getElementById('chat-box');
+            const aiDiv = document.createElement('div');
+            aiDiv.innerHTML = `<b>BrewBot:</b> ${text}`;
+            chatBox.appendChild(aiDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        };
+
+        const connectTextSocket = async () => {
+            if (textSocket && textSocket.readyState === WebSocket.OPEN) {
+                return textSocket;
+            }
+
+            if (textSocketConnecting) {
+                return textSocketConnecting;
+            }
+
+            textSocketConnecting = (async () => {
+                const resp = await fetch('/.netlify/functions/get-voice-session');
+                if (!resp.ok) throw new Error('Could not get session ticket');
+
+                const { signedUrl } = await resp.json();
+                if (!signedUrl) throw new Error('Missing signedUrl');
+
+                const wsUrl = signedUrl.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+                textSocket = new WebSocket(wsUrl);
+
+                textSocket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        const text = data.message || data.text || data.reply || data.output || (data.response && data.response.text) || null;
+                        if (text) appendBotMessage(text);
+                    } catch (e) {
+                        // Fallback: if it's plain text
+                        if (typeof event.data === 'string' && event.data.trim()) {
+                            appendBotMessage(event.data.trim());
+                        }
+                    }
+                };
+
+                return await new Promise((resolve, reject) => {
+                    textSocket.onopen = () => {
+                        textSocket.send(JSON.stringify({ type: 'conversation_initiation_client_data' }));
+                        resolve(textSocket);
+                    };
+                    textSocket.onerror = (err) => reject(err);
+                });
+            })();
+
+            try {
+                return await textSocketConnecting;
+            } finally {
+                textSocketConnecting = null;
+            }
+        };
+
         document.getElementById('send-btn').addEventListener('click', async () => {
             const input = document.getElementById('user-text');
             const message = input.value.trim();
@@ -200,27 +259,11 @@
             chatBox.scrollTop = chatBox.scrollHeight;
 
             try {
-                // Text chat via ElevenLabs proxy
-                const response = await fetch('/.netlify/functions/elevenlabs-chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message })
-                });
-                const raw = await response.text();
-                let data;
-                try {
-                    data = JSON.parse(raw);
-                } catch (parseErr) {
-                    throw new Error(`Invalid JSON response: ${raw || '[empty]'}`);
-                }
-
-                const aiDiv = document.createElement('div');
-                const reply = data.reply || data.message || (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "I'm listening!";
-                aiDiv.innerHTML = `<b>BrewBot:</b> ${reply}`;
-                chatBox.appendChild(aiDiv);
-                chatBox.scrollTop = chatBox.scrollHeight;
+                const socket = await connectTextSocket();
+                socket.send(JSON.stringify({ type: 'input_text', text: message }));
             } catch (err) {
-                console.error("Text Error:", err);
+                console.error('Text Error:', err);
+                appendBotMessage('Connection failed. Try again.');
             }
         });
 

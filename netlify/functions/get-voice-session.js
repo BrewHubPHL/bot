@@ -1,37 +1,48 @@
-exports.handler = async (event) => {
+exports.handler = async function(event, context) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json'
   };
 
+  const agentId = process.env.ELEVENLABS_AGENT_ID;
+  const elevenlabsApiKey = process.env.ELEVENLABS_API_KEY;
+
+  if (!agentId || !elevenlabsApiKey) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Missing ElevenLabs Agent ID or API Key environment variables.' })
+    };
+  }
+
   try {
-    const agentId = process.env.ELEVENLABS_AGENT_ID;
-    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
+      {
+        headers: {
+          'xi-api-key': elevenlabsApiKey,
+        },
+      }
+    );
 
-    if (!agentId) {
-      throw new Error('Missing ELEVENLABS_AGENT_ID');
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`Failed to get signed URL: ${response.status} - ${JSON.stringify(errorData)}`);
     }
-
-    // We removed the 'node-fetch' requirement and used the native fetch
-    const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`, {
-      method: 'GET',
-      headers: { 'xi-api-key': apiKey }
-    });
 
     const data = await response.json();
-
-    if (!data.signed_url) {
-        throw new Error('ElevenLabs did not return a URL. Check your API Key.');
-    }
-
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ signedUrl: data.signed_url })
+      body: JSON.stringify({ signedUrl: data.signed_url }),
     };
-  } catch (err) {
-    console.error('Bot Error:', err.message);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
+  } catch (error) {
+    console.error('Error generating signed URL:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Failed to generate signed URL' }),
+    };
   }
 };
