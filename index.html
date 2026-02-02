@@ -1,8 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/client/dist/index.bundle.js"></script>
-    
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BrewHub PHL | Hub</title>
+
+    <script type="module">
+      // This loads the libraries directly without needing local node_modules
+      import { Conversation } from "https://cdn.skypack.dev/@elevenlabs/client";
+      import { createClient } from "https://cdn.skypack.dev/@supabase/supabase-js";
+
+      // Attach them to window so our other functions can see them
+      window.ElevenLabsConversation = Conversation;
+      window.supabase = { createClient };
+      
+      console.log("Libraries loaded via Skypack.");
+    </script>
+
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-0TYLTJRWT1"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -11,103 +25,22 @@
       gtag('config', 'G-0TYLTJRWT1');
     </script>
 
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>BrewHub PHL | Hub</title>
-    
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="BrewHub PHL">
-    <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    <link rel="shortcut icon" href="favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
-    <link rel="manifest" href="public/site.webmanifest" />
-    
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-
     <style>
-        :root { 
-            --hub-brown: #3c2f2f; 
-            --hub-tan: #d4b59e; 
-            --hub-light: #f8f4f0; 
-            --glass: rgba(255, 255, 255, 0.95);
-        }
-
-        html, body { 
-            height: 100%; margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%);
-            color: var(--hub-brown);
-            display: flex;
-            flex-direction: column;
-            overflow-x: hidden;
-        }
-        
-        header { 
-            background: var(--hub-brown); color: #fff; padding: 10px 15px; 
-            display: flex; justify-content: center; align-items: center;
-            border-bottom: 3px solid var(--hub-tan); position: relative; flex-shrink: 0;
-            min-height: 60px;
-        }
-
-        #logo { max-width: 130px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.2)); }
-
-        #employee-login-tab {
-            position: absolute; right: 10px; background: var(--hub-tan);
-            color: var(--hub-brown); border: none; border-radius: 4px; padding: 4px 8px;
-            font-weight: bold; cursor: pointer; font-size: 0.65em;
-        }
-
-        main { 
-            flex: 1; display: flex; flex-direction: column; align-items: center; 
-            padding: 20px 15px; overflow-y: auto; -webkit-overflow-scrolling: touch;
-        }
-
-        .hero-card { 
-            background: var(--glass); padding: 25px; border-radius: 25px; 
-            box-shadow: 0 10px 30px rgba(60,47,47,0.08); max-width: 380px; width: 100%; 
-            text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px);
-            display: flex; flex-direction: column; gap: 15px; box-sizing: border-box;
-        }
-
-        .chat-display { 
-            height: 160px; min-height: 160px; overflow-y: auto; text-align: left; 
-            font-size: 0.85em; padding: 12px; background: #fff; border-radius: 12px; 
-            border: 1px solid #eee; margin-bottom: 10px;
-        }
-
-        .chat-input-row { display: flex; gap: 8px; margin-bottom: 10px; }
-        .chat-input-row input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; }
-        
-        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 14px; border-radius: 12px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .primary-btn:active { transform: scale(0.98); }
-        .voice-btn { background: var(--hub-tan); color: var(--hub-brown); border: 2px solid var(--hub-brown); text-transform: uppercase; letter-spacing: 1px; }
-
-        footer { padding: 30px 10px; font-size: 11px; color: #7a6a6a; text-align: center; flex-shrink: 0; }
-        .footer-links { margin-top: 10px; }
-        .footer-links a { color: var(--hub-brown); text-decoration: none; font-weight: bold; padding: 12px; display: inline-block; }
-
-        #splash-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: var(--hub-brown); z-index: 10000; display: flex; flex-direction: column; 
-            align-items: center; justify-content: center; transition: opacity 0.5s ease;
-        }
-        .spinner { margin-top: 20px; width: 25px; height: 25px; border: 3px solid var(--hub-tan); border-top: 3px solid white; border-radius: 50%; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        .modal { display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(60,47,47,0.9); align-items: center; justify-content: center; }
-        .modal-content { background: white; padding: 25px; border-radius: 20px; width: 85%; max-width: 320px; text-align: center; }
+        :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; --glass: rgba(255, 255, 255, 0.95); }
+        html, body { height: 100%; margin: 0; font-family: sans-serif; background: var(--hub-light); color: var(--hub-brown); display: flex; flex-direction: column; }
+        header { background: var(--hub-brown); color: #fff; padding: 15px; display: flex; justify-content: center; align-items: center; border-bottom: 3px solid var(--hub-tan); position: relative; }
+        #logo { max-width: 130px; }
+        #employee-login-tab { position: absolute; right: 10px; background: var(--hub-tan); border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 12px; font-weight: bold; }
+        main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .hero-card { background: var(--glass); padding: 25px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); max-width: 400px; width: 100%; text-align: center; }
+        .chat-display { height: 150px; overflow-y: auto; text-align: left; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 10px; font-size: 14px; }
+        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .voice-btn { background: var(--hub-tan); color: var(--hub-brown); }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 20px; border-radius: 15px; width: 300px; text-align: center; }
     </style>
 </head>
 <body>
-
-    <div id="splash-overlay">
-        <img src="logo.png" alt="BrewHub" style="width:160px;">
-        <div class="spinner"></div>
-    </div>
 
     <header>
         <img src="logo.png" alt="BrewHub PHL" id="logo">
@@ -116,217 +49,96 @@
 
     <main>
         <section class="hero-card">
-            <p id="tagline" style="margin:0; font-size: 1em; font-weight: 500;">Join the Point Breeze neighborhub.</p>
-            
+            <h3>Join the Neighborhub</h3>
             <form id="waitlist-form">
-                <input type="email" id="email" placeholder="Email for alerts" required style="width:100%; padding:12px; border:2px solid #eee; border-radius:10px; margin-bottom:10px; box-sizing:border-box; outline:none;">
+                <input type="email" id="email" placeholder="Email address" required style="width:100%; padding:10px; margin-bottom:10px; border-radius:5px; border:1px solid #ddd;">
                 <button type="submit" class="primary-btn">JOIN WAITLIST</button>
             </form>
 
-            <div id="chat-section">
-                <div id="chat-box" class="chat-display">
-                    <b>BrewBot:</b> Talk or type to ask about parcels & coffee!
-                </div>
-                <div class="chat-input-row">
-                    <input type="text" id="user-text" placeholder="Ask BrewBot...">
-                    <button id="send-btn" style="background:var(--hub-brown); color:white; border:none; border-radius:8px; padding:0 15px; cursor:pointer;">↑</button>
-                </div>
+            <div id="chat-section" style="margin-top:20px;">
+                <div id="chat-box" class="chat-display"><b>BrewBot:</b> Ask me anything!</div>
                 <button id="voice-btn" class="primary-btn voice-btn">🎤 Start Voice Chat</button>
             </div>
         </section>
     </main>
 
-    <footer>
-        South Philadelphia • Point Breeze
-        <div class="footer-links">
-            <a href="https://instagram.com/brewhubphl" target="_blank">Instagram</a> • 
-            <a href="https://facebook.com/thebrewhubphl" target="_blank">Facebook</a>
-        </div>
-    </footer>
-
     <div id="staff-modal" class="modal">
-        <div class="modal-content" id="modal-body">
-            <h3 style="margin-top:0">Staff Portal</h3>
-            <input type="email" id="staff-email" placeholder="Email" style="width:100%; padding:10px; margin-bottom:8px; border:1px solid #ddd; border-radius:8px;">
-            <input type="password" id="staff-password" placeholder="Password" style="width:100%; padding:10px; margin-bottom:8px; border:1px solid #ddd; border-radius:8px;">
-            <button class="primary-btn" onclick="staffLogin()">Sign In</button>
-            <button style="background:none; border:none; margin-top:12px; cursor:pointer; color:#999" onclick="closeModal()">Cancel</button>
+        <div class="modal-content">
+            <h3>Staff Login</h3>
+            <input type="email" id="staff-email" placeholder="Email" style="width:90%; padding:8px; margin-bottom:10px;">
+            <input type="password" id="staff-password" placeholder="Password" style="width:90%; padding:8px; margin-bottom:10px;">
+            <button class="primary-btn" id="login-submit">Sign In</button>
+            <button onclick="closeModal()" style="background:none; border:none; color:gray; cursor:pointer; margin-top:10px;">Cancel</button>
         </div>
     </div>
 
-    <script>
-        // --- 1. CONFIG & INIT ---
-        const supabaseClient = supabase.createClient(
-            'https://rruionkpgswvncypweiv.supabase.co', 
-            'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN', 
-            {
-                auth: {
-                    autoRefreshToken: true,
-                    persistSession: true,
-                    detectSessionInUrl: true,
-                    storageKey: 'brewhub-session',
+    <script type="module">
+        // Wait for Skypack to finish
+        const init = setInterval(() => {
+            if (window.supabase && window.ElevenLabsConversation) {
+                clearInterval(init);
+                setupApp();
+            }
+        }, 100);
+
+        function setupApp() {
+            const supabaseClient = window.supabase.createClient(
+                'https://rruionkpgswvncypweiv.supabase.co', 
+                'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN'
+            );
+
+            // --- STAFF PORTAL ---
+            const modal = document.getElementById('staff-modal');
+            document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
+            window.closeModal = () => modal.style.display = 'none';
+
+            document.getElementById('login-submit').onclick = async () => {
+                const email = document.getElementById('staff-email').value;
+                const password = document.getElementById('staff-password').value;
+                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                if (error) alert(error.message);
+                else {
+                    alert("Welcome back!");
+                    location.reload(); 
                 }
-            }
-        );
+            };
 
-        // Hide Splash
-        window.addEventListener('load', () => {
-            setTimeout(() => {
-                const splash = document.getElementById('splash-overlay');
-                if(splash) {
-                    splash.style.opacity = '0';
-                    setTimeout(() => splash.style.display = 'none', 500);
+            // --- VOICE CHAT ---
+            let activeSession = null;
+            document.getElementById('voice-btn').onclick = async () => {
+                const btn = document.getElementById('voice-btn');
+                
+                if (activeSession) {
+                    await activeSession.endSession();
+                    activeSession = null;
+                    btn.innerText = "🎤 Start Voice Chat";
+                    return;
                 }
-            }, 1200); 
-        });
 
-        // --- 2. TEXT CHAT (WebSockets) ---
-        let textSocket = null;
-        let textSocketConnecting = null;
+                try {
+                    btn.innerText = "Connecting...";
+                    const resp = await fetch('/.netlify/functions/get-voice-session');
+                    const { signedUrl } = await resp.json();
 
-        const appendBotMessage = (text) => {
-            const chatBox = document.getElementById('chat-box');
-            const aiDiv = document.createElement('div');
-            aiDiv.innerHTML = `<b>BrewBot:</b> ${text}`;
-            chatBox.appendChild(aiDiv);
-            chatBox.scrollTop = chatBox.scrollHeight;
-        };
+                    activeSession = await window.ElevenLabsConversation.startSession({
+                        signedUrl,
+                        onConnect: () => { btn.innerText = "🛑 Stop Chatting"; },
+                        onDisconnect: () => { btn.innerText = "🎤 Start Voice Chat"; },
+                        onError: (err) => alert("Mic Error: " + err)
+                    });
+                } catch (e) {
+                    alert("Connection failed.");
+                    btn.innerText = "🎤 Start Voice Chat";
+                }
+            };
 
-        const connectTextSocket = async () => {
-            if (textSocket && textSocket.readyState === WebSocket.OPEN) return textSocket;
-            if (textSocketConnecting) return textSocketConnecting;
-
-            textSocketConnecting = (async () => {
-                const resp = await fetch('/.netlify/functions/get-voice-session');
-                const { signedUrl } = await resp.json();
-                
-                const wsUrl = signedUrl.replace(/^http/, 'ws');
-                textSocket = new WebSocket(wsUrl);
-
-                textSocket.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        // ElevenLabs sends the response text in different fields depending on state
-                        const text = data.message || data.text || (data.response && data.response.text);
-                        if (text) appendBotMessage(text);
-                    } catch (e) {
-                        if (typeof event.data === 'string' && event.data.trim()) appendBotMessage(event.data);
-                    }
-                };
-
-                return await new Promise((resolve, reject) => {
-                    textSocket.onopen = () => {
-                        textSocket.send(JSON.stringify({ type: 'conversation_initiation_client_data' }));
-                        resolve(textSocket);
-                    };
-                    textSocket.onerror = (err) => reject(err);
-                });
-            })();
-
-            try { return await textSocketConnecting; } finally { textSocketConnecting = null; }
-        };
-
-        document.getElementById('send-btn').onclick = async () => {
-            const input = document.getElementById('user-text');
-            const message = input.value.trim();
-            if (!message) return;
-
-            const chatBox = document.getElementById('chat-box');
-            const userDiv = document.createElement('div');
-            userDiv.innerHTML = `<b>You:</b> ${message}`;
-            chatBox.appendChild(userDiv);
-            input.value = '';
-            chatBox.scrollTop = chatBox.scrollHeight;
-
-            try {
-                const socket = await connectTextSocket();
-                socket.send(JSON.stringify({ type: 'input_text', text: message }));
-            } catch (err) {
-                appendBotMessage('Text system unavailable.');
-            }
-        };
-
-        // --- 3. VOICE CHAT (ElevenLabs Client SDK) ---
-        let currentConversation = null;
-
-        async function startVoiceChat() {
-            // Triple check: Is the library there?
-            const lib = window.ElevenLabsClient || window.ElevenLabs;
-
-            if (!lib) {
-                alert("Voice library is still loading. Please wait a few seconds.");
-                return;
-            }
-
-            // If already talking, stop it
-            if (currentConversation) {
-                await currentConversation.endSession();
-                currentConversation = null;
-                document.getElementById('voice-btn').innerText = "🎤 Start Voice Chat";
-                return;
-            }
-
-            try {
-                document.getElementById('voice-btn').innerText = "⌛ Connecting...";
-                
-                const response = await fetch('/.netlify/functions/get-voice-session');
-                const data = await response.json();
-
-                if (!data.signedUrl) throw new Error("Missing signedUrl");
-
-                currentConversation = await lib.Conversation.startSession({
-                    signedUrl: data.signedUrl,
-                    connectionType: 'webrtc', // Highest quality for 2026
-                    onConnect: () => {
-                        console.log("Connected!");
-                        document.getElementById('voice-btn').innerText = "🛑 Stop Elise";
-                    },
-                    onDisconnect: () => {
-                        currentConversation = null;
-                        document.getElementById('voice-btn').innerText = "🎤 Start Voice Chat";
-                    },
-                    onError: (err) => {
-                        alert("Microphone Error: Please allow access in browser settings.");
-                        console.error(err);
-                    }
-                });
-            } catch (error) {
-                console.error("Voice Error:", error);
-                document.getElementById('voice-btn').innerText = "🎤 Start Voice Chat";
-            }
-        }
-
-        document.getElementById('voice-btn').onclick = startVoiceChat;
-
-        // --- 4. WAITLIST & STAFF ---
-        document.getElementById('waitlist-form').onsubmit = async function(e) {
-            e.preventDefault();
-            const emailValue = document.getElementById('email').value;
-            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-            await supabaseClient.from('waitlist').insert([{ email: emailValue }]);
-            document.getElementById('tagline').innerText = "Welcome! Check your email.";
-            this.style.display = 'none';
-        };
-
-        const modal = document.getElementById('staff-modal');
-        document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
-        const closeModal = () => modal.style.display = 'none';
-
-        async function staffLogin() {
-            const email = document.getElementById('staff-email').value.trim().toLowerCase();
-            const password = document.getElementById('staff-password').value;
-            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-            if (error) alert(error.message);
-            else renderPortal(data.user);
-        }
-
-        function renderPortal(user) {
-            const isManager = user.email === 'thomas@brewhubphl.com';
-            document.getElementById('modal-body').innerHTML = `
-                <h3 style="margin-top:0">Hi, ${user.email.split('@')[0]}</h3>
-                <button class="primary-btn" style="background:#28a745; margin-bottom:8px;" onclick="location.reload()">Clock In (Success)</button>
-                <button style="background:none; border:none; margin-top:15px; cursor:pointer; color:#999; text-decoration:underline" onclick="location.reload()">Logout</button>
-            `;
+            // --- WAITLIST ---
+            document.getElementById('waitlist-form').onsubmit = async (e) => {
+                e.preventDefault();
+                const email = document.getElementById('email').value;
+                await supabaseClient.from('waitlist').insert([{ email }]);
+                alert("You're on the list!");
+            };
         }
     </script>
 </body>
