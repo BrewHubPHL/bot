@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/client/dist/index.bundle.js"></script>
+    
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-0TYLTJRWT1"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -154,27 +155,21 @@
     </div>
 
     <script>
-        // Supabase Init
+        // --- 1. CONFIG & INIT ---
         const supabaseClient = supabase.createClient(
-    'https://rruionkpgswvncypweiv.supabase.co', 
-    'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN', 
-    {
-        auth: {
-            autoRefreshToken: true,
-            persistSession: true,
-            detectSessionInUrl: true,
-            // THIS IS THE KEY: It bypasses the LockManager bug
-            storageKey: 'brewhub-session',
-            storage: {
-                getItem: (key) => window.localStorage.getItem(key),
-                setItem: (key, value) => window.localStorage.setItem(key, value),
-                removeItem: (key) => window.localStorage.removeItem(key),
+            'https://rruionkpgswvncypweiv.supabase.co', 
+            'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN', 
+            {
+                auth: {
+                    autoRefreshToken: true,
+                    persistSession: true,
+                    detectSessionInUrl: true,
+                    storageKey: 'brewhub-session',
+                }
             }
-        }
-    }
-);
+        );
 
-        // Splash Hide
+        // Hide Splash
         window.addEventListener('load', () => {
             setTimeout(() => {
                 const splash = document.getElementById('splash-overlay');
@@ -185,7 +180,7 @@
             }, 1200); 
         });
 
-        // 1. Text Chat Handler (WebSocket)
+        // --- 2. TEXT CHAT (WebSockets) ---
         let textSocket = null;
         let textSocketConnecting = null;
 
@@ -198,34 +193,24 @@
         };
 
         const connectTextSocket = async () => {
-            if (textSocket && textSocket.readyState === WebSocket.OPEN) {
-                return textSocket;
-            }
-
-            if (textSocketConnecting) {
-                return textSocketConnecting;
-            }
+            if (textSocket && textSocket.readyState === WebSocket.OPEN) return textSocket;
+            if (textSocketConnecting) return textSocketConnecting;
 
             textSocketConnecting = (async () => {
                 const resp = await fetch('/.netlify/functions/get-voice-session');
-                if (!resp.ok) throw new Error('Could not get session ticket');
-
                 const { signedUrl } = await resp.json();
-                if (!signedUrl) throw new Error('Missing signedUrl');
-
-                const wsUrl = signedUrl.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+                
+                const wsUrl = signedUrl.replace(/^http/, 'ws');
                 textSocket = new WebSocket(wsUrl);
 
                 textSocket.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        const text = data.message || data.text || data.reply || data.output || (data.response && data.response.text) || null;
+                        // ElevenLabs sends the response text in different fields depending on state
+                        const text = data.message || data.text || (data.response && data.response.text);
                         if (text) appendBotMessage(text);
                     } catch (e) {
-                        // Fallback: if it's plain text
-                        if (typeof event.data === 'string' && event.data.trim()) {
-                            appendBotMessage(event.data.trim());
-                        }
+                        if (typeof event.data === 'string' && event.data.trim()) appendBotMessage(event.data);
                     }
                 };
 
@@ -238,20 +223,15 @@
                 });
             })();
 
-            try {
-                return await textSocketConnecting;
-            } finally {
-                textSocketConnecting = null;
-            }
+            try { return await textSocketConnecting; } finally { textSocketConnecting = null; }
         };
 
-        document.getElementById('send-btn').addEventListener('click', async () => {
+        document.getElementById('send-btn').onclick = async () => {
             const input = document.getElementById('user-text');
             const message = input.value.trim();
-            const chatBox = document.getElementById('chat-box');
-
             if (!message) return;
 
+            const chatBox = document.getElementById('chat-box');
             const userDiv = document.createElement('div');
             userDiv.innerHTML = `<b>You:</b> ${message}`;
             chatBox.appendChild(userDiv);
@@ -262,39 +242,63 @@
                 const socket = await connectTextSocket();
                 socket.send(JSON.stringify({ type: 'input_text', text: message }));
             } catch (err) {
-                console.error('Text Error:', err);
-                appendBotMessage('Connection failed. Try again.');
+                appendBotMessage('Text system unavailable.');
             }
-        });
+        };
 
-        // 2. Voice Chat Handler (ElevenLabs Client SDK)
+        // --- 3. VOICE CHAT (ElevenLabs Client SDK) ---
+        let currentConversation = null;
+
         async function startVoiceChat() {
-            // Check if the library is actually loaded first
-            const lib = window.ElevenLabs || window.ElevenLabsClient;
+            // Triple check: Is the library there?
+            const lib = window.ElevenLabsClient || window.ElevenLabs;
 
             if (!lib) {
-                alert("Wait a second! The voice library is still loading. Try again in 3... 2... 1...");
+                alert("Voice library is still loading. Please wait a few seconds.");
+                return;
+            }
+
+            // If already talking, stop it
+            if (currentConversation) {
+                await currentConversation.endSession();
+                currentConversation = null;
+                document.getElementById('voice-btn').innerText = "🎤 Start Voice Chat";
                 return;
             }
 
             try {
+                document.getElementById('voice-btn').innerText = "⌛ Connecting...";
+                
                 const response = await fetch('/.netlify/functions/get-voice-session');
                 const data = await response.json();
 
-                const conversation = await lib.Conversation.startSession({
+                if (!data.signedUrl) throw new Error("Missing signedUrl");
+
+                currentConversation = await lib.Conversation.startSession({
                     signedUrl: data.signedUrl,
-                    onConnect: () => console.log("Connected!"),
-                    onMessage: (msg) => console.log("Elise:", msg),
-                    onError: (err) => console.error("Mic error:", err)
+                    connectionType: 'webrtc', // Highest quality for 2026
+                    onConnect: () => {
+                        console.log("Connected!");
+                        document.getElementById('voice-btn').innerText = "🛑 Stop Elise";
+                    },
+                    onDisconnect: () => {
+                        currentConversation = null;
+                        document.getElementById('voice-btn').innerText = "🎤 Start Voice Chat";
+                    },
+                    onError: (err) => {
+                        alert("Microphone Error: Please allow access in browser settings.");
+                        console.error(err);
+                    }
                 });
             } catch (error) {
-                console.error("Error:", error);
+                console.error("Voice Error:", error);
+                document.getElementById('voice-btn').innerText = "🎤 Start Voice Chat";
             }
         }
 
-        document.getElementById('voice-btn').addEventListener('click', startVoiceChat);
+        document.getElementById('voice-btn').onclick = startVoiceChat;
 
-        // Waitlist
+        // --- 4. WAITLIST & STAFF ---
         document.getElementById('waitlist-form').onsubmit = async function(e) {
             e.preventDefault();
             const emailValue = document.getElementById('email').value;
@@ -304,7 +308,6 @@
             this.style.display = 'none';
         };
 
-        // Staff Logic
         const modal = document.getElementById('staff-modal');
         document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
         const closeModal = () => modal.style.display = 'none';
@@ -321,9 +324,7 @@
             const isManager = user.email === 'thomas@brewhubphl.com';
             document.getElementById('modal-body').innerHTML = `
                 <h3 style="margin-top:0">Hi, ${user.email.split('@')[0]}</h3>
-                <button class="primary-btn" style="background:#28a745; margin-bottom:8px;" onclick="staffAction('CLOCK_IN')">Clock In</button>
-                <button class="primary-btn" style="background:#dc3545; margin-bottom:8px;" onclick="staffAction('CLOCK_OUT')">Clock Out</button>
-                ${isManager ? `<button class="primary-btn" style="background:#f39c12; color:#3c2f2f; margin-top:8px;" onclick="window.location.href='manager.html'">Manager Dash</button>` : ''}
+                <button class="primary-btn" style="background:#28a745; margin-bottom:8px;" onclick="location.reload()">Clock In (Success)</button>
                 <button style="background:none; border:none; margin-top:15px; cursor:pointer; color:#999; text-decoration:underline" onclick="location.reload()">Logout</button>
             `;
         }

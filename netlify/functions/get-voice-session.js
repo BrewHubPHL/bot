@@ -1,3 +1,4 @@
+// get-voice-session.js
 exports.handler = async function(event, context) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -12,7 +13,7 @@ exports.handler = async function(event, context) {
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ error: 'Missing ElevenLabs Agent ID or API Key environment variables.' })
+      body: JSON.stringify({ error: 'Missing Environment Variables' })
     };
   }
 
@@ -20,6 +21,7 @@ exports.handler = async function(event, context) {
     const response = await fetch(
       `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`,
       {
+        method: 'GET', // Explicitly set GET
         headers: {
           'xi-api-key': elevenlabsApiKey,
         },
@@ -28,7 +30,12 @@ exports.handler = async function(event, context) {
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(`Failed to get signed URL: ${response.status} - ${JSON.stringify(errorData)}`);
+      console.error("ElevenLabs Error Details:", errorData); // This helps you debug in Netlify logs
+      return {
+        statusCode: response.status,
+        headers,
+        body: JSON.stringify({ error: errorData })
+      };
     }
 
     const data = await response.json();
@@ -42,7 +49,7 @@ exports.handler = async function(event, context) {
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ error: 'Failed to generate signed URL' }),
+      body: JSON.stringify({ error: error.message })
     };
   }
 };
