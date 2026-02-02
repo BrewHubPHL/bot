@@ -18,7 +18,7 @@ exports.handler = async function(event, context) {
 
   try {
     const response = await fetch(
-      `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
+      `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`,
       {
         headers: {
           'xi-api-key': elevenlabsApiKey,
