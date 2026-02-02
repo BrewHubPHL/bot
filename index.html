@@ -5,17 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BrewHub PHL | Hub</title>
 
-    <script type="module">
-      // This loads the libraries directly without needing local node_modules
-      import { Conversation } from "https://cdn.skypack.dev/@elevenlabs/client";
-      import { createClient } from "https://cdn.skypack.dev/@supabase/supabase-js";
-
-      // Attach them to window so our other functions can see them
-      window.ElevenLabsConversation = Conversation;
-      window.supabase = { createClient };
-      
-      console.log("Libraries loaded via Skypack.");
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/client/dist/index.bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-0TYLTJRWT1"></script>
     <script>
@@ -26,18 +18,56 @@
     </script>
 
     <style>
-        :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; --glass: rgba(255, 255, 255, 0.95); }
-        html, body { height: 100%; margin: 0; font-family: sans-serif; background: var(--hub-light); color: var(--hub-brown); display: flex; flex-direction: column; }
-        header { background: var(--hub-brown); color: #fff; padding: 15px; display: flex; justify-content: center; align-items: center; border-bottom: 3px solid var(--hub-tan); position: relative; }
+        :root { 
+            --hub-brown: #3c2f2f; 
+            --hub-tan: #d4b59e; 
+            --hub-light: #f8f4f0; 
+            --glass: rgba(255, 255, 255, 0.95);
+        }
+
+        html, body { 
+            height: 100%; margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%);
+            color: var(--hub-brown);
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+        
+        header { 
+            background: var(--hub-brown); color: #fff; padding: 10px 15px; 
+            display: flex; justify-content: center; align-items: center;
+            border-bottom: 3px solid var(--hub-tan); position: relative; flex-shrink: 0;
+            min-height: 60px;
+        }
+
         #logo { max-width: 130px; }
-        #employee-login-tab { position: absolute; right: 10px; background: var(--hub-tan); border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; font-size: 12px; font-weight: bold; }
-        main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-        .hero-card { background: var(--glass); padding: 25px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); max-width: 400px; width: 100%; text-align: center; }
-        .chat-display { height: 150px; overflow-y: auto; text-align: left; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 10px; margin-bottom: 10px; font-size: 14px; }
-        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-        .voice-btn { background: var(--hub-tan); color: var(--hub-brown); }
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; }
-        .modal-content { background: white; padding: 20px; border-radius: 15px; width: 300px; text-align: center; }
+
+        #employee-login-tab {
+            position: absolute; right: 10px; background: var(--hub-tan);
+            color: var(--hub-brown); border: none; border-radius: 4px; padding: 4px 8px;
+            font-weight: bold; cursor: pointer; font-size: 0.65em;
+        }
+
+        main { 
+            flex: 1; display: flex; flex-direction: column; align-items: center; 
+            padding: 20px 15px; overflow-y: auto;
+        }
+
+        .hero-card { 
+            background: var(--glass); padding: 25px; border-radius: 25px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08); max-width: 380px; width: 100%; 
+            text-align: center; border: 1px solid rgba(212,181,158,0.3); backdrop-filter: blur(10px);
+        }
+
+        .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 14px; border-radius: 12px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .voice-btn { background: var(--hub-tan); color: var(--hub-brown); border: 2px solid var(--hub-brown); }
+
+        .modal { display: none; position: fixed; z-index: 4000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(60,47,47,0.9); align-items: center; justify-content: center; }
+        .modal-content { background: white; padding: 25px; border-radius: 20px; width: 85%; max-width: 320px; text-align: center; }
+        
+        input { width: 100%; padding: 12px; border: 2px solid #eee; border-radius: 10px; margin-bottom: 10px; box-sizing: border-box; outline: none; }
     </style>
 </head>
 <body>
@@ -49,14 +79,15 @@
 
     <main>
         <section class="hero-card">
-            <h3>Join the Neighborhub</h3>
+            <h3 id="tagline">Join the Point Breeze Neighborhub.</h3>
+            
             <form id="waitlist-form">
-                <input type="email" id="email" placeholder="Email address" required style="width:100%; padding:10px; margin-bottom:10px; border-radius:5px; border:1px solid #ddd;">
+                <input type="email" id="email" placeholder="Email for alerts" required>
                 <button type="submit" class="primary-btn">JOIN WAITLIST</button>
             </form>
 
-            <div id="chat-section" style="margin-top:20px;">
-                <div id="chat-box" class="chat-display"><b>BrewBot:</b> Ask me anything!</div>
+            <div id="chat-section" style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
+                <p style="font-size: 0.9em; margin-bottom: 15px;"><b>BrewBot:</b> Tap below to talk to Elise!</p>
                 <button id="voice-btn" class="primary-btn voice-btn">🎤 Start Voice Chat</button>
             </div>
         </section>
@@ -64,82 +95,109 @@
 
     <div id="staff-modal" class="modal">
         <div class="modal-content">
-            <h3>Staff Login</h3>
-            <input type="email" id="staff-email" placeholder="Email" style="width:90%; padding:8px; margin-bottom:10px;">
-            <input type="password" id="staff-password" placeholder="Password" style="width:90%; padding:8px; margin-bottom:10px;">
+            <h3 style="margin-top:0">Staff Portal</h3>
+            <input type="email" id="staff-email" placeholder="Email">
+            <input type="password" id="staff-password" placeholder="Password">
             <button class="primary-btn" id="login-submit">Sign In</button>
-            <button onclick="closeModal()" style="background:none; border:none; color:gray; cursor:pointer; margin-top:10px;">Cancel</button>
+            <button style="background:none; border:none; margin-top:12px; cursor:pointer; color:#999" onclick="closeModal()">Cancel</button>
         </div>
     </div>
 
-    <script type="module">
-        // Wait for Skypack to finish
-        const init = setInterval(() => {
-            if (window.supabase && window.ElevenLabsConversation) {
-                clearInterval(init);
-                setupApp();
-            }
-        }, 100);
+    <script>
+        // --- INITIALIZATION ---
+        let supabaseClient;
+        let activeSession = null;
 
-        function setupApp() {
-            const supabaseClient = window.supabase.createClient(
+        document.addEventListener('DOMContentLoaded', () => {
+            // Setup Supabase
+            supabaseClient = window.supabase.createClient(
                 'https://rruionkpgswvncypweiv.supabase.co', 
                 'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN'
             );
 
-            // --- STAFF PORTAL ---
+            // --- STAFF LOGIC ---
             const modal = document.getElementById('staff-modal');
+            const loginBtn = document.getElementById('login-submit');
+            
             document.getElementById('employee-login-tab').onclick = () => modal.style.display = 'flex';
             window.closeModal = () => modal.style.display = 'none';
 
-            document.getElementById('login-submit').onclick = async () => {
+            loginBtn.onclick = async () => {
                 const email = document.getElementById('staff-email').value;
                 const password = document.getElementById('staff-password').value;
                 const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
                 if (error) alert(error.message);
                 else {
-                    alert("Welcome back!");
-                    location.reload(); 
+                    alert("Logged in successfully!");
+                    location.reload();
                 }
             };
 
-            // --- VOICE CHAT ---
-            let activeSession = null;
-            document.getElementById('voice-btn').onclick = async () => {
-                const btn = document.getElementById('voice-btn');
+            // --- VOICE CHAT LOGIC ---
+            const voiceBtn = document.getElementById('voice-btn');
+
+            voiceBtn.onclick = async () => {
+                const lib = window.ElevenLabsClient || window.ElevenLabs;
                 
+                if (!lib) {
+                    alert("Voice engine is still loading. Please try again in 2 seconds.");
+                    return;
+                }
+
                 if (activeSession) {
                     await activeSession.endSession();
                     activeSession = null;
-                    btn.innerText = "🎤 Start Voice Chat";
+                    voiceBtn.innerText = "🎤 Start Voice Chat";
                     return;
                 }
 
                 try {
-                    btn.innerText = "Connecting...";
+                    voiceBtn.innerText = "⌛ Connecting...";
+                    
+                    // Fetch the signed URL from your Netlify function
                     const resp = await fetch('/.netlify/functions/get-voice-session');
-                    const { signedUrl } = await resp.json();
+                    const data = await resp.json();
 
-                    activeSession = await window.ElevenLabsConversation.startSession({
-                        signedUrl,
-                        onConnect: () => { btn.innerText = "🛑 Stop Chatting"; },
-                        onDisconnect: () => { btn.innerText = "🎤 Start Voice Chat"; },
-                        onError: (err) => alert("Mic Error: " + err)
+                    if (!data.signedUrl) throw new Error("No signedUrl found");
+
+                    activeSession = await lib.Conversation.startSession({
+                        signedUrl: data.signedUrl,
+                        onConnect: () => {
+                            voiceBtn.innerText = "🛑 Stop Elise";
+                            console.log("Connected!");
+                        },
+                        onDisconnect: () => {
+                            activeSession = null;
+                            voiceBtn.innerText = "🎤 Start Voice Chat";
+                        },
+                        onError: (err) => {
+                            alert("Mic error: " + err);
+                            voiceBtn.innerText = "🎤 Start Voice Chat";
+                        }
                     });
                 } catch (e) {
-                    alert("Connection failed.");
-                    btn.innerText = "🎤 Start Voice Chat";
+                    console.error(e);
+                    alert("Could not connect to Elise.");
+                    voiceBtn.innerText = "🎤 Start Voice Chat";
                 }
             };
 
-            // --- WAITLIST ---
+            // --- WAITLIST LOGIC ---
             document.getElementById('waitlist-form').onsubmit = async (e) => {
                 e.preventDefault();
                 const email = document.getElementById('email').value;
-                await supabaseClient.from('waitlist').insert([{ email }]);
-                alert("You're on the list!");
+                
+                const { error } = await supabaseClient.from('waitlist').insert([{ email }]);
+                
+                if (error) {
+                    alert("Error: " + error.message);
+                } else {
+                    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+                    document.getElementById('tagline').innerText = "You're on the list! ☕️";
+                    document.getElementById('waitlist-form').style.display = 'none';
+                }
             };
-        }
+        });
     </script>
 </body>
 </html>
