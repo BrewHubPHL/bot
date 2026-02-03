@@ -27,77 +27,99 @@ exports.handler = async (event) => {
             };
         }
 
-        // Use the ElevenLabs text generation API to get response from agent
-        const agentResp = await fetch(
-            `https://api.elevenlabs.io/v1/convai/agents/${agentId}`,
+        // Get signed URL for WebSocket connection
+        const signedUrlResp = await fetch(
+            `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`,
             { method: 'GET', headers: { 'xi-api-key': apiKey } }
         );
         
-        if (!agentResp.ok) {
-            throw new Error('Failed to get agent info');
+        if (!signedUrlResp.ok) {
+            throw new Error('Failed to get signed URL');
         }
 
-        const agentInfo = await agentResp.json();
-        const voiceId = agentInfo.conversation_config?.tts?.voice_id || 'EXAVITQu4vr4xnSDxMaL'; // Default to Sarah
-        const systemPrompt = agentInfo.conversation_config?.agent?.prompt?.prompt || 
-            "You are Elise, a friendly barista at BrewHub coffee shop.";
+        const { signed_url } = await signedUrlResp.json();
 
-        // Use OpenAI-compatible endpoint or simple response
-        // For now, use a simple contextual response based on the agent's persona
-        const responses = {
-            "hi": "Hey there! Welcome to BrewHub! What can I get started for you today?",
-            "hello": "Hi! Welcome to BrewHub! Ready to order something delicious?",
-            "hey": "Hey! Great to see you at BrewHub! What sounds good today?",
-            "how are you": "I'm doing great, thanks for asking! Ready to make you an amazing drink. What can I get you?",
-            "what do you have": "We've got all the classics - lattes, cappuccinos, cold brew, plus some seasonal specials! What's your go-to?",
-            "menu": "Our menu has espresso drinks, cold brews, teas, and pastries! Any favorites you're craving?",
-            "coffee": "Coffee is our specialty! We have drip coffee, pour-over, espresso, lattes, cappuccinos... what's your style?",
-            "latte": "Lattes are so good! We can do classic, vanilla, caramel, or our seasonal flavors. Hot or iced?",
-            "default": "I'm here to help with your order! What sounds good today?"
-        };
+        // Connect via WebSocket and get real AI response
+        const reply = await new Promise((resolve, reject) => {
+            const WebSocket = require('ws');
+            const ws = new WebSocket(signed_url);
+            let response = '';
+            let timeout;
+            let gotResponse = false;
 
-        const lowerText = userText.toLowerCase().trim();
-        let reply = responses.default;
-        for (const [key, value] of Object.entries(responses)) {
-            if (lowerText.includes(key)) {
-                reply = value;
-                break;
-            }
-        }
+            ws.on('open', () => {
+                console.log('WebSocket connected');
+                timeout = setTimeout(() => {
+                    console.log('Timeout - closing');
+                    ws.close();
+                }, 20000);
+            });
 
-        // Generate TTS audio so Elise can "read" the reply
-        const ttsResp = await fetch(
-            `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-            {
-                method: 'POST',
-                headers: {
-                    'xi-api-key': apiKey,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    text: reply,
-                    model_id: 'eleven_turbo_v2',
-                    voice_settings: {
-                        stability: 0.5,
-                        similarity_boost: 0.75
+            ws.on('message', (data) => {
+                try {
+                    const msg = JSON.parse(data.toString());
+                    console.log('Message type:', msg.type);
+                    
+                    // After receiving metadata, send user message
+                    if (msg.type === 'conversation_initiation_metadata') {
+                        console.log('Sending user message:', userText);
+                        ws.send(JSON.stringify({
+                            type: 'user_message',
+                            user_message: {
+                                role: 'user',
+                                content: userText
+                            }
+                        }));
                     }
-                })
-            }
-        );
+                    
+                    // Collect transcript chunks
+                    if (msg.type === 'agent_response' && msg.agent_response_event?.agent_response) {
+                        response += msg.agent_response_event.agent_response;
+                        gotResponse = true;
+                    }
+                    
+                    // Alternative: check for text in various formats
+                    if (msg.type === 'audio' && msg.text) {
+                        response = msg.text;
+                        gotResponse = true;
+                    }
 
-        let audioBase64 = null;
-        if (ttsResp.ok) {
-            const audioBuffer = await ttsResp.arrayBuffer();
-            audioBase64 = Buffer.from(audioBuffer).toString('base64');
-        }
+                    // Final corrected response
+                    if (msg.type === 'agent_response_correction') {
+                        response = msg.corrected_transcript || msg.agent_response || response;
+                        gotResponse = true;
+                    }
+
+                    // Turn ended - we have the full response
+                    if (msg.type === 'interruption' || msg.type === 'agent_turn_end' || msg.type === 'turn_end') {
+                        if (gotResponse && response) {
+                            console.log('Turn ended with response');
+                            clearTimeout(timeout);
+                            ws.close();
+                        }
+                    }
+                } catch (e) {
+                    console.error('Parse error:', e);
+                }
+            });
+
+            ws.on('error', (err) => {
+                console.error('WS Error:', err);
+                clearTimeout(timeout);
+                reject(err);
+            });
+
+            ws.on('close', () => {
+                console.log('WS Closed, response:', response.substring(0, 50));
+                clearTimeout(timeout);
+                resolve(response || "Hey! Welcome to BrewHub. How can I help you today?");
+            });
+        });
 
         return {
             statusCode: 200,
             headers,
-            body: JSON.stringify({ 
-                reply,
-                audio: audioBase64 // Base64 encoded MP3 audio
-            })
+            body: JSON.stringify({ reply })
         };
 
     } catch (error) {
@@ -105,6 +127,10 @@ exports.handler = async (event) => {
         return {
             statusCode: 500,
             headers,
+            body: JSON.stringify({ error: error.message })
+        };
+    }
+};
             body: JSON.stringify({ error: error.message })
         };
     }
