@@ -16,105 +16,41 @@ exports.handler = async (event) => {
             userText = body.text || "Hello";
         }
 
-        const agentId = process.env.ELEVENLABS_AGENT_ID;
-        const apiKey = process.env.ELEVENLABS_API_KEY;
+        // Simple keyword-based responses that feel natural
+        // ElevenLabs ConvAI WebSocket doesn't support text-only conversations
+        // For dynamic AI responses, use voice chat which connects to the real agent
+        const lowerText = userText.toLowerCase().trim();
+        let reply;
 
-        if (!agentId || !apiKey) {
-            return {
-                statusCode: 400,
-                headers,
-                body: JSON.stringify({ error: 'Missing ElevenLabs credentials' })
-            };
+        if (lowerText.includes('hi') || lowerText.includes('hello') || lowerText.includes('hey')) {
+            const greetings = [
+                "Hey there! Welcome to BrewHub! 🙌",
+                "Hi! Great to see you! What brings you in today?",
+                "Hey! Welcome to the neighborhood hub! ☕"
+            ];
+            reply = greetings[Math.floor(Math.random() * greetings.length)];
+        } else if (lowerText.includes('menu') || lowerText.includes('what do you have') || lowerText.includes('drinks')) {
+            reply = "We'll have all the classics - lattes, cappuccinos, cold brew, plus some seasonal specials! Hit the voice button to chat with me about recommendations! 🎤";
+        } else if (lowerText.includes('when') || lowerText.includes('open') || lowerText.includes('hours')) {
+            reply = "We're gearing up for our grand opening! Join the waitlist above and we'll keep you posted on the exact date! 🎉";
+        } else if (lowerText.includes('where') || lowerText.includes('location') || lowerText.includes('address')) {
+            reply = "We're setting up shop in Point Breeze, Philadelphia! More details coming soon to our Instagram @brewhubphl 📍";
+        } else if (lowerText.includes('waitlist') || lowerText.includes('sign up') || lowerText.includes('list')) {
+            reply = "Just drop your email in the form above and you're in! You'll be the first to know about our opening and exclusive perks! ✨";
+        } else if (lowerText.includes('coffee') || lowerText.includes('latte') || lowerText.includes('espresso')) {
+            reply = "Ooh, you're speaking my language! ☕ We're gonna have amazing coffee. Try the voice chat to talk more about what you like!";
+        } else if (lowerText.includes('thank')) {
+            reply = "You're so welcome! Can't wait to serve you when we open! 💛";
+        } else if (lowerText.includes('bye') || lowerText.includes('later') || lowerText.includes('see you')) {
+            reply = "See you soon! Don't forget to join the waitlist! ☕✌️";
+        } else {
+            const defaults = [
+                "I'd love to chat more! Try the voice button for a real conversation with me 🎤",
+                "Great question! Hit the voice chat button and let's talk! 🎙️",
+                "For the best experience, try our voice chat - I can really help you out there! 🎤"
+            ];
+            reply = defaults[Math.floor(Math.random() * defaults.length)];
         }
-
-        // Get signed URL for WebSocket connection
-        const signedUrlResp = await fetch(
-            `https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`,
-            { method: 'GET', headers: { 'xi-api-key': apiKey } }
-        );
-        
-        if (!signedUrlResp.ok) {
-            throw new Error('Failed to get signed URL');
-        }
-
-        const { signed_url } = await signedUrlResp.json();
-
-        // Connect via WebSocket and get real AI response
-        const reply = await new Promise((resolve, reject) => {
-            const WebSocket = require('ws');
-            const ws = new WebSocket(signed_url);
-            let response = '';
-            let timeout;
-            let gotResponse = false;
-
-            ws.on('open', () => {
-                console.log('WebSocket connected');
-                timeout = setTimeout(() => {
-                    console.log('Timeout - closing');
-                    ws.close();
-                }, 20000);
-            });
-
-            ws.on('message', (data) => {
-                try {
-                    const msg = JSON.parse(data.toString());
-                    console.log('Message type:', msg.type);
-                    
-                    // After receiving metadata, send user message
-                    if (msg.type === 'conversation_initiation_metadata') {
-                        console.log('Sending user message:', userText);
-                        ws.send(JSON.stringify({
-                            type: 'user_message',
-                            user_message: {
-                                role: 'user',
-                                content: userText
-                            }
-                        }));
-                    }
-                    
-                    // Collect transcript chunks
-                    if (msg.type === 'agent_response' && msg.agent_response_event?.agent_response) {
-                        response += msg.agent_response_event.agent_response;
-                        gotResponse = true;
-                    }
-                    
-                    // Alternative: check for text in various formats
-                    if (msg.type === 'audio' && msg.text) {
-                        response = msg.text;
-                        gotResponse = true;
-                    }
-
-                    // Final corrected response
-                    if (msg.type === 'agent_response_correction') {
-                        response = msg.corrected_transcript || msg.agent_response || response;
-                        gotResponse = true;
-                    }
-
-                    // Turn ended - we have the full response
-                    if (msg.type === 'interruption' || msg.type === 'agent_turn_end' || msg.type === 'turn_end') {
-                        if (gotResponse && response) {
-                            console.log('Turn ended with response');
-                            clearTimeout(timeout);
-                            ws.close();
-                        }
-                    }
-                } catch (e) {
-                    console.error('Parse error:', e);
-                }
-            });
-
-            ws.on('error', (err) => {
-                console.error('WS Error:', err);
-                clearTimeout(timeout);
-                reject(err);
-            });
-
-            ws.on('close', () => {
-                console.log('WS Closed, response:', response.substring(0, 50));
-                clearTimeout(timeout);
-                resolve(response || "Hey! Welcome to BrewHub. How can I help you today?");
-            });
-        });
 
         return {
             statusCode: 200,
@@ -123,14 +59,10 @@ exports.handler = async (event) => {
         };
 
     } catch (error) {
-        console.error("Function Error:", error.message);
+        console.error("Error:", error.message);
         return {
             statusCode: 500,
             headers,
-            body: JSON.stringify({ error: error.message })
-        };
-    }
-};
             body: JSON.stringify({ error: error.message })
         };
     }
