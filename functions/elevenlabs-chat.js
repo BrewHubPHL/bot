@@ -16,57 +16,76 @@ exports.handler = async (event) => {
             userText = body.text || "Hello";
         }
 
-        // Simple keyword-based responses that feel natural
+        const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+        
+        // Use Grok API for real AI responses
+        if (grokKey) {
+            try {
+                const grokResp = await fetch('https://api.x.ai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${grokKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'grok-2',
+                        messages: [
+                            {
+                                role: 'system',
+                                content: `You are Elise, a friendly digital barista and concierge for BrewHub, a coffee shop opening soon in Point Breeze, Philadelphia. 
+
+Key info:
+- BrewHub is a neighborhood coffee hub opening soon in Point Breeze, Philly
+- For marketing/business inquiries: info@brewhubphl.com
+- Instagram: @brewhubphl
+- Menu will have lattes, cappuccinos, cold brew, espresso, tea, pastries
+- Good wifi and workspace vibes
+- Hiring announcements on Instagram
+- Join waitlist on the website for opening updates
+
+Keep responses short, friendly, and helpful (1-2 sentences max). Use emojis sparingly.`
+                            },
+                            {
+                                role: 'user',
+                                content: userText
+                            }
+                        ],
+                        max_tokens: 150
+                    })
+                });
+
+                if (grokResp.ok) {
+                    const grokData = await grokResp.json();
+                    const reply = grokData.choices?.[0]?.message?.content || "Hey! How can I help you today?";
+                    return {
+                        statusCode: 200,
+                        headers,
+                        body: JSON.stringify({ reply })
+                    };
+                } else {
+                    console.error('Grok API error:', grokResp.status, await grokResp.text());
+                }
+            } catch (e) {
+                console.error('Grok error:', e.message);
+            }
+        } else {
+            console.error('No GROK_API_KEY or XAI_API_KEY found');
+        }
+
+        // Fallback: Simple keyword responses
         const lowerText = userText.toLowerCase().trim();
-        let reply;
+        let reply = "For any questions, feel free to email info@brewhubphl.com or DM us on Instagram @brewhubphl! ☕";
 
         if (lowerText.includes('hi') || lowerText.includes('hello') || lowerText.includes('hey')) {
-            const greetings = [
-                "Hey there! Welcome to BrewHub! ☕",
-                "Hi! Great to see you! What brings you in today?",
-                "Hey! Welcome to the neighborhood hub!"
-            ];
-            reply = greetings[Math.floor(Math.random() * greetings.length)];
-        } else if (lowerText.includes('menu') || lowerText.includes('what do you have') || lowerText.includes('drinks')) {
-            reply = "We'll have all the classics - lattes, cappuccinos, cold brew, plus some seasonal specials! Can't wait to serve you! ☕";
-        } else if (lowerText.includes('when') || lowerText.includes('open') || lowerText.includes('hours')) {
-            reply = "We're gearing up for our grand opening! Join the waitlist above and we'll keep you posted on the exact date! 🎉";
-        } else if (lowerText.includes('where') || lowerText.includes('location') || lowerText.includes('address')) {
-            reply = "We're setting up shop in Point Breeze, Philadelphia! More details coming soon to our Instagram @brewhubphl 📍";
-        } else if (lowerText.includes('waitlist') || lowerText.includes('sign up') || lowerText.includes('list')) {
-            reply = "Just drop your email in the form above and you're in! You'll be the first to know about our opening and exclusive perks! ✨";
-        } else if (lowerText.includes('coffee')) {
-            const coffeeReplies = [
-                "Coffee is our passion! We'll have everything from classic drip to specialty lattes ☕",
-                "You're speaking my language! We're gonna have some amazing roasts 🔥",
-                "Can't wait to brew you a perfect cup! We're sourcing some incredible beans ☕"
-            ];
-            reply = coffeeReplies[Math.floor(Math.random() * coffeeReplies.length)];
-        } else if (lowerText.includes('latte')) {
-            reply = "Lattes are gonna be our specialty! Classic, vanilla, caramel, oat milk - we'll have it all ☕";
-        } else if (lowerText.includes('espresso')) {
-            reply = "We take our espresso seriously! Dialing in the perfect shot is an art 🎯";
-        } else if (lowerText.includes('tea')) {
-            reply = "We'll have a great tea selection too! Hot and iced options for everyone 🍵";
-        } else if (lowerText.includes('food') || lowerText.includes('pastry') || lowerText.includes('eat')) {
-            reply = "Fresh pastries and light bites are definitely on the menu! Perfect with your coffee ☕🥐";
-        } else if (lowerText.includes('wifi') || lowerText.includes('work') || lowerText.includes('laptop')) {
-            reply = "Absolutely! We're gonna be a great spot to work - good wifi and cozy vibes 💻☕";
-        } else if (lowerText.includes('thank')) {
-            reply = "You're so welcome! Can't wait to serve you when we open! 💛";
-        } else if (lowerText.includes('bye') || lowerText.includes('later') || lowerText.includes('see you')) {
-            reply = "See you soon! Don't forget to join the waitlist! ☕✌️";
-        } else if (lowerText.includes('price') || lowerText.includes('cost') || lowerText.includes('how much')) {
-            reply = "We're keeping prices fair and accessible for the neighborhood! Details coming soon 💰";
-        } else if (lowerText.includes('job') || lowerText.includes('hiring') || lowerText.includes('work here')) {
-            reply = "We'll be hiring soon! Keep an eye on our Instagram @brewhubphl for announcements 📣";
-        } else {
-            const defaults = [
-                "That's a great question! Feel free to ask about our menu, location, or opening date ☕",
-                "I'm here to help! Ask me about BrewHub - menu, hours, location, anything!",
-                "Happy to chat! What would you like to know about BrewHub? ☕"
-            ];
-            reply = defaults[Math.floor(Math.random() * defaults.length)];
+            reply = "Hey there! Welcome to BrewHub! How can I help? ☕";
+        } else if (lowerText.includes('email') || lowerText.includes('contact') || lowerText.includes('marketing')) {
+            reply = "For business or marketing inquiries, email info@brewhubphl.com! 📧";
+        } else if (lowerText.includes('menu') || lowerText.includes('drinks') || lowerText.includes('coffee') || lowerText.includes('black') || lowerText.includes('latte')) {
+            reply = "We'll have all the classics - drip coffee, lattes, cappuccinos, cold brew and more! Can't wait to serve you ☕";
+        } else if (lowerText.includes('when') || lowerText.includes('open')) {
+            reply = "We're gearing up for our grand opening! Join the waitlist above to be the first to know! 🎉";
+        } else if (lowerText.includes('where') || lowerText.includes('location')) {
+            reply = "We're setting up in Point Breeze, Philadelphia! Follow @brewhubphl for updates 📍";
         }
 
         return {
