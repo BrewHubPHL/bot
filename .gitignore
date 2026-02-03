@@ -9,3 +9,5 @@ analytics.py
 loyalty_app.py
 .venv/
 terminal.py
+# Local Netlify folder
+.netlify
