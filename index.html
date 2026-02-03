@@ -250,13 +250,6 @@
                 const data = await resp.json();
                 box.innerHTML += `<div><b>Elise:</b> ${data.reply}</div>`;
                 box.scrollTop = box.scrollHeight;
-                
-                // Play Elise's voice response if audio is available
-                if (data.audio) {
-                    const audioData = `data:audio/mpeg;base64,${data.audio}`;
-                    const audio = new Audio(audioData);
-                    audio.play().catch(e => console.log('Audio play blocked:', e));
-                }
             } catch (e) { box.innerHTML += `<div><i>Connection lost...</i></div>`; }
             
             isSending = false;
