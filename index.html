@@ -224,6 +224,54 @@
 
         // --- TEXT CHAT ---
         let isSending = false;
+        let currentAudio = null;
+
+        // Speak text using ElevenLabs TTS
+        async function speakText(text, btn) {
+            // Stop any currently playing audio
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            
+            btn.innerText = '⏳';
+            btn.disabled = true;
+            
+            try {
+                const resp = await fetch('/.netlify/functions/text-to-speech', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                
+                if (!resp.ok) throw new Error('TTS failed');
+                
+                const audioBlob = await resp.blob();
+                const audioUrl = URL.createObjectURL(audioBlob);
+                currentAudio = new Audio(audioUrl);
+                
+                currentAudio.onended = () => {
+                    btn.innerText = '🔊';
+                    btn.disabled = false;
+                    URL.revokeObjectURL(audioUrl);
+                    currentAudio = null;
+                };
+                
+                currentAudio.onerror = () => {
+                    btn.innerText = '🔊';
+                    btn.disabled = false;
+                    currentAudio = null;
+                };
+                
+                await currentAudio.play();
+                btn.innerText = '⏹️';
+            } catch (e) {
+                console.error('TTS error:', e);
+                btn.innerText = '🔊';
+                btn.disabled = false;
+            }
+        }
+
         document.getElementById('send-btn').onclick = async () => {
             if (isSending) return; // Prevent double-tap on iOS
             
@@ -248,7 +296,8 @@
                     cache: 'no-store'
                 });
                 const data = await resp.json();
-                box.innerHTML += `<div><b>Elise:</b> ${data.reply}</div>`;
+                const msgId = 'msg-' + Date.now();
+                box.innerHTML += `<div><b>Elise:</b> ${data.reply} <button id="${msgId}" onclick="speakText('${data.reply.replace(/'/g, "\\'")}', this)" style="background:none; border:none; cursor:pointer; font-size:14px; padding:2px 5px;">🔊</button></div>`;
                 box.scrollTop = box.scrollHeight;
             } catch (e) { box.innerHTML += `<div><i>Connection lost...</i></div>`; }
             
