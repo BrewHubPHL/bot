@@ -13,8 +13,11 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/client/dist/index.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script type="module">
+        import { Conversation } from 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@0.13.1/+esm';
+        window.ElevenLabsConversation = Conversation;
+    </script>
 
     <style>
         :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; }
@@ -38,7 +41,7 @@
             border-bottom: 3px solid var(--hub-tan); flex-shrink: 0; position: relative;
         }
         #logo { max-width: 100px; }
-        #staff-tab { position: absolute; right: 10px; background: var(--hub-tan); border: none; padding: 5px 8px; border-radius: 4px; font-weight: bold; font-size: 10px; color: var(--hub-brown); }
+        #staff-tab { position: absolute; right: 10px; background: var(--hub-tan); border: none; padding: 5px 8px; border-radius: 4px; font-weight: bold; font-size: 10px; color: var(--hub-brown); cursor: pointer; }
 
         main { 
             flex: 1; display: flex; align-items: center; justify-content: center; 
@@ -58,20 +61,12 @@
         .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; }
         .voice-btn { background: var(--hub-tan); color: var(--hub-brown); margin-top: 8px; border: 1px solid var(--hub-brown); }
 
-        footer { 
-            padding: 15px 10px; font-size: 11px; text-align: center; flex-shrink: 0; 
-            background: white; border-top: 1px solid #eee;
-        }
+        footer { padding: 15px 10px; font-size: 11px; text-align: center; flex-shrink: 0; background: white; border-top: 1px solid #eee; }
         .footer-links { margin-top: 5px; }
         .footer-links a { color: var(--hub-brown); text-decoration: none; font-weight: bold; margin: 0 8px; }
 
         .modal { display: none; position: fixed; z-index: 5000; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); align-items: center; justify-content: center; }
         .modal-content { background: white; padding: 20px; border-radius: 15px; width: 80%; max-width: 300px; }
-
-        @media (max-height: 600px) {
-            .chat-display { height: 70px; }
-            .hero-card { padding: 15px; }
-        }
     </style>
 </head>
 <body>
@@ -86,16 +81,17 @@
     <main>
         <section class="hero-card" id="main-content">
             <p id="tagline" style="margin-top:0; font-weight: bold;">Point Breeze Neighborhood Hub</p>
+            
             <form id="waitlist-form">
                 <input type="email" id="email" placeholder="Enter email" required style="width:100%; padding:12px; margin-bottom:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
                 <button type="submit" class="primary-btn">JOIN WAITLIST</button>
             </form>
 
             <div style="margin-top:15px;">
-                <div id="chat-box" class="chat-display"><b>BrewBot:</b> Ask about coffee or parcels!</div>
+                <div id="chat-box" class="chat-display"><b>Elise:</b> Welcome! I'm the BrewHub concierge. Feel free to ask about our opening or your waitlist status!</div>
                 <div class="chat-input-row">
-                    <input type="text" id="user-text" placeholder="Type...">
-                    <button id="send-btn" style="background:var(--hub-brown); color:white; border:none; padding:0 15px; border-radius:8px;">↑</button>
+                    <input type="text" id="user-text" placeholder="Type a message...">
+                    <button id="send-btn" style="background:var(--hub-brown); color:white; border:none; padding:0 15px; border-radius:8px; cursor:pointer;">↑</button>
                 </div>
                 <button id="voice-btn" class="primary-btn voice-btn">🎤 VOICE CHAT</button>
             </div>
@@ -116,24 +112,28 @@
             <input type="email" id="staff-email" placeholder="Email" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:5px;">
             <input type="password" id="staff-password" placeholder="Password" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:5px;">
             <button class="primary-btn" id="login-btn">Sign In</button>
+            <button onclick="document.getElementById('staff-modal').style.display='none'" style="background:none; border:none; color:gray; width:100%; margin-top:10px; font-size:12px; cursor:pointer;">Cancel</button>
         </div>
     </div>
 
     <script>
+        // Supabase Init
         const supabaseClient = window.supabase.createClient(
             'https://rruionkpgswvncypweiv.supabase.co', 
-            'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN',
-            { auth: { persistSession: true, autoRefreshToken: true } }
+            'sb_publishable_qIKS7qkVzYtm7Iwh2icPTQ_yQKc6BTN'
         );
 
         window.onload = () => setTimeout(() => {
             const splash = document.getElementById('splash-overlay');
             splash.style.opacity = '0';
             setTimeout(() => splash.style.display='none', 500);
+            
+            const savedEmail = localStorage.getItem('brewhub_email');
+            if (savedEmail) document.getElementById('email').value = savedEmail;
         }, 1000);
 
+        // Staff Auth
         document.getElementById('staff-tab').onclick = () => document.getElementById('staff-modal').style.display='flex';
-
         document.getElementById('login-btn').onclick = async () => {
             const { data, error } = await supabaseClient.auth.signInWithPassword({
                 email: document.getElementById('staff-email').value,
@@ -149,70 +149,119 @@
                 <h3>Staff: ${user.email.split('@')[0]}</h3>
                 <button class="primary-btn" onclick="handleClock('in', '${user.email}')" style="background:#28a745; margin-bottom:10px;">CLOCK IN</button>
                 <button class="primary-btn" onclick="handleClock('out', '${user.email}')" style="background:#dc3545; margin-bottom:10px;">CLOCK OUT</button>
-                ${isManager ? `<button class="primary-btn" onclick="window.location.href='manager.html'" style="background:#f39c12; margin-top:10px; color:#3c2f2f;">MANAGER DASHBOARD</button>` : ''}
-                <button onclick="location.reload()" style="background:none; border:none; color:gray; margin-top:15px; text-decoration:underline;">Logout</button>
+                ${isManager ? `<button class="primary-btn" onclick="window.location.href='manager.html'" style="background:#f39c12; margin-top:10px;">MANAGER DASHBOARD</button>` : ''}
+                <button onclick="location.reload()" style="background:none; border:none; color:gray; margin-top:15px; text-decoration:underline; cursor:pointer;">Logout</button>
             `;
         }
 
-        // UPDATED: Aligned with time_logs schema and manager.html
         async function handleClock(type, email) {
-            const now = new Date().toISOString();
-            const { error } = await supabaseClient
-                .from('time_logs')
-                .insert([{ 
-                    employee_email: email, 
-                    action_type: type.toLowerCase(), 
-                    clock_in: type.toLowerCase() === 'in' ? now : null,
-                    clock_out: type.toLowerCase() === 'out' ? now : null
-                }]);
-            
-            if (error) {
-                alert("Clock error: " + error.message);
-            } else {
-                alert(`Successfully Logged: ${type.toUpperCase()}`);
-                location.reload(); 
-            }
+            const { error } = await supabaseClient.from('time_logs').insert([{ 
+                employee_email: email, 
+                action_type: type, 
+                clock_in: type === 'in' ? new Date().toISOString() : null,
+                clock_out: type === 'out' ? new Date().toISOString() : null
+            }]);
+            if (error) alert(error.message); else alert(`Clocked ${type.toUpperCase()}`);
         }
 
+        // --- ELEVENLABS CONVAI VOICE ---
         let activeSession = null;
         document.getElementById('voice-btn').onclick = async () => {
             const btn = document.getElementById('voice-btn');
-            const lib = window.ElevenLabsClient || window.ElevenLabs;
-            if (activeSession) { await activeSession.endSession(); activeSession = null; btn.innerText = "🎤 VOICE CHAT"; return; }
+            const box = document.getElementById('chat-box');
+            const Conversation = window.ElevenLabsConversation;
+
+            if (!Conversation) {
+                alert("Voice SDK still loading or blocked. Check Chrome console (F12).");
+                return;
+            }
+
+            if (activeSession) { 
+                await activeSession.endSession(); 
+                activeSession = null; 
+                btn.innerText = "🎤 VOICE CHAT"; 
+                return; 
+            }
+
             btn.innerText = "Connecting...";
+
             try {
                 const resp = await fetch('/.netlify/functions/get-voice-session');
                 const { signedUrl } = await resp.json();
-                activeSession = await lib.Conversation.startSession({
-                    signedUrl,
-                    onConnect: () => btn.innerText = "🛑 STOP ELISE",
-                    onDisconnect: () => { activeSession = null; btn.innerText = "🎤 VOICE CHAT"; }
+
+                activeSession = await Conversation.startSession({
+                    signedUrl: signedUrl,
+                    onConnect: () => { 
+                        btn.innerText = "🛑 STOP ELISE"; 
+                        box.innerHTML += `<div style="color:#888;"><i>🎤 Voice chat started...</i></div>`;
+                        box.scrollTop = box.scrollHeight;
+                    },
+                    onDisconnect: () => { 
+                        activeSession = null; 
+                        btn.innerText = "🎤 VOICE CHAT"; 
+                        box.innerHTML += `<div style="color:#888;"><i>Voice chat ended.</i></div>`;
+                        box.scrollTop = box.scrollHeight;
+                    },
+                    onMessage: (message) => {
+                        // Show user's speech in chat box
+                        if (message.source === 'user' && message.message) {
+                            box.innerHTML += `<div><b>You:</b> ${message.message}</div>`;
+                            box.scrollTop = box.scrollHeight;
+                        }
+                        // Show Elise's response in chat box
+                        if (message.source === 'ai' && message.message) {
+                            box.innerHTML += `<div><b>Elise:</b> ${message.message}</div>`;
+                            box.scrollTop = box.scrollHeight;
+                        }
+                    }
                 });
-            } catch (e) { alert("Voice offline"); btn.innerText = "🎤 VOICE CHAT"; }
+            } catch (e) {
+                console.error(e);
+                alert("Voice offline. Run 'netlify dev'.");
+                btn.innerText = "🎤 VOICE CHAT";
+            }
         };
 
+        // --- TEXT CHAT ---
         document.getElementById('send-btn').onclick = async () => {
             const input = document.getElementById('user-text'), box = document.getElementById('chat-box');
+            const email = localStorage.getItem('brewhub_email') || "";
             if (!input.value.trim()) return;
+
             box.innerHTML += `<div><b>You:</b> ${input.value}</div>`;
+            const text = input.value;
+            input.value = '';
+
             try {
                 const resp = await fetch('/.netlify/functions/elevenlabs-chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: input.value })
+                    body: JSON.stringify({ text, email })
                 });
                 const data = await resp.json();
-                box.innerHTML += `<div><b>Bot:</b> ${data.reply}</div>`;
-                input.value = ''; box.scrollTop = box.scrollHeight;
+                box.innerHTML += `<div><b>Elise:</b> ${data.reply}</div>`;
+                box.scrollTop = box.scrollHeight;
+                
+                // Play Elise's voice response if audio is available
+                if (data.audio) {
+                    const audioData = `data:audio/mpeg;base64,${data.audio}`;
+                    const audio = new Audio(audioData);
+                    audio.play().catch(e => console.log('Audio play blocked:', e));
+                }
             } catch (e) { box.innerHTML += `<div><i>Connection lost...</i></div>`; }
         };
 
+        // --- WAITLIST ---
         document.getElementById('waitlist-form').onsubmit = async (e) => {
             e.preventDefault();
-            await supabaseClient.from('waitlist').insert([{ email: document.getElementById('email').value }]);
-            confetti({ particleCount: 100, spread: 70 });
-            document.getElementById('tagline').innerText = "Welcome! ☕️";
-            document.getElementById('waitlist-form').style.display = 'none';
+            const email = document.getElementById('email').value;
+            const { error } = await supabaseClient.from('waitlist').insert([{ email }]);
+            if (!error) {
+                localStorage.setItem('brewhub_email', email);
+                confetti({ particleCount: 100, spread: 70 });
+                document.getElementById('tagline').innerText = "You're on the list! ☕️";
+                document.getElementById('waitlist-form').style.display = 'none';
+            }
         };
     </script>
 </body>
