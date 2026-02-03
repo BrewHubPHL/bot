@@ -223,20 +223,29 @@
         };
 
         // --- TEXT CHAT ---
+        let isSending = false;
         document.getElementById('send-btn').onclick = async () => {
+            if (isSending) return; // Prevent double-tap on iOS
+            
             const input = document.getElementById('user-text'), box = document.getElementById('chat-box');
             const email = localStorage.getItem('brewhub_email') || "";
             if (!input.value.trim()) return;
 
+            isSending = true;
             box.innerHTML += `<div><b>You:</b> ${input.value}</div>`;
             const text = input.value;
             input.value = '';
+            input.blur(); // Dismiss iOS keyboard
 
             try {
-                const resp = await fetch('/.netlify/functions/elevenlabs-chat', {
+                const resp = await fetch('/.netlify/functions/elevenlabs-chat?t=' + Date.now(), {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, email })
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-cache, no-store'
+                    },
+                    body: JSON.stringify({ text, email }),
+                    cache: 'no-store'
                 });
                 const data = await resp.json();
                 box.innerHTML += `<div><b>Elise:</b> ${data.reply}</div>`;
@@ -249,6 +258,16 @@
                     audio.play().catch(e => console.log('Audio play blocked:', e));
                 }
             } catch (e) { box.innerHTML += `<div><i>Connection lost...</i></div>`; }
+            
+            isSending = false;
+        };
+
+        // Allow Enter key to send
+        document.getElementById('user-text').onkeydown = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('send-btn').click();
+            }
         };
 
         // --- WAITLIST ---
