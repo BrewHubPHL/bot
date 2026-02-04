@@ -2,13 +2,19 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
-  const mode = event.queryStringParameters.mode || 'push';
+  const mode = event.queryStringParameters?.mode || 'push';
 
   try {
     // DIRECTION A: PUSH (Supabase -> Sheets)
     if (mode === 'push') {
-      const { record } = JSON.parse(event.body);
-      await fetch(process.env.MARKETING_SHEET_URL, {
+      const body = JSON.parse(event.body || '{}');
+      const record = body.record;
+      
+      if (!record) {
+        return { statusCode: 400, body: 'Missing record in body' };
+      }
+
+      const response = await fetch(process.env.MARKETING_SHEET_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -19,6 +25,8 @@ exports.handler = async (event) => {
           link: record.id
         })
       });
+      
+      console.log('[MARKETING] Pushed to Sheets:', record.username);
       return { statusCode: 200, body: "Pushed to Sheets" };
     }
 
