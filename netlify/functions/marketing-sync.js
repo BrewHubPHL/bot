@@ -49,12 +49,22 @@ exports.handler = async (event) => {
       const response = await fetch(process.env.MARKETING_SHEET_URL);
       const sheetData = await response.json();
 
+      // Dedupe by id - keep last occurrence
+      const deduped = Object.values(
+        sheetData.reduce((acc, row) => {
+          if (row.id) acc[row.id] = row;
+          return acc;
+        }, {})
+      );
+
+      console.log(`[MARKETING] Syncing ${deduped.length} unique leads (from ${sheetData.length} rows)`);
+
       const { error } = await supabase
         .from('marketing_leads')
-        .upsert(sheetData, { onConflict: 'id' });
+        .upsert(deduped, { onConflict: 'id' });
 
       if (error) throw error;
-      return { statusCode: 200, body: `Synced ${sheetData.length} leads back to DB` };
+      return { statusCode: 200, body: `Synced ${deduped.length} leads back to DB` };
     }
 
   } catch (err) {
