@@ -349,7 +349,7 @@
     /* Scan indicator */
     .scan-indicator {
       position: fixed;
-      top: 1rem;
+      bottom: 1rem;
       right: 1rem;
       padding: 0.5rem 1rem;
       background: rgba(39, 174, 96, 0.2);
@@ -360,6 +360,8 @@
       display: flex;
       align-items: center;
       gap: 0.5rem;
+      z-index: 100;
+      pointer-events: none;
     }
     .scan-dot {
       width: 8px;
