@@ -1,0 +1,36 @@
+const { SquareClient, SquareEnvironment } = require('square');
+
+const client = new SquareClient({
+  token: process.env.SQUARE_SANDBOX_TOKEN,
+  environment: SquareEnvironment.Sandbox, // Change to Production when you open!
+});
+
+exports.handler = async (event) => {
+  const { amount, orderId, deviceId } = JSON.parse(event.body);
+
+  try {
+    const response = await client.terminal.checkouts.create({
+      checkout: {
+        amountMoney: {
+          amount: amount, // In cents (e.g., 550 for $5.50)
+          currency: 'USD'
+        },
+        deviceOptions: {
+          deviceId: deviceId, // The ID of your specific Square Terminal or Stand
+          skipReceiptScreen: false,
+          collectSignature: true
+        },
+        referenceId: orderId // This links back to your Supabase order!
+      },
+      idempotencyKey: require('crypto').randomBytes(12).toString('hex')
+    });
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify(response.result)
+    };
+  } catch (error) {
+    console.error("Terminal Error:", error);
+    return { statusCode: 500, body: JSON.stringify(error) };
+  }
+};

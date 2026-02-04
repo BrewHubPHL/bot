@@ -12,11 +12,14 @@
     "packageJson": {
       "dependencies": [
         "npm:@elevenlabs/elevenlabs-js@^2.34.0",
-        "npm:@supabase/supabase-js@^2.91.1",
-        "npm:axios@^1.13.2",
+        "npm:@netlify/functions@^5.1.2",
+        "npm:@supabase/supabase-js@^2.93.3",
+        "npm:axios@^1.13.4",
         "npm:dotenv@^17.2.3",
         "npm:express@^5.2.1",
-        "npm:node-fetch@^2.6.7"
+        "npm:node-fetch@^2.7.0",
+        "npm:square@44",
+        "npm:ws@^8.19.0"
       ]
     }
   }

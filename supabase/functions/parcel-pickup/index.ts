@@ -7,10 +7,10 @@ serve(async (req) => {
     // This catches the data sent from your Supabase 'parcels' table
     const { record } = await req.json()
     
-    // Using your exact column names from the screenshot
+    // Using correct column names from parcels table
     const userEmail = record.email
-    const recipientName = record.recipient_nam || 'Neighbor'
-    const trackingNum = record.tracking_num || 'Available for pickup'
+    const recipientName = record.recipient_name || 'Neighbor'
+    const trackingNum = record.tracking_number || 'Available for pickup'
     const carrier = record.carrier || 'Standard'
 
     const res = await fetch('https://api.resend.com/emails', {

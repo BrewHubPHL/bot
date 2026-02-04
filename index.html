@@ -149,7 +149,11 @@
                 <h3>Staff: ${user.email.split('@')[0]}</h3>
                 <button class="primary-btn" onclick="handleClock('in', '${user.email}')" style="background:#28a745; margin-bottom:10px;">CLOCK IN</button>
                 <button class="primary-btn" onclick="handleClock('out', '${user.email}')" style="background:#dc3545; margin-bottom:10px;">CLOCK OUT</button>
-                ${isManager ? `<button class="primary-btn" onclick="window.location.href='manager.html'" style="background:#f39c12; margin-top:10px;">MANAGER DASHBOARD</button>` : ''}
+                <hr style="margin:15px 0; border:none; border-top:1px solid #ddd;">
+                <p style="font-size:12px; color:#888; margin-bottom:10px;">After clocking in:</p>
+                <button class="primary-btn" onclick="window.location.href='cafe.html'" style="background:var(--hub-tan); color:var(--hub-brown); margin-bottom:8px;">☕ CAFE POS</button>
+                <button class="primary-btn" onclick="window.location.href='parcels.html'" style="background:var(--hub-tan); color:var(--hub-brown); margin-bottom:8px;">📦 PARCEL HUB</button>
+                ${isManager ? `<button class="primary-btn" onclick="window.location.href='manager.html'" style="background:#f39c12; margin-top:10px;">📊 MANAGER DASHBOARD</button>` : ''}
                 <button onclick="location.reload()" style="background:none; border:none; color:gray; margin-top:15px; text-decoration:underline; cursor:pointer;">Logout</button>
             `;
         }

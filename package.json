@@ -20,11 +20,15 @@
   "homepage": "https://github.com/BrewHubPHL/bot#readme",
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.34.0",
+    "@netlify/functions": "^5.1.2",
     "@supabase/supabase-js": "^2.93.3",
-    "axios": "^1.13.2",
+    "axios": "^1.13.4",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "facebook-nodejs-business-sdk": "^24.0.1",
     "node-fetch": "^2.7.0",
+    "qrcode": "^1.5.4",
+    "square": "^44.0.0",
     "ws": "^8.19.0"
   }
 }

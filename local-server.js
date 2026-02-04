@@ -2,7 +2,6 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
 require('dotenv').config(); // Load environment variables from .env
-const { handler } = require('./netlify/functions/chat-v2.js');
 
 const app = express();
 const PORT = 3000;
@@ -13,25 +12,48 @@ app.use(bodyParser.json());
 // Serve static files from 'public' folder
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Mock the Netlify Function API route
-app.post('/api/chat-v2', async (req, res) => {
-    console.log("Local Server: Received Chat Request");
+// Test route for supabase-webhook
+app.post('/test/webhook', async (req, res) => {
+    console.log("Testing supabase-webhook...");
     
-    // Create a mock Netlify event object
+    const { handler } = require('./netlify/functions/supabase-webhook.js');
+    
+    const event = {
+        httpMethod: 'POST',
+        headers: {
+            'x-brewhub-secret': process.env.INTERNAL_SYNC_SECRET
+        },
+        body: JSON.stringify(req.body)
+    };
+
+    try {
+        const response = await handler(event);
+        console.log("Response:", response);
+        res.status(response.statusCode).json(JSON.parse(response.body));
+    } catch (err) {
+        console.error("Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Test route for square-sync
+app.post('/test/square-sync', async (req, res) => {
+    console.log("Testing square-sync...");
+    
+    const { handler } = require('./netlify/functions/square-sync.js');
+    
     const event = {
         httpMethod: 'POST',
         body: JSON.stringify(req.body)
     };
 
     try {
-        // Call the actual function code
         const response = await handler(event);
-        
-        // Send the response back to the browser
-        res.status(response.statusCode).set(response.headers).send(response.body);
+        console.log("Response:", response);
+        res.status(response.statusCode).json(JSON.parse(response.body));
     } catch (err) {
-        console.error("Function Crash:", err);
-        res.status(500).send(err.message);
+        console.error("Error:", err);
+        res.status(500).json({ error: err.message });
     }
 });
 
