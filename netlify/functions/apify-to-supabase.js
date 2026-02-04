@@ -19,7 +19,7 @@ exports.handler = async (event) => {
 
     // 3. Filter and map the data to our Supabase schema
     const cleanItems = items
-      .filter(post => post.likesCount > 50)
+      .filter(post => post.likesCount > 20)
       .map(post => ({
         id: post.url,
         username: post.ownerUsername,
