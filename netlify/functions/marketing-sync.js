@@ -90,11 +90,8 @@ exports.handler = async (event) => {
 
       console.log(`[MARKETING] Exporting ${mentions.length} mentions to Sheets`);
 
-      // Format and send each record
-      let added = 0;
-      let skipped = 0;
-
-      for (const record of mentions) {
+      // Format all records
+      const records = mentions.map(record => {
         const postedDate = record.posted_at ? new Date(record.posted_at) : new Date();
         const formattedDate = postedDate.toLocaleDateString('en-US', { 
           month: 'short', day: 'numeric', year: 'numeric' 
@@ -103,8 +100,7 @@ exports.handler = async (event) => {
           hour: 'numeric', minute: '2-digit', hour12: true 
         });
 
-        const sheetPayload = {
-          auth_key: "BrewHub-Marketing-2026",
+        return {
           username: record.username,
           likes: record.likes,
           caption: record.caption,
@@ -112,24 +108,25 @@ exports.handler = async (event) => {
           posted: `${formattedDate} @ ${formattedTime}`,
           added: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         };
+      });
 
-        const response = await fetch(process.env.MARKETING_SHEET_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(sheetPayload)
-        });
+      // Send bulk payload
+      const response = await fetch(process.env.MARKETING_SHEET_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auth_key: "BrewHub-Marketing-2026",
+          bulk: true,
+          records: records
+        })
+      });
 
-        const result = await response.text();
-        if (result.includes('Duplicate')) {
-          skipped++;
-        } else {
-          added++;
-        }
-      }
+      const result = await response.text();
+      console.log('[MARKETING] Bulk export result:', result);
 
       return { 
         statusCode: 200, 
-        body: `Exported to Sheets: ${added} added, ${skipped} already existed` 
+        body: `Exported ${mentions.length} records to Sheets. Result: ${result}` 
       };
     }
 
