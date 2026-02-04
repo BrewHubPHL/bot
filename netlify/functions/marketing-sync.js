@@ -78,6 +78,61 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: `Synced ${deduped.length} leads back to DB` };
     }
 
+    // DIRECTION C: EXPORT (Bulk Supabase -> Sheets)
+    if (mode === 'export') {
+      // Fetch all local_mentions from Supabase
+      const { data: mentions, error } = await supabase
+        .from('local_mentions')
+        .select('*')
+        .order('likes', { ascending: false });
+
+      if (error) throw error;
+
+      console.log(`[MARKETING] Exporting ${mentions.length} mentions to Sheets`);
+
+      // Format and send each record
+      let added = 0;
+      let skipped = 0;
+
+      for (const record of mentions) {
+        const postedDate = record.posted_at ? new Date(record.posted_at) : new Date();
+        const formattedDate = postedDate.toLocaleDateString('en-US', { 
+          month: 'short', day: 'numeric', year: 'numeric' 
+        });
+        const formattedTime = postedDate.toLocaleTimeString('en-US', { 
+          hour: 'numeric', minute: '2-digit', hour12: true 
+        });
+
+        const sheetPayload = {
+          auth_key: "BrewHub-Marketing-2026",
+          username: record.username,
+          likes: record.likes,
+          caption: record.caption,
+          link: record.id,
+          posted: `${formattedDate} @ ${formattedTime}`,
+          added: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        };
+
+        const response = await fetch(process.env.MARKETING_SHEET_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sheetPayload)
+        });
+
+        const result = await response.text();
+        if (result.includes('Duplicate')) {
+          skipped++;
+        } else {
+          added++;
+        }
+      }
+
+      return { 
+        statusCode: 200, 
+        body: `Exported to Sheets: ${added} added, ${skipped} already existed` 
+      };
+    }
+
   } catch (err) {
     console.error("Sync Error:", err);
     return { statusCode: 500, body: err.message };
