@@ -15,17 +15,21 @@ exports.handler = async (event) => {
     const response = await fetch(apifyUrl);
     const items = await response.json();
 
-    console.log(`[APIFY] Processing ${items.length} new #southphilly posts.`);
+    console.log(`[APIFY] Received ${items.length} posts, filtering for >50 likes...`);
 
-    // 3. Map the data to our Supabase schema
-    const cleanItems = items.map(post => ({
-      id: post.url,
-      username: post.ownerUsername,
-      caption: post.caption,
-      image_url: post.displayUrl,
-      likes: post.likesCount,
-      posted_at: post.timestamp
-    }));
+    // 3. Filter and map the data to our Supabase schema
+    const cleanItems = items
+      .filter(post => post.likesCount > 50)
+      .map(post => ({
+        id: post.url,
+        username: post.ownerUsername,
+        caption: post.caption,
+        image_url: post.displayUrl,
+        likes: post.likesCount,
+        posted_at: post.timestamp
+      }));
+    
+    console.log(`[APIFY] ${cleanItems.length} posts passed the filter.`);
 
     // 4. "Upsert" ensures we update likes but don't create double rows
     const { error } = await supabase
