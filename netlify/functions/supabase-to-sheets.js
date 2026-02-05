@@ -26,6 +26,22 @@ exports.handler = async (event) => {
         let sheetData = { auth_key: auth_key || "BrewHub-Sync-2027-Secure" };
 
         // 2. DATA ROUTING
+        
+        // --- MARKETING: Route to specialized handler ---
+        if (table === 'marketing_posts') {
+            console.log("➡️ Routing to Marketing Sync...");
+            const baseUrl = process.env.URL || 'https://brewhubphl.com';
+            
+            await fetch(`${baseUrl}/.netlify/functions/marketing-sync?mode=push`, {
+                method: 'POST',
+                body: JSON.stringify({ record: record }),
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            return { statusCode: 200, body: "Routed to Marketing Sync" };
+        }
+
+        // --- MASTER SHEET: time_logs, employees, waitlist ---
         if (table === 'time_logs') {
             sheetData.target_sheet = 'Logs';
             sheetData.email = record.employee_email;
@@ -47,13 +63,6 @@ exports.handler = async (event) => {
                 body: { record: { email: record.email } } 
             });
             if (emailError) console.error('Email Trigger Failed:', emailError);
-        }
-        // --- MARKETING BOT POSTS ---
-        else if (table === 'marketing_posts') {
-            sheetData.target_sheet = 'SocialPosts';
-            sheetData.action = record.day_of_week;  // Day column
-            sheetData.name = record.topic;           // Topic column
-            sheetData.email = record.caption;        // Caption column
         }
 
         // 3. SEND TO GOOGLE
