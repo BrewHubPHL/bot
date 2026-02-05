@@ -20,6 +20,7 @@
   "homepage": "https://github.com/BrewHubPHL/bot#readme",
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.34.0",
+    "@google/generative-ai": "^0.24.1",
     "@netlify/functions": "^5.1.2",
     "@supabase/supabase-js": "^2.93.3",
     "axios": "^1.13.4",

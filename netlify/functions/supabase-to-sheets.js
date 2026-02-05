@@ -48,6 +48,13 @@ exports.handler = async (event) => {
             });
             if (emailError) console.error('Email Trigger Failed:', emailError);
         }
+        // --- MARKETING BOT POSTS ---
+        else if (table === 'marketing_posts') {
+            sheetData.target_sheet = 'SocialPosts';
+            sheetData.action = record.day_of_week;  // Day column
+            sheetData.name = record.topic;           // Topic column
+            sheetData.email = record.caption;        // Caption column
+        }
 
         // 3. SEND TO GOOGLE
         const response = await fetch(GS_URL, {
