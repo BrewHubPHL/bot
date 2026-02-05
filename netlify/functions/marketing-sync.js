@@ -22,6 +22,33 @@ exports.handler = async (event) => {
         return { statusCode: 400, body: 'Missing record in body' };
       }
 
+      // DETECT: Marketing Bot Post vs Instagram Lead
+      if (record.day_of_week && record.topic) {
+        // Marketing Bot Post -> SocialPosts tab
+        const sheetPayload = {
+          auth_key: "BrewHub-Marketing-2026",
+          target_sheet: "SocialPosts",
+          day: record.day_of_week,
+          topic: record.topic,
+          caption: record.caption,
+          added: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        };
+
+        console.log('[MARKETING] Sending Social Post:', JSON.stringify(sheetPayload));
+
+        const response = await fetch(process.env.MARKETING_SHEET_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sheetPayload)
+        });
+
+        const responseText = await response.text();
+        console.log('[MARKETING] Sheets response:', response.status, responseText);
+
+        return { statusCode: 200, body: "Social post pushed to Sheets" };
+      }
+
+      // Instagram Lead -> IG_Leads tab
       // Format timestamp for easy reading in Sheets
       const postedDate = record.posted_at ? new Date(record.posted_at) : new Date();
       const formattedDate = postedDate.toLocaleDateString('en-US', { 
