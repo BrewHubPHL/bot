@@ -1,3 +1,6 @@
 [build]
   functions = "netlify/functions"
   publish = "public"
+
+[functions."marketing-bot"]
+  schedule = "0 13 * * *"  # 8:00 AM EST (13:00 UTC)
