@@ -282,7 +282,10 @@
             // Create auth user with password
             const { data, error: authError } = await sb.auth.signUp({
                 email,
-                password
+                password,
+                options: {
+                    emailRedirectTo: window.location.origin + '/portal.html'
+                }
             });
 
             if (authError) {
@@ -295,7 +298,8 @@
             // Check if email confirmation is required (no session returned)
             const needsEmailConfirmation = !data.session;
 
-            // Create customer record in database (do this regardless, so it's ready when they confirm)
+            // Create customer record in database immediately
+            // (RLS allows anon insert so this works before email confirmation)
             const { error: dbError } = await sb
                 .from('customers')
                 .upsert({ 
@@ -311,15 +315,32 @@
                 isRegistering = false;
                 btn.disabled = false;
                 console.error("DB error:", dbError);
-                msg.innerText = "Account created but profile error. Please try logging in.";
+                // Don't scare user - account is created, just profile issue
+                if (needsEmailConfirmation) {
+                    msg.innerHTML = `
+                        <div style="background:#d4edda; padding:15px; border-radius:8px; text-align:center;">
+                            <strong>📧 Check your email!</strong><br><br>
+                            We sent a confirmation link to <strong>${email}</strong><br><br>
+                            Click the link, then come back here to log in.
+                        </div>
+                    `;
+                } else {
+                    msg.innerText = "Account created! Please log in.";
+                }
                 return;
             }
 
-            // If email confirmation was required, don't show dashboard
+            // If email confirmation required, show clear instructions
             if (needsEmailConfirmation) {
                 isRegistering = false;
                 btn.disabled = false;
-                msg.innerText = "✅ Check your email to confirm your account, then log in.";
+                msg.innerHTML = `
+                    <div style="background:#d4edda; padding:15px; border-radius:8px; text-align:center;">
+                        <strong>📧 Check your email!</strong><br><br>
+                        We sent a confirmation link to <strong>${email}</strong><br><br>
+                        Click the link, then come back here to log in.
+                    </div>
+                `;
                 return;
             }
 
