@@ -103,40 +103,48 @@
 
         // 2. CHECK SESSION ON LOAD
         async function init() {
-            // Also check sessionStorage for pending registration/reset
-            const hasPendingRegistration = !!sessionStorage.getItem('pendingRegistration');
-            const hasPendingReset = !!sessionStorage.getItem('pendingPasswordReset');
-            const needsPasswordSetup = NEEDS_PASSWORD || hasPendingRegistration || hasPendingReset;
+            // Check localStorage for pending registration/reset (same device)
+            const hasPendingRegistration = !!localStorage.getItem('pendingRegistration');
+            const hasPendingReset = !!localStorage.getItem('pendingPasswordReset');
+            const needsPasswordFromStorage = hasPendingRegistration || hasPendingReset;
             
+            console.log('NEEDS_PASSWORD from hash:', NEEDS_PASSWORD);
             console.log('Has pending registration:', hasPendingRegistration);
             console.log('Has pending reset:', hasPendingReset);
-            console.log('Final needs password setup:', needsPasswordSetup);
             
-            // If coming from magic link, wait for session then show password setup
-            if (needsPasswordSetup) {
-                // Wait a moment for Supabase to process the token
-                setTimeout(async () => {
-                    const { data: { session } } = await sb.auth.getSession();
-                    if (session) {
-                        showPasswordSetup(session.user);
-                    }
-                }, 500);
-                return;
-            }
-            
-            // Listen for auth state changes (for normal login flow)
+            // Listen for auth state changes
             sb.auth.onAuthStateChange(async (event, session) => {
-                console.log('Auth event:', event);
-                if (event === 'SIGNED_IN' && session) {
-                    showDashboard(session.user);
+                console.log('Auth event:', event, 'Session:', !!session);
+                
+                if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
+                    // Check if user needs password setup:
+                    // 1. URL had magic link hash
+                    // 2. localStorage has pending registration/reset
+                    // 3. User is authenticated but NOT in customers table (cross-device magic link)
+                    
+                    if (NEEDS_PASSWORD || needsPasswordFromStorage) {
+                        showPasswordSetup(session.user);
+                        return;
+                    }
+                    
+                    // Check if user exists in customers table
+                    const { data: customer } = await sb
+                        .from('customers')
+                        .select('email')
+                        .eq('email', session.user.email)
+                        .single();
+                    
+                    console.log('Customer lookup:', customer);
+                    
+                    if (!customer) {
+                        // New user from magic link (different device) - needs password setup
+                        showPasswordSetup(session.user);
+                    } else {
+                        // Existing customer - show dashboard
+                        showDashboard(session.user);
+                    }
                 }
             });
-            
-            // Check existing session (returning user with password)
-            const { data: { session } } = await sb.auth.getSession();
-            if (session) {
-                showDashboard(session.user);
-            }
         }
         init();
 
@@ -196,7 +204,7 @@
             }
             
             // Mark that we're expecting a password reset
-            sessionStorage.setItem('pendingPasswordReset', 'true');
+            localStorage.setItem('pendingPasswordReset', 'true');
             
             const { error } = await sb.auth.resetPasswordForEmail(email, {
                 redirectTo: window.location.origin + '/portal.html'
@@ -204,7 +212,7 @@
             
             if (error) {
                 msg.innerText = "Error: " + error.message;
-                sessionStorage.removeItem('pendingPasswordReset');
+                localStorage.removeItem('pendingPasswordReset');
             } else {
                 msg.innerText = "✅ Check your email for reset link!";
             }
@@ -236,7 +244,7 @@
             }
 
             // Now user is authenticated - create customer record
-            const pendingReg = sessionStorage.getItem('pendingRegistration');
+            const pendingReg = localStorage.getItem('pendingRegistration');
             if (pendingReg) {
                 const regData = JSON.parse(pendingReg);
                 const { error: dbError } = await sb
@@ -253,11 +261,11 @@
                 if (dbError) {
                     console.error("DB error:", dbError);
                 }
-                sessionStorage.removeItem('pendingRegistration');
+                localStorage.removeItem('pendingRegistration');
             }
             
             // Clear password reset flag if present
-            sessionStorage.removeItem('pendingPasswordReset');
+            localStorage.removeItem('pendingPasswordReset');
             
             // Clear URL hash and show dashboard
             window.history.replaceState(null, '', window.location.pathname);
@@ -281,7 +289,7 @@
             msg.innerText = "Registering...";
 
             // Store registration data for after magic link click
-            sessionStorage.setItem('pendingRegistration', JSON.stringify({
+            localStorage.setItem('pendingRegistration', JSON.stringify({
                 email, name, address, phone, sms_opt_in: smsOptIn
             }));
 
@@ -293,7 +301,7 @@
 
             if (authError) {
                 msg.innerText = "Error: " + authError.message;
-                sessionStorage.removeItem('pendingRegistration');
+                localStorage.removeItem('pendingRegistration');
                 return;
             }
 
