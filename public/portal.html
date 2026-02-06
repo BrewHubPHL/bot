@@ -24,12 +24,16 @@
         <h1>☕️ Resident Portal</h1>
         
         <div id="login-form">
-            <p>Already registered? Enter your email to log in.</p>
-            <input type="email" id="email" placeholder="name@example.com" />
-            <button onclick="handleLogin()">Send Magic Link</button>
+            <p>Already registered? Log in below.</p>
+            <input type="email" id="email" placeholder="Email" />
+            <input type="password" id="password" placeholder="Password" />
+            <button onclick="handleLogin()">Log In</button>
             <p id="login-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
-            <p style="margin-top:20px; text-align:center;">
-                <a href="#" onclick="showRegister()" style="color:var(--dark);">New resident? <strong>Register here</strong></a>
+            <p style="margin-top:15px; text-align:center;">
+                <a href="javascript:void(0)" onclick="handleForgotPassword()" style="color:#666; font-size:0.85rem;">Forgot password?</a>
+            </p>
+            <p style="margin-top:10px; text-align:center;">
+                <a href="javascript:void(0)" onclick="showRegister()" style="color:var(--dark);">New resident? <strong>Register here</strong></a>
             </p>
         </div>
 
@@ -45,8 +49,17 @@
             <button onclick="handleRegister()">Register</button>
             <p id="register-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
             <p style="margin-top:20px; text-align:center;">
-                <a href="#" onclick="showLogin()" style="color:var(--dark);">Already registered? <strong>Log in</strong></a>
+                <a href="javascript:void(0)" onclick="showLogin()" style="color:var(--dark);">Already registered? <strong>Log in</strong></a>
             </p>
+        </div>
+
+        <div id="set-password-form" class="hidden">
+            <h2>🔐 Set Your Password</h2>
+            <p>Create a password to complete your registration.</p>
+            <input type="password" id="new-password" placeholder="Create password (min 6 characters)" />
+            <input type="password" id="confirm-password" placeholder="Confirm password" />
+            <button onclick="handleSetPassword()">Set Password</button>
+            <p id="set-password-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
         </div>
     </div>
 
@@ -80,12 +93,38 @@
 
         // 2. CHECK SESSION ON LOAD
         async function init() {
+            // Check URL for magic link token (user just clicked email link)
+            const hashParams = new URLSearchParams(window.location.hash.substring(1));
+            const accessToken = hashParams.get('access_token');
+            const type = hashParams.get('type');
+            
+            // Listen for auth changes
+            supabase.auth.onAuthStateChange(async (event, session) => {
+                if (event === 'SIGNED_IN' && session) {
+                    // Check if user needs to set password (came from magic link)
+                    if (type === 'magiclink' || type === 'signup' || type === 'recovery') {
+                        showPasswordSetup(session.user);
+                    } else {
+                        showDashboard(session.user);
+                    }
+                }
+            });
+            
+            // Check existing session
             const { data: { session } } = await supabase.auth.getSession();
-            if (session) {
+            if (session && !accessToken) {
+                // User already logged in with password
                 showDashboard(session.user);
             }
         }
         init();
+
+        function showPasswordSetup(user) {
+            document.getElementById('login-form').classList.add('hidden');
+            document.getElementById('register-form').classList.add('hidden');
+            document.getElementById('dashboard-view').classList.add('hidden');
+            document.getElementById('set-password-form').classList.remove('hidden');
+        }
 
         // 3. LOGIN/REGISTER TOGGLE
         function showRegister() {
@@ -97,22 +136,78 @@
             document.getElementById('login-form').classList.remove('hidden');
         }
 
-        // 4. LOGIN LOGIC (Magic Link)
+        // 4. LOGIN LOGIC (Password)
         async function handleLogin() {
             const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
             const msg = document.getElementById('login-msg');
-            msg.innerText = "Sending link...";
             
-            const { error } = await supabase.auth.signInWithOtp({ 
+            if (!email || !password) {
+                msg.innerText = "Please enter email and password.";
+                return;
+            }
+            
+            msg.innerText = "Logging in...";
+            
+            const { data, error } = await supabase.auth.signInWithPassword({ 
                 email,
-                options: { emailRedirectTo: window.location.origin + '/portal.html' }
+                password
+            });
+            
+            if (error) {
+                msg.innerText = "Error: " + error.message;
+            } else {
+                showDashboard(data.user);
+            }
+        }
+
+        async function handleForgotPassword() {
+            const email = document.getElementById('email').value;
+            const msg = document.getElementById('login-msg');
+            
+            if (!email) {
+                msg.innerText = "Enter your email first, then click Forgot password.";
+                return;
+            }
+            
+            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: window.location.origin + '/portal.html'
             });
             
             if (error) msg.innerText = "Error: " + error.message;
-            else msg.innerText = "✅ Check your email for the login link!";
+            else msg.innerText = "✅ Check your email for reset link!";
         }
 
-        // 5. REGISTER LOGIC
+        // 5. SET PASSWORD (after magic link click)
+        async function handleSetPassword() {
+            const password = document.getElementById('new-password').value;
+            const confirm = document.getElementById('confirm-password').value;
+            const msg = document.getElementById('set-password-msg');
+            
+            if (!password || password.length < 6) {
+                msg.innerText = "Password must be at least 6 characters.";
+                return;
+            }
+            
+            if (password !== confirm) {
+                msg.innerText = "Passwords don't match.";
+                return;
+            }
+            
+            msg.innerText = "Setting password...";
+            
+            const { data, error } = await supabase.auth.updateUser({ password });
+            
+            if (error) {
+                msg.innerText = "Error: " + error.message;
+            } else {
+                // Clear URL hash and show dashboard
+                window.history.replaceState(null, '', window.location.pathname);
+                showDashboard(data.user);
+            }
+        }
+
+        // 6. REGISTER LOGIC
         async function handleRegister() {
             const name = document.getElementById('reg-name').value.trim();
             const address = document.getElementById('reg-address').value.trim();
@@ -164,9 +259,10 @@
             window.location.reload();
         }
 
-        // 6. LOAD USER DATA
+        // 7. LOAD USER DATA
         async function showDashboard(user) {
             document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('set-password-form').classList.add('hidden');
             document.getElementById('dashboard-view').classList.remove('hidden');
             document.getElementById('welcome-text').innerText = `Welcome, ${user.email.split('@')[0]}`;
 
