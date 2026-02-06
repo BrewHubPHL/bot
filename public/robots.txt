@@ -5,6 +5,7 @@ Disallow: /manager.html
 Disallow: /login.html
 Disallow: /scan.html
 Disallow: /thank-you.html
+Disallow: /portal.html
 Disallow: /.netlify/
 
 Sitemap: https://brewhubphl.com/sitemap.xml

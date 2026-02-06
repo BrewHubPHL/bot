@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrewHub Resident Portal</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        :root { --brand: #d2b48c; --dark: #2c1810; --bg: #fdfbf7; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--dark); max-width: 600px; margin: 0 auto; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        h1, h2 { color: var(--dark); }
+        button { background: var(--dark); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 16px; }
+        button:hover { opacity: 0.9; }
+        input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+        .badge { background: #e0f2f1; color: #00695c; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; }
+        .hidden { display: none; }
+        .voucher { border: 2px dashed var(--brand); padding: 10px; text-align: center; margin-top: 10px; background: #fff8e1; }
+    </style>
+</head>
+<body>
+
+    <div id="login-view">
+        <h1>☕️ Resident Portal</h1>
+        
+        <div id="login-form">
+            <p>Already registered? Enter your email to log in.</p>
+            <input type="email" id="email" placeholder="name@example.com" />
+            <button onclick="handleLogin()">Send Magic Link</button>
+            <p id="login-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
+            <p style="margin-top:20px; text-align:center;">
+                <a href="#" onclick="showRegister()" style="color:var(--dark);">New resident? <strong>Register here</strong></a>
+            </p>
+        </div>
+
+        <div id="register-form" class="hidden">
+            <p>Register for package tracking & coffee rewards.</p>
+            <input type="text" id="reg-name" placeholder="Full Name *" required />
+            <input type="text" id="reg-address" placeholder="Unit # or Address *" required />
+            <input type="email" id="reg-email" placeholder="Email *" required />
+            <input type="tel" id="reg-phone" placeholder="Phone (optional - for text alerts)" />
+            <label style="display:flex; align-items:center; gap:8px; margin-bottom:15px; font-size:0.9rem;">
+                <input type="checkbox" id="reg-sms-opt-in" /> Text me when my packages arrive
+            </label>
+            <button onclick="handleRegister()">Register</button>
+            <p id="register-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
+            <p style="margin-top:20px; text-align:center;">
+                <a href="#" onclick="showLogin()" style="color:var(--dark);">Already registered? <strong>Log in</strong></a>
+            </p>
+        </div>
+    </div>
+
+    <div id="dashboard-view" class="hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1 id="welcome-text">Welcome Home</h1>
+            <button onclick="handleLogout()" style="width: auto; background: #ccc; font-size: 0.8rem;">Sign Out</button>
+        </div>
+
+        <div class="card">
+            <h2>📦 Incoming Parcels</h2>
+            <div id="parcel-list">Loading packages...</div>
+        </div>
+
+        <div class="card">
+            <h2>☕️ Coffee Loyalty</h2>
+            <div id="loyalty-progress">Checking points...</div>
+            <div id="voucher-list" style="margin-top:15px;"></div>
+        </div>
+    </div>
+
+    <script>
+        // 1. SETUP SUPABASE
+        const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgzNjU3MjMsImV4cCI6MjA2Mzk0MTcyM30.WAPtNjLOI-kIwHoKrFuejT3P6NqaVMXMrjGqFvJzSxQ';
+        const supabase = toSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        function toSupabaseClient(url, key) {
+            return window.supabase.createClient(url, key);
+        }
+
+        // 2. CHECK SESSION ON LOAD
+        async function init() {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                showDashboard(session.user);
+            }
+        }
+        init();
+
+        // 3. LOGIN/REGISTER TOGGLE
+        function showRegister() {
+            document.getElementById('login-form').classList.add('hidden');
+            document.getElementById('register-form').classList.remove('hidden');
+        }
+        function showLogin() {
+            document.getElementById('register-form').classList.add('hidden');
+            document.getElementById('login-form').classList.remove('hidden');
+        }
+
+        // 4. LOGIN LOGIC (Magic Link)
+        async function handleLogin() {
+            const email = document.getElementById('email').value;
+            const msg = document.getElementById('login-msg');
+            msg.innerText = "Sending link...";
+            
+            const { error } = await supabase.auth.signInWithOtp({ 
+                email,
+                options: { emailRedirectTo: window.location.origin + '/portal.html' }
+            });
+            
+            if (error) msg.innerText = "Error: " + error.message;
+            else msg.innerText = "✅ Check your email for the login link!";
+        }
+
+        // 5. REGISTER LOGIC
+        async function handleRegister() {
+            const name = document.getElementById('reg-name').value.trim();
+            const address = document.getElementById('reg-address').value.trim();
+            const email = document.getElementById('reg-email').value.trim();
+            const phone = document.getElementById('reg-phone').value.trim() || null;
+            const smsOptIn = document.getElementById('reg-sms-opt-in').checked;
+            const msg = document.getElementById('register-msg');
+
+            if (!name || !address || !email) {
+                msg.innerText = "Please fill in all required fields.";
+                return;
+            }
+
+            msg.innerText = "Registering...";
+
+            // Create auth user (sends magic link)
+            const { error: authError } = await supabase.auth.signInWithOtp({
+                email,
+                options: { emailRedirectTo: window.location.origin + '/portal.html' }
+            });
+
+            if (authError) {
+                msg.innerText = "Error: " + authError.message;
+                return;
+            }
+
+            // Add to customers table (upsert in case they exist)
+            const { error: dbError } = await supabase
+                .from('customers')
+                .upsert({ 
+                    email,
+                    name,
+                    address,
+                    phone,
+                    sms_opt_in: smsOptIn,
+                    loyalty_points: 0
+                }, { onConflict: 'email' });
+
+            if (dbError) {
+                console.error("DB error:", dbError);
+                msg.innerText = "✅ Check your email! (Note: profile may need staff verification)";
+            } else {
+                msg.innerText = "✅ Registered! Check your email for the login link.";
+            }
+        }
+
+        async function handleLogout() {
+            await supabase.auth.signOut();
+            window.location.reload();
+        }
+
+        // 6. LOAD USER DATA
+        async function showDashboard(user) {
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('dashboard-view').classList.remove('hidden');
+            document.getElementById('welcome-text').innerText = `Welcome, ${user.email.split('@')[0]}`;
+
+            loadPackages(user.email);
+            loadLoyalty(user.email);
+            loadVouchers(user.id);
+        }
+
+        // Fetch loyalty points from customers table
+        async function loadLoyalty(email) {
+            const { data, error } = await supabase
+                .from('customers')
+                .select('loyalty_points')
+                .eq('email', email)
+                .single();
+
+            const container = document.getElementById('loyalty-progress');
+            const points = data?.loyalty_points || 0;
+            const progress = points % 10;
+            const freeDrinks = Math.floor(points / 10);
+
+            container.innerHTML = `
+                <div style="margin-bottom:10px;">
+                    <strong>${progress}/10</strong> coffees until your next free drink
+                </div>
+                <div style="background:#eee; border-radius:8px; height:20px; overflow:hidden;">
+                    <div style="background:var(--brand); height:100%; width:${progress * 10}%; transition: width 0.3s;"></div>
+                </div>
+                <p style="font-size:0.8rem; color:#666; margin-top:8px;">Total points earned: ${points}</p>
+            `;
+        }
+
+        // Fetch parcels matching email (from register-tracking.js logic)
+        async function loadPackages(email) {
+            const { data, error } = await supabase
+                .from('expected_parcels')
+                .select('*')
+                .eq('customer_email', email)
+                .order('registered_at', { ascending: false });
+
+            const container = document.getElementById('parcel-list');
+            
+            if (!data || data.length === 0) {
+                container.innerHTML = "<p>No active package tracking.</p>";
+                return;
+            }
+
+            container.innerHTML = data.map(p => `
+                <div style="border-bottom:1px solid #eee; padding: 10px 0;">
+                    <strong>${p.carrier}</strong>: ${p.tracking_number.slice(-4)}...
+                    <br><span class="badge">${p.status}</span>
+                </div>
+            `).join('');
+        }
+
+        // Fetch active vouchers (from square-webhook.js logic)
+        async function loadVouchers(userId) {
+            const { data, error } = await supabase
+                .from('vouchers')
+                .select('*')
+                .eq('user_id', userId)
+                .eq('is_redeemed', false);
+
+            const container = document.getElementById('voucher-list');
+
+            if (!data || data.length === 0) {
+                container.innerHTML = "";
+                return;
+            }
+
+            container.innerHTML = "<h3 style='margin-bottom:10px;'>🎟 Ready to Redeem:</h3>" + data.map(v => `
+                <div class="voucher">
+                    <h3>FREE COFFEE</h3>
+                    <p>Code: <strong>${v.code}</strong></p>
+                    <img src="${v.qr_code_base64}" style="width: 100px; height: 100px;" />
+                    <p style="font-size:0.7rem;">Show this at the counter</p>
+                </div>
+            `).join('');
+        }
+    </script>
+</body>
+</html>
