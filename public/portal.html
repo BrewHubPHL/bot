@@ -88,6 +88,14 @@
     </div>
 
     <script>
+        // CAPTURE HASH IMMEDIATELY before Supabase can clear it
+        const INITIAL_HASH = window.location.hash;
+        const NEEDS_PASSWORD = INITIAL_HASH.includes('access_token') && 
+            (INITIAL_HASH.includes('type=magiclink') || INITIAL_HASH.includes('type=signup') || INITIAL_HASH.includes('type=recovery'));
+        
+        console.log('INITIAL HASH:', INITIAL_HASH);
+        console.log('NEEDS PASSWORD:', NEEDS_PASSWORD);
+        
         // 1. SETUP SUPABASE
         const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
@@ -95,32 +103,38 @@
 
         // 2. CHECK SESSION ON LOAD
         async function init() {
-            // Check URL for magic link token BEFORE Supabase clears it
-            const hash = window.location.hash;
-            const isFromMagicLink = hash.includes('access_token') && 
-                (hash.includes('type=magiclink') || hash.includes('type=signup') || hash.includes('type=recovery'));
+            // Also check sessionStorage for pending registration/reset
+            const hasPendingRegistration = !!sessionStorage.getItem('pendingRegistration');
+            const hasPendingReset = !!sessionStorage.getItem('pendingPasswordReset');
+            const needsPasswordSetup = NEEDS_PASSWORD || hasPendingRegistration || hasPendingReset;
             
-            console.log('Hash:', hash);
-            console.log('Is from magic link:', isFromMagicLink);
+            console.log('Has pending registration:', hasPendingRegistration);
+            console.log('Has pending reset:', hasPendingReset);
+            console.log('Final needs password setup:', needsPasswordSetup);
             
-            // Listen for auth state changes
-            sb.auth.onAuthStateChange(async (event, session) => {
-                console.log('Auth event:', event, 'Session:', !!session, 'isFromMagicLink:', isFromMagicLink);
-                
-                if (event === 'SIGNED_IN' && session) {
-                    if (isFromMagicLink) {
-                        // User just clicked magic link - show password setup
+            // If coming from magic link, wait for session then show password setup
+            if (needsPasswordSetup) {
+                // Wait a moment for Supabase to process the token
+                setTimeout(async () => {
+                    const { data: { session } } = await sb.auth.getSession();
+                    if (session) {
                         showPasswordSetup(session.user);
-                    } else {
-                        // Normal login
-                        showDashboard(session.user);
                     }
+                }, 500);
+                return;
+            }
+            
+            // Listen for auth state changes (for normal login flow)
+            sb.auth.onAuthStateChange(async (event, session) => {
+                console.log('Auth event:', event);
+                if (event === 'SIGNED_IN' && session) {
+                    showDashboard(session.user);
                 }
             });
             
             // Check existing session (returning user with password)
             const { data: { session } } = await sb.auth.getSession();
-            if (session && !isFromMagicLink) {
+            if (session) {
                 showDashboard(session.user);
             }
         }
@@ -181,12 +195,19 @@
                 return;
             }
             
+            // Mark that we're expecting a password reset
+            sessionStorage.setItem('pendingPasswordReset', 'true');
+            
             const { error } = await sb.auth.resetPasswordForEmail(email, {
                 redirectTo: window.location.origin + '/portal.html'
             });
             
-            if (error) msg.innerText = "Error: " + error.message;
-            else msg.innerText = "✅ Check your email for reset link!";
+            if (error) {
+                msg.innerText = "Error: " + error.message;
+                sessionStorage.removeItem('pendingPasswordReset');
+            } else {
+                msg.innerText = "✅ Check your email for reset link!";
+            }
         }
 
         // 5. SET PASSWORD (after magic link click)
@@ -211,11 +232,36 @@
             
             if (error) {
                 msg.innerText = "Error: " + error.message;
-            } else {
-                // Clear URL hash and show dashboard
-                window.history.replaceState(null, '', window.location.pathname);
-                showDashboard(data.user);
+                return;
             }
+
+            // Now user is authenticated - create customer record
+            const pendingReg = sessionStorage.getItem('pendingRegistration');
+            if (pendingReg) {
+                const regData = JSON.parse(pendingReg);
+                const { error: dbError } = await sb
+                    .from('customers')
+                    .upsert({ 
+                        email: regData.email,
+                        name: regData.name,
+                        address: regData.address,
+                        phone: regData.phone,
+                        sms_opt_in: regData.sms_opt_in,
+                        loyalty_points: 0
+                    }, { onConflict: 'email' });
+                
+                if (dbError) {
+                    console.error("DB error:", dbError);
+                }
+                sessionStorage.removeItem('pendingRegistration');
+            }
+            
+            // Clear password reset flag if present
+            sessionStorage.removeItem('pendingPasswordReset');
+            
+            // Clear URL hash and show dashboard
+            window.history.replaceState(null, '', window.location.pathname);
+            showDashboard(data.user);
         }
 
         // 6. REGISTER LOGIC
@@ -234,6 +280,11 @@
 
             msg.innerText = "Registering...";
 
+            // Store registration data for after magic link click
+            sessionStorage.setItem('pendingRegistration', JSON.stringify({
+                email, name, address, phone, sms_opt_in: smsOptIn
+            }));
+
             // Create auth user (sends magic link)
             const { error: authError } = await sb.auth.signInWithOtp({
                 email,
@@ -242,27 +293,11 @@
 
             if (authError) {
                 msg.innerText = "Error: " + authError.message;
+                sessionStorage.removeItem('pendingRegistration');
                 return;
             }
 
-            // Add to customers table (upsert in case they exist)
-            const { error: dbError } = await sb
-                .from('customers')
-                .upsert({ 
-                    email,
-                    name,
-                    address,
-                    phone,
-                    sms_opt_in: smsOptIn,
-                    loyalty_points: 0
-                }, { onConflict: 'email' });
-
-            if (dbError) {
-                console.error("DB error:", dbError);
-                msg.innerText = "✅ Check your email! (Note: profile may need staff verification)";
-            } else {
-                msg.innerText = "✅ Registered! Check your email for the login link.";
-            }
+            msg.innerText = "✅ Check your email for the login link!";
         }
 
         async function handleLogout() {
