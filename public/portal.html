@@ -107,6 +107,7 @@
                 
                 // Handle password recovery event specifically
                 if (event === 'PASSWORD_RECOVERY') {
+                    console.log('PASSWORD_RECOVERY detected - showing password form');
                     showPasswordSetup(session.user);
                     return;
                 }
@@ -114,13 +115,6 @@
                 if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
                     // Skip if we're in the middle of registration (handleRegister will call showDashboard)
                     if (isRegistering) return;
-                    
-                    // If user explicitly requested password reset (from forgot password flow)
-                    // Note: PASSWORD_RECOVERY event handles the actual reset link clicks
-                    if (localStorage.getItem('pendingPasswordReset')) {
-                        showPasswordSetup(session.user);
-                        return;
-                    }
                     
                     // Otherwise show dashboard
                     showDashboard(session.user);
@@ -165,9 +159,6 @@
             msg.innerText = "Logging in...";
             btn.disabled = true;
             
-            // Clear BEFORE login so auth listener doesn't show password form
-            localStorage.removeItem('pendingPasswordReset');
-            
             const { data, error } = await sb.auth.signInWithPassword({ 
                 email,
                 password
@@ -191,16 +182,12 @@
                 return;
             }
             
-            // Mark that we're expecting a password reset
-            localStorage.setItem('pendingPasswordReset', 'true');
-            
             const { error } = await sb.auth.resetPasswordForEmail(email, {
                 redirectTo: window.location.origin + '/portal.html'
             });
             
             if (error) {
                 msg.innerText = "Error: " + error.message;
-                localStorage.removeItem('pendingPasswordReset');
             } else {
                 msg.innerText = "✅ Check your email for reset link!";
             }
@@ -240,9 +227,6 @@
                 return;
             }
 
-            // Clear password reset flag
-            localStorage.removeItem('pendingPasswordReset');
-            
             // Clear URL hash and show dashboard
             window.history.replaceState(null, '', window.location.pathname);
             showDashboard(data.user);
@@ -282,10 +266,7 @@
             // Create auth user with password
             const { data, error: authError } = await sb.auth.signUp({
                 email,
-                password,
-                options: {
-                    emailRedirectTo: window.location.origin + '/portal.html'
-                }
+                password
             });
 
             if (authError) {
@@ -302,14 +283,14 @@
             // (RLS allows anon insert so this works before email confirmation)
             const { error: dbError } = await sb
                 .from('customers')
-                .upsert({ 
+                .insert({ 
                     email,
                     name,
                     address,
                     phone,
                     sms_opt_in: smsOptIn,
                     loyalty_points: 0
-                }, { onConflict: 'email' });
+                });
 
             if (dbError) {
                 isRegistering = false;
