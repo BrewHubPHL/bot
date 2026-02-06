@@ -95,31 +95,32 @@
 
         // 2. CHECK SESSION ON LOAD
         async function init() {
-            // Check URL for magic link token (user just clicked email link)
-            const hashParams = new URLSearchParams(window.location.hash.substring(1));
-            const accessToken = hashParams.get('access_token');
-            const type = hashParams.get('type');
+            // Check URL for magic link token BEFORE Supabase clears it
+            const hash = window.location.hash;
+            const isFromMagicLink = hash.includes('access_token') && 
+                (hash.includes('type=magiclink') || hash.includes('type=signup') || hash.includes('type=recovery'));
             
-            // If URL has magic link tokens, show password setup after auth resolves
-            if (accessToken && (type === 'magiclink' || type === 'signup' || type === 'recovery')) {
-                // Wait for Supabase to process the token
-                const { data: { session }, error } = await sb.auth.getSession();
-                if (session) {
-                    showPasswordSetup(session.user);
-                    return;
-                }
-            }
+            console.log('Hash:', hash);
+            console.log('Is from magic link:', isFromMagicLink);
             
-            // Listen for auth changes (for normal login flow)
+            // Listen for auth state changes
             sb.auth.onAuthStateChange(async (event, session) => {
+                console.log('Auth event:', event, 'Session:', !!session, 'isFromMagicLink:', isFromMagicLink);
+                
                 if (event === 'SIGNED_IN' && session) {
-                    showDashboard(session.user);
+                    if (isFromMagicLink) {
+                        // User just clicked magic link - show password setup
+                        showPasswordSetup(session.user);
+                    } else {
+                        // Normal login
+                        showDashboard(session.user);
+                    }
                 }
             });
             
-            // Check existing session (returning user)
+            // Check existing session (returning user with password)
             const { data: { session } } = await sb.auth.getSession();
-            if (session) {
+            if (session && !isFromMagicLink) {
                 showDashboard(session.user);
             }
         }
