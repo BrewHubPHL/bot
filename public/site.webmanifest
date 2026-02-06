@@ -1,6 +1,8 @@
 {
-  "name": "BrewHubPHL ",
-  "short_name": "",
+  "name": "BrewHub PHL - Coffee & Parcel Hub",
+  "short_name": "BrewHub",
+  "description": "Philadelphia coffee shop, parcel hub, notary services, free WiFi, and mailbox rentals.",
+  "start_url": "/",
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",

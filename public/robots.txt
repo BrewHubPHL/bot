@@ -1,4 +1,10 @@
 User-agent: *
 Allow: /
+Disallow: /admin.html
+Disallow: /manager.html
+Disallow: /login.html
+Disallow: /scan.html
+Disallow: /thank-you.html
+Disallow: /.netlify/
 
-Sitemap: https://brewhub-phl.netlify.app/sitemap.xml
+Sitemap: https://brewhubphl.com/sitemap.xml
