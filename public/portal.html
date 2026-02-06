@@ -70,8 +70,14 @@
         </div>
 
         <div class="card">
-            <h2>📦 Incoming Parcels</h2>
-            <div id="parcel-list">Loading packages...</div>
+            <h2>📦 Package Lookup</h2>
+            <p style="font-size:0.9rem; color:#666; margin-bottom:10px;">Check if your package has arrived at BrewHub</p>
+            <div style="display:flex; gap:8px;">
+                <input type="text" id="tracking-search" placeholder="Tracking # or email" style="flex:1; margin-bottom:0;" />
+                <button onclick="searchPackage()" style="width:auto; padding:12px 20px;">Check</button>
+            </div>
+            <div id="package-result" style="margin-top:15px;"></div>
+            <div id="parcel-list" style="margin-top:15px;"></div>
         </div>
 
         <div class="card">
@@ -85,11 +91,7 @@
         // 1. SETUP SUPABASE
         const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgzNjU3MjMsImV4cCI6MjA2Mzk0MTcyM30.WAPtNjLOI-kIwHoKrFuejT3P6NqaVMXMrjGqFvJzSxQ';
-        const supabase = toSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-        function toSupabaseClient(url, key) {
-            return window.supabase.createClient(url, key);
-        }
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         // 2. CHECK SESSION ON LOAD
         async function init() {
@@ -310,16 +312,19 @@
             const container = document.getElementById('parcel-list');
             
             if (!data || data.length === 0) {
-                container.innerHTML = "<p>No active package tracking.</p>";
+                container.innerHTML = "";
                 return;
             }
 
-            container.innerHTML = data.map(p => `
-                <div style="border-bottom:1px solid #eee; padding: 10px 0;">
-                    <strong>${p.carrier}</strong>: ${p.tracking_number.slice(-4)}...
-                    <br><span class="badge">${p.status}</span>
-                </div>
-            `).join('');
+            container.innerHTML = `
+                <h3 style="margin-top:15px; margin-bottom:10px; font-size:0.95rem;">📋 Your Tracked Packages:</h3>
+                ${data.map(p => `
+                    <div style="border-bottom:1px solid #eee; padding: 10px 0;">
+                        <strong>${p.carrier}</strong>: ...${p.tracking_number.slice(-6)}
+                        <br><span class="badge">${p.status}</span>
+                    </div>
+                `).join('')}
+            `;
         }
 
         // Fetch active vouchers (from square-webhook.js logic)
@@ -345,6 +350,84 @@
                     <p style="font-size:0.7rem;">Show this at the counter</p>
                 </div>
             `).join('');
+        }
+
+        // Search for package by tracking number OR email
+        async function searchPackage() {
+            const input = document.getElementById('tracking-search').value.trim();
+            const result = document.getElementById('package-result');
+            
+            if (!input) {
+                result.innerHTML = '<p style="color:#666;">Enter a tracking number or email to search.</p>';
+                return;
+            }
+
+            result.innerHTML = '<p>Searching...</p>';
+
+            // Check if input looks like an email
+            const isEmail = input.includes('@');
+            let query;
+
+            if (isEmail) {
+                // Search by resident email - may return multiple packages
+                query = supabase
+                    .from('parcels')
+                    .select('*')
+                    .ilike('resident_email', input)
+                    .eq('picked_up', false)
+                    .order('created_at', { ascending: false });
+            } else {
+                // Search by tracking number
+                query = supabase
+                    .from('parcels')
+                    .select('*')
+                    .ilike('tracking_number', `%${input}%`)
+                    .limit(5);
+            }
+
+            const { data, error } = await query;
+
+            if (error || !data || data.length === 0) {
+                result.innerHTML = `
+                    <div style="background:#fff3cd; padding:15px; border-radius:8px; border:1px solid #ffc107;">
+                        <strong>📭 No packages found</strong>
+                        <p style="margin:5px 0 0; font-size:0.9rem;">${isEmail ? 'No pending packages for this email.' : "This tracking number hasn't been checked in yet."}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Show results
+            if (data.length === 1) {
+                const p = data[0];
+                const status = p.picked_up ? 'Picked Up' : 'Ready for Pickup';
+                const statusColor = p.picked_up ? '#6c757d' : '#28a745';
+                
+                result.innerHTML = `
+                    <div style="background:#d4edda; padding:15px; border-radius:8px; border:1px solid #28a745;">
+                        <strong style="color:${statusColor};">📦 ${status}</strong>
+                        <p style="margin:8px 0 0; font-size:0.9rem;">
+                            <strong>Carrier:</strong> ${p.carrier || 'Unknown'}<br>
+                            <strong>Checked in:</strong> ${new Date(p.created_at).toLocaleDateString()}
+                        </p>
+                        ${!p.picked_up ? '<p style="margin-top:10px; font-size:0.85rem; color:#155724;">Show ID at the counter to pick up your package.</p>' : ''}
+                    </div>
+                `;
+            } else {
+                // Multiple packages
+                result.innerHTML = `
+                    <div style="background:#d4edda; padding:15px; border-radius:8px; border:1px solid #28a745;">
+                        <strong>📦 ${data.length} Package${data.length > 1 ? 's' : ''} Found</strong>
+                        ${data.map(p => `
+                            <div style="margin-top:10px; padding:10px; background:white; border-radius:6px;">
+                                <strong>${p.carrier || 'Package'}</strong> - ${p.picked_up ? '✓ Picked up' : '🟢 Ready'}<br>
+                                <span style="font-size:0.85rem; color:#666;">Checked in: ${new Date(p.created_at).toLocaleDateString()}</span>
+                            </div>
+                        `).join('')}
+                        <p style="margin-top:10px; font-size:0.85rem; color:#155724;">Show ID at the counter to pick up.</p>
+                    </div>
+                `;
+            }
         }
     </script>
 </body>
