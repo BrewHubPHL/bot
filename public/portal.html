@@ -91,7 +91,7 @@
         // 1. SETUP SUPABASE
         const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgzNjU3MjMsImV4cCI6MjA2Mzk0MTcyM30.WAPtNjLOI-kIwHoKrFuejT3P6NqaVMXMrjGqFvJzSxQ';
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         // 2. CHECK SESSION ON LOAD
         async function init() {
@@ -101,7 +101,7 @@
             const type = hashParams.get('type');
             
             // Listen for auth changes
-            supabase.auth.onAuthStateChange(async (event, session) => {
+            sb.auth.onAuthStateChange(async (event, session) => {
                 if (event === 'SIGNED_IN' && session) {
                     // Check if user needs to set password (came from magic link)
                     if (type === 'magiclink' || type === 'signup' || type === 'recovery') {
@@ -113,7 +113,7 @@
             });
             
             // Check existing session
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await sb.auth.getSession();
             if (session && !accessToken) {
                 // User already logged in with password
                 showDashboard(session.user);
@@ -155,7 +155,7 @@
             
             msg.innerText = "Logging in...";
             
-            const { data, error } = await supabase.auth.signInWithPassword({ 
+            const { data, error } = await sb.auth.signInWithPassword({ 
                 email,
                 password
             });
@@ -176,7 +176,7 @@
                 return;
             }
             
-            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            const { error } = await sb.auth.resetPasswordForEmail(email, {
                 redirectTo: window.location.origin + '/portal.html'
             });
             
@@ -202,7 +202,7 @@
             
             msg.innerText = "Setting password...";
             
-            const { data, error } = await supabase.auth.updateUser({ password });
+            const { data, error } = await sb.auth.updateUser({ password });
             
             if (error) {
                 msg.innerText = "Error: " + error.message;
@@ -230,7 +230,7 @@
             msg.innerText = "Registering...";
 
             // Create auth user (sends magic link)
-            const { error: authError } = await supabase.auth.signInWithOtp({
+            const { error: authError } = await sb.auth.signInWithOtp({
                 email,
                 options: { emailRedirectTo: window.location.origin + '/portal.html' }
             });
@@ -241,7 +241,7 @@
             }
 
             // Add to customers table (upsert in case they exist)
-            const { error: dbError } = await supabase
+            const { error: dbError } = await sb
                 .from('customers')
                 .upsert({ 
                     email,
@@ -261,7 +261,7 @@
         }
 
         async function handleLogout() {
-            await supabase.auth.signOut();
+            await sb.auth.signOut();
             window.location.reload();
         }
 
@@ -279,7 +279,7 @@
 
         // Fetch loyalty points from customers table
         async function loadLoyalty(email) {
-            const { data, error } = await supabase
+            const { data, error } = await sb
                 .from('customers')
                 .select('loyalty_points')
                 .eq('email', email)
@@ -303,7 +303,7 @@
 
         // Fetch parcels matching email (from register-tracking.js logic)
         async function loadPackages(email) {
-            const { data, error } = await supabase
+            const { data, error } = await sb
                 .from('expected_parcels')
                 .select('*')
                 .eq('customer_email', email)
@@ -329,7 +329,7 @@
 
         // Fetch active vouchers (from square-webhook.js logic)
         async function loadVouchers(userId) {
-            const { data, error } = await supabase
+            const { data, error } = await sb
                 .from('vouchers')
                 .select('*')
                 .eq('user_id', userId)
@@ -370,7 +370,7 @@
 
             if (isEmail) {
                 // Search by resident email - may return multiple packages
-                query = supabase
+                query = sb
                     .from('parcels')
                     .select('*')
                     .ilike('resident_email', input)
@@ -378,7 +378,7 @@
                     .order('created_at', { ascending: false });
             } else {
                 // Search by tracking number
-                query = supabase
+                query = sb
                     .from('parcels')
                     .select('*')
                     .ilike('tracking_number', `%${input}%`)
