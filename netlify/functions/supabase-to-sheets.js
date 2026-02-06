@@ -57,12 +57,23 @@ exports.handler = async (event) => {
             sheetData.email = record.email;
             sheetData.action = 'New Signup';
 
-            // --- THE EMAIL TRIGGER (The fix for the email problem) ---
-            console.log('Triggering Welcome Email for:', record.email);
-            const { error: emailError } = await supabase.functions.invoke('welcome-email', {
-                body: { record: { email: record.email } } 
-            });
-            if (emailError) console.error('Email Trigger Failed:', emailError);
+            // Check if this email is already a registered customer (skip welcome email if so)
+            const { data: existingCustomer } = await supabase
+                .from('customers')
+                .select('email')
+                .eq('email', record.email)
+                .single();
+
+            if (!existingCustomer) {
+                // Only send welcome email to new users not already in customers table
+                console.log('Triggering Welcome Email for:', record.email);
+                const { error: emailError } = await supabase.functions.invoke('welcome-email', {
+                    body: { record: { email: record.email } } 
+                });
+                if (emailError) console.error('Email Trigger Failed:', emailError);
+            } else {
+                console.log('Skipping welcome email - already a customer:', record.email);
+            }
         }
 
         // 3. SEND TO GOOGLE

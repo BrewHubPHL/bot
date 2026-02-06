@@ -100,22 +100,26 @@
             const accessToken = hashParams.get('access_token');
             const type = hashParams.get('type');
             
-            // Listen for auth changes
+            // If URL has magic link tokens, show password setup after auth resolves
+            if (accessToken && (type === 'magiclink' || type === 'signup' || type === 'recovery')) {
+                // Wait for Supabase to process the token
+                const { data: { session }, error } = await sb.auth.getSession();
+                if (session) {
+                    showPasswordSetup(session.user);
+                    return;
+                }
+            }
+            
+            // Listen for auth changes (for normal login flow)
             sb.auth.onAuthStateChange(async (event, session) => {
                 if (event === 'SIGNED_IN' && session) {
-                    // Check if user needs to set password (came from magic link)
-                    if (type === 'magiclink' || type === 'signup' || type === 'recovery') {
-                        showPasswordSetup(session.user);
-                    } else {
-                        showDashboard(session.user);
-                    }
+                    showDashboard(session.user);
                 }
             });
             
-            // Check existing session
+            // Check existing session (returning user)
             const { data: { session } } = await sb.auth.getSession();
-            if (session && !accessToken) {
-                // User already logged in with password
+            if (session) {
                 showDashboard(session.user);
             }
         }
