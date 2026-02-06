@@ -12,6 +12,7 @@
         h1, h2 { color: var(--dark); }
         button { background: var(--dark); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 16px; }
         button:hover { opacity: 0.9; }
+        button:disabled { background: #999; cursor: not-allowed; }
         input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
         .badge { background: #e0f2f1; color: #00695c; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; }
         .hidden { display: none; }
@@ -27,7 +28,7 @@
             <p>Already registered? Log in below.</p>
             <input type="email" id="email" placeholder="Email" />
             <input type="password" id="password" placeholder="Password" />
-            <button onclick="handleLogin()">Log In</button>
+            <button id="login-btn" onclick="handleLogin()">Log In</button>
             <p id="login-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
             <p style="margin-top:15px; text-align:center;">
                 <a href="javascript:void(0)" onclick="handleForgotPassword()" style="color:#666; font-size:0.85rem;">Forgot password?</a>
@@ -42,11 +43,13 @@
             <input type="text" id="reg-name" placeholder="Full Name *" required />
             <input type="text" id="reg-address" placeholder="Unit # or Address *" required />
             <input type="email" id="reg-email" placeholder="Email *" required />
+            <input type="password" id="reg-password" placeholder="Password (min 6 characters) *" required />
+            <input type="password" id="reg-password-confirm" placeholder="Confirm Password *" required />
             <input type="tel" id="reg-phone" placeholder="Phone (optional - for text alerts)" />
             <label style="display:flex; align-items:center; gap:8px; margin-bottom:15px; font-size:0.9rem;">
                 <input type="checkbox" id="reg-sms-opt-in" /> Text me when my packages arrive
             </label>
-            <button onclick="handleRegister()">Register</button>
+            <button id="register-btn" onclick="handleRegister()">Register</button>
             <p id="register-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
             <p style="margin-top:20px; text-align:center;">
                 <a href="#" onclick="showLogin(event); return false;" style="color:var(--dark);">Already registered? <strong>Log in</strong></a>
@@ -54,11 +57,11 @@
         </div>
 
         <div id="set-password-form" class="hidden">
-            <h2>🔐 Set Your Password</h2>
-            <p>Create a password to complete your registration.</p>
-            <input type="password" id="new-password" placeholder="Create password (min 6 characters)" />
+            <h2>🔐 Reset Your Password</h2>
+            <p>Create a new password for your account.</p>
+            <input type="password" id="new-password" placeholder="New password (min 6 characters)" />
             <input type="password" id="confirm-password" placeholder="Confirm password" />
-            <button onclick="handleSetPassword()">Set Password</button>
+            <button id="set-password-btn" onclick="handleSetPassword()">Update Password</button>
             <p id="set-password-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
         </div>
     </div>
@@ -88,61 +91,39 @@
     </div>
 
     <script>
-        // CAPTURE HASH IMMEDIATELY before Supabase can clear it
-        const INITIAL_HASH = window.location.hash;
-        const NEEDS_PASSWORD = INITIAL_HASH.includes('access_token') && 
-            (INITIAL_HASH.includes('type=magiclink') || INITIAL_HASH.includes('type=signup') || INITIAL_HASH.includes('type=recovery'));
-        
-        console.log('INITIAL HASH:', INITIAL_HASH);
-        console.log('NEEDS PASSWORD:', NEEDS_PASSWORD);
-        
         // 1. SETUP SUPABASE
         const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co'; 
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
         const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // Flag to prevent onAuthStateChange from firing during registration
+        let isRegistering = false;
+
         // 2. CHECK SESSION ON LOAD
         async function init() {
-            // Check localStorage for pending registration/reset (same device)
-            const hasPendingRegistration = !!localStorage.getItem('pendingRegistration');
-            const hasPendingReset = !!localStorage.getItem('pendingPasswordReset');
-            const needsPasswordFromStorage = hasPendingRegistration || hasPendingReset;
-            
-            console.log('NEEDS_PASSWORD from hash:', NEEDS_PASSWORD);
-            console.log('Has pending registration:', hasPendingRegistration);
-            console.log('Has pending reset:', hasPendingReset);
-            
             // Listen for auth state changes
             sb.auth.onAuthStateChange(async (event, session) => {
                 console.log('Auth event:', event, 'Session:', !!session);
                 
+                // Handle password recovery event specifically
+                if (event === 'PASSWORD_RECOVERY') {
+                    showPasswordSetup(session.user);
+                    return;
+                }
+                
                 if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
-                    // Check if user needs password setup:
-                    // 1. URL had magic link hash
-                    // 2. localStorage has pending registration/reset
-                    // 3. User is authenticated but NOT in customers table (cross-device magic link)
+                    // Skip if we're in the middle of registration (handleRegister will call showDashboard)
+                    if (isRegistering) return;
                     
-                    if (NEEDS_PASSWORD || needsPasswordFromStorage) {
+                    // If user explicitly requested password reset (from forgot password flow)
+                    // Note: PASSWORD_RECOVERY event handles the actual reset link clicks
+                    if (localStorage.getItem('pendingPasswordReset')) {
                         showPasswordSetup(session.user);
                         return;
                     }
                     
-                    // Check if user exists in customers table
-                    const { data: customer } = await sb
-                        .from('customers')
-                        .select('email')
-                        .eq('email', session.user.email)
-                        .single();
-                    
-                    console.log('Customer lookup:', customer);
-                    
-                    if (!customer) {
-                        // New user from magic link (different device) - needs password setup
-                        showPasswordSetup(session.user);
-                    } else {
-                        // Existing customer - show dashboard
-                        showDashboard(session.user);
-                    }
+                    // Otherwise show dashboard
+                    showDashboard(session.user);
                 }
             });
         }
@@ -174,6 +155,7 @@
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             const msg = document.getElementById('login-msg');
+            const btn = document.getElementById('login-btn');
             
             if (!email || !password) {
                 msg.innerText = "Please enter email and password.";
@@ -181,11 +163,17 @@
             }
             
             msg.innerText = "Logging in...";
+            btn.disabled = true;
+            
+            // Clear BEFORE login so auth listener doesn't show password form
+            localStorage.removeItem('pendingPasswordReset');
             
             const { data, error } = await sb.auth.signInWithPassword({ 
                 email,
                 password
             });
+            
+            btn.disabled = false;
             
             if (error) {
                 msg.innerText = "Error: " + error.message;
@@ -218,11 +206,12 @@
             }
         }
 
-        // 5. SET PASSWORD (after magic link click)
+        // 5. SET PASSWORD (after password reset link)
         async function handleSetPassword() {
             const password = document.getElementById('new-password').value;
             const confirm = document.getElementById('confirm-password').value;
             const msg = document.getElementById('set-password-msg');
+            const btn = document.getElementById('set-password-btn');
             
             if (!password || password.length < 6) {
                 msg.innerText = "Password must be at least 6 characters.";
@@ -235,36 +224,23 @@
             }
             
             msg.innerText = "Setting password...";
+            btn.disabled = true;
             
             const { data, error } = await sb.auth.updateUser({ password });
+            
+            btn.disabled = false;
             
             if (error) {
                 msg.innerText = "Error: " + error.message;
                 return;
             }
 
-            // Now user is authenticated - create customer record
-            const pendingReg = localStorage.getItem('pendingRegistration');
-            if (pendingReg) {
-                const regData = JSON.parse(pendingReg);
-                const { error: dbError } = await sb
-                    .from('customers')
-                    .upsert({ 
-                        email: regData.email,
-                        name: regData.name,
-                        address: regData.address,
-                        phone: regData.phone,
-                        sms_opt_in: regData.sms_opt_in,
-                        loyalty_points: 0
-                    }, { onConflict: 'email' });
-                
-                if (dbError) {
-                    console.error("DB error:", dbError);
-                }
-                localStorage.removeItem('pendingRegistration');
+            if (!data.user) {
+                msg.innerText = "Error: Could not update password. Please try again.";
+                return;
             }
-            
-            // Clear password reset flag if present
+
+            // Clear password reset flag
             localStorage.removeItem('pendingPasswordReset');
             
             // Clear URL hash and show dashboard
@@ -272,40 +248,85 @@
             showDashboard(data.user);
         }
 
-        // 6. REGISTER LOGIC
+        // 6. REGISTER LOGIC (email + password)
         async function handleRegister() {
             const name = document.getElementById('reg-name').value.trim();
             const address = document.getElementById('reg-address').value.trim();
             const email = document.getElementById('reg-email').value.trim();
+            const password = document.getElementById('reg-password').value;
+            const confirmPassword = document.getElementById('reg-password-confirm').value;
             const phone = document.getElementById('reg-phone').value.trim() || null;
             const smsOptIn = document.getElementById('reg-sms-opt-in').checked;
             const msg = document.getElementById('register-msg');
+            const btn = document.getElementById('register-btn');
 
-            if (!name || !address || !email) {
+            if (!name || !address || !email || !password) {
                 msg.innerText = "Please fill in all required fields.";
                 return;
             }
 
-            msg.innerText = "Registering...";
-
-            // Store registration data for after magic link click
-            localStorage.setItem('pendingRegistration', JSON.stringify({
-                email, name, address, phone, sms_opt_in: smsOptIn
-            }));
-
-            // Create auth user (sends magic link)
-            const { error: authError } = await sb.auth.signInWithOtp({
-                email,
-                options: { emailRedirectTo: window.location.origin + '/portal.html' }
-            });
-
-            if (authError) {
-                msg.innerText = "Error: " + authError.message;
-                localStorage.removeItem('pendingRegistration');
+            if (password.length < 6) {
+                msg.innerText = "Password must be at least 6 characters.";
                 return;
             }
 
-            msg.innerText = "✅ Check your email for the login link!";
+            if (password !== confirmPassword) {
+                msg.innerText = "Passwords don't match.";
+                return;
+            }
+
+            msg.innerText = "Registering...";
+            btn.disabled = true;
+            isRegistering = true;
+
+            // Create auth user with password
+            const { data, error: authError } = await sb.auth.signUp({
+                email,
+                password
+            });
+
+            if (authError) {
+                isRegistering = false;
+                btn.disabled = false;
+                msg.innerText = "Error: " + authError.message;
+                return;
+            }
+
+            // Check if email confirmation is required (no session returned)
+            const needsEmailConfirmation = !data.session;
+
+            // Create customer record in database (do this regardless, so it's ready when they confirm)
+            const { error: dbError } = await sb
+                .from('customers')
+                .upsert({ 
+                    email,
+                    name,
+                    address,
+                    phone,
+                    sms_opt_in: smsOptIn,
+                    loyalty_points: 0
+                }, { onConflict: 'email' });
+
+            if (dbError) {
+                isRegistering = false;
+                btn.disabled = false;
+                console.error("DB error:", dbError);
+                msg.innerText = "Account created but profile error. Please try logging in.";
+                return;
+            }
+
+            // If email confirmation was required, don't show dashboard
+            if (needsEmailConfirmation) {
+                isRegistering = false;
+                btn.disabled = false;
+                msg.innerText = "✅ Check your email to confirm your account, then log in.";
+                return;
+            }
+
+            // Show dashboard after customer record is created
+            isRegistering = false;
+            btn.disabled = false;
+            showDashboard(data.user);
         }
 
         async function handleLogout() {
@@ -315,6 +336,11 @@
 
         // 7. LOAD USER DATA
         async function showDashboard(user) {
+            if (!user || !user.email) {
+                console.error('showDashboard called with invalid user:', user);
+                return;
+            }
+            
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('set-password-form').classList.add('hidden');
             document.getElementById('dashboard-view').classList.remove('hidden');
@@ -327,13 +353,20 @@
 
         // Fetch loyalty points from customers table
         async function loadLoyalty(email) {
+            const container = document.getElementById('loyalty-progress');
+            
             const { data, error } = await sb
                 .from('customers')
                 .select('loyalty_points')
                 .eq('email', email)
                 .single();
 
-            const container = document.getElementById('loyalty-progress');
+            if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+                console.error('Error loading loyalty:', error);
+                container.innerHTML = '<p style="color:#c00;">Could not load loyalty info.</p>';
+                return;
+            }
+
             const points = data?.loyalty_points || 0;
             const progress = points % 10;
             const freeDrinks = Math.floor(points / 10);
@@ -351,13 +384,19 @@
 
         // Fetch parcels matching email (from register-tracking.js logic)
         async function loadPackages(email) {
+            const container = document.getElementById('parcel-list');
+            
             const { data, error } = await sb
                 .from('expected_parcels')
                 .select('*')
                 .eq('customer_email', email)
                 .order('registered_at', { ascending: false });
 
-            const container = document.getElementById('parcel-list');
+            if (error) {
+                console.error('Error loading packages:', error);
+                container.innerHTML = '<p style="color:#c00; font-size:0.9rem;">Could not load packages.</p>';
+                return;
+            }
             
             if (!data || data.length === 0) {
                 container.innerHTML = "";
@@ -368,8 +407,8 @@
                 <h3 style="margin-top:15px; margin-bottom:10px; font-size:0.95rem;">📋 Your Tracked Packages:</h3>
                 ${data.map(p => `
                     <div style="border-bottom:1px solid #eee; padding: 10px 0;">
-                        <strong>${p.carrier}</strong>: ...${p.tracking_number.slice(-6)}
-                        <br><span class="badge">${p.status}</span>
+                        <strong>${p.carrier || 'Unknown'}</strong>: ...${(p.tracking_number || '').slice(-6) || 'N/A'}
+                        <br><span class="badge">${p.status || 'pending'}</span>
                     </div>
                 `).join('')}
             `;
@@ -377,13 +416,19 @@
 
         // Fetch active vouchers (from square-webhook.js logic)
         async function loadVouchers(userId) {
+            const container = document.getElementById('voucher-list');
+            
             const { data, error } = await sb
                 .from('vouchers')
                 .select('*')
                 .eq('user_id', userId)
                 .eq('is_redeemed', false);
 
-            const container = document.getElementById('voucher-list');
+            if (error) {
+                console.error('Error loading vouchers:', error);
+                container.innerHTML = '<p style="color:#c00; font-size:0.9rem;">Could not load vouchers.</p>';
+                return;
+            }
 
             if (!data || data.length === 0) {
                 container.innerHTML = "";
@@ -393,8 +438,8 @@
             container.innerHTML = "<h3 style='margin-bottom:10px;'>🎟 Ready to Redeem:</h3>" + data.map(v => `
                 <div class="voucher">
                     <h3>FREE COFFEE</h3>
-                    <p>Code: <strong>${v.code}</strong></p>
-                    <img src="${v.qr_code_base64}" style="width: 100px; height: 100px;" />
+                    <p>Code: <strong>${v.code || 'N/A'}</strong></p>
+                    ${v.qr_code_base64 ? `<img src="${v.qr_code_base64}" style="width: 100px; height: 100px;" />` : ''}
                     <p style="font-size:0.7rem;">Show this at the counter</p>
                 </div>
             `).join('');
@@ -435,7 +480,18 @@
 
             const { data, error } = await query;
 
-            if (error || !data || data.length === 0) {
+            if (error) {
+                console.error('Search error:', error);
+                result.innerHTML = `
+                    <div style="background:#f8d7da; padding:15px; border-radius:8px; border:1px solid #f5c6cb;">
+                        <strong>❌ Search failed</strong>
+                        <p style="margin:5px 0 0; font-size:0.9rem;">Please try again later.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            if (!data || data.length === 0) {
                 result.innerHTML = `
                     <div style="background:#fff3cd; padding:15px; border-radius:8px; border:1px solid #ffc107;">
                         <strong>📭 No packages found</strong>
@@ -446,6 +502,8 @@
             }
 
             // Show results
+            const formatDate = (d) => d ? new Date(d).toLocaleDateString() : 'Unknown';
+            
             if (data.length === 1) {
                 const p = data[0];
                 const status = p.picked_up ? 'Picked Up' : 'Ready for Pickup';
@@ -456,7 +514,7 @@
                         <strong style="color:${statusColor};">📦 ${status}</strong>
                         <p style="margin:8px 0 0; font-size:0.9rem;">
                             <strong>Carrier:</strong> ${p.carrier || 'Unknown'}<br>
-                            <strong>Checked in:</strong> ${new Date(p.created_at).toLocaleDateString()}
+                            <strong>Checked in:</strong> ${formatDate(p.created_at)}
                         </p>
                         ${!p.picked_up ? '<p style="margin-top:10px; font-size:0.85rem; color:#155724;">Show ID at the counter to pick up your package.</p>' : ''}
                     </div>
@@ -469,7 +527,7 @@
                         ${data.map(p => `
                             <div style="margin-top:10px; padding:10px; background:white; border-radius:6px;">
                                 <strong>${p.carrier || 'Package'}</strong> - ${p.picked_up ? '✓ Picked up' : '🟢 Ready'}<br>
-                                <span style="font-size:0.85rem; color:#666;">Checked in: ${new Date(p.created_at).toLocaleDateString()}</span>
+                                <span style="font-size:0.85rem; color:#666;">Checked in: ${formatDate(p.created_at)}</span>
                             </div>
                         `).join('')}
                         <p style="margin-top:10px; font-size:0.85rem; color:#155724;">Show ID at the counter to pick up.</p>
