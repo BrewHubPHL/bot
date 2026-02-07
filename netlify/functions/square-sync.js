@@ -1,9 +1,17 @@
 const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
 
+const squareEnvironment = process.env.NODE_ENV === 'production'
+  ? SquareEnvironment.Production
+  : SquareEnvironment.Sandbox;
+
+const squareToken = process.env.NODE_ENV === 'production'
+  ? process.env.SQUARE_ACCESS_TOKEN
+  : process.env.SQUARE_SANDBOX_TOKEN;
+
 const square = new SquareClient({
-  token: process.env.SQUARE_SANDBOX_TOKEN,
-  environment: SquareEnvironment.Sandbox,
+  token: squareToken,
+  environment: squareEnvironment,
 });
 
 const supabase = createClient(

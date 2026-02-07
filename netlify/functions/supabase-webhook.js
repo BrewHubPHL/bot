@@ -13,7 +13,7 @@ exports.handler = async (event) => {
 
   // 2. Parse the payload from Supabase
   const payload = JSON.parse(event.body || '{}');
-  const { type, record, old_record } = payload;
+  const { type, record } = payload;
 
   console.log(`Processing ${type} for order: ${record?.id}`);
 
@@ -21,18 +21,20 @@ exports.handler = async (event) => {
 
   /**
    * ROUTING LOGIC:
-   * - If a NEW order is created, sync it to the Square Sandbox.
-   * - If an EXISTING order is updated to 'paid', trigger the voice announcement.
+   * * 1. NEW ORDERS (INSERT):
+   * - We ONLY sync to Square if 'square_order_id' is missing.
+   * - If 'square_order_id' exists, it means 'create-checkout.js' 
+   * already handled the Square creation, so we skip it here.
    */
-  if (type === 'INSERT') {
+  if (type === 'INSERT' && !record.square_order_id) {
     targetFunction = 'square-sync';
-  } else if (
-    type === 'UPDATE' && 
-    record.status === 'paid' && 
-    old_record?.status !== 'paid'
-  ) {
-    targetFunction = 'order-announcer';
-  }
+  } 
+  
+  /**
+   * NOTE: "Order Announcer" logic removed per request.
+   * If you want to add other triggers (like sending emails on 'paid'),
+   * add the 'UPDATE' logic here.
+   */
 
   // 3. Forward the request to the appropriate service
   if (targetFunction) {
@@ -42,7 +44,10 @@ exports.handler = async (event) => {
       
       await fetch(`${baseUrl}/.netlify/functions/${targetFunction}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-brewhub-secret': process.env.INTERNAL_SYNC_SECRET
+        },
         body: JSON.stringify({ record })
       });
 

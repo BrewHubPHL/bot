@@ -1,7 +1,8 @@
 const { createClient } = require('@supabase/supabase-js');
 const QRCode = require('qrcode');
+const crypto = require('crypto');
 
-const supabaseUrl = 'https://rruionkpgswvncypweiv.supabase.co';
+const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 // Generate unique voucher codes like BRW-K8L9P2
@@ -15,7 +16,28 @@ const generateVoucherCode = () => {
 };
 
 exports.handler = async (event) => {
-  const body = JSON.parse(event.body);
+  const signatureKey = process.env.SQUARE_WEBHOOK_SIGNATURE;
+  const signatureHeader = event.headers['x-square-signature'];
+  const rawBody = event.body || '';
+
+  if (signatureKey && signatureHeader) {
+    const baseUrl = process.env.SQUARE_WEBHOOK_URL || process.env.URL;
+    const notificationUrl = `${baseUrl}/.netlify/functions/square-webhook`;
+    const payload = notificationUrl + rawBody;
+    const digest = crypto
+      .createHmac('sha256', signatureKey)
+      .update(payload, 'utf8')
+      .digest('base64');
+
+    if (digest !== signatureHeader) {
+      console.error('Invalid Square webhook signature');
+      return { statusCode: 401, body: JSON.stringify({ error: 'Invalid signature' }) };
+    }
+  } else {
+    console.warn('Square webhook signature not verified: missing header or signature key');
+  }
+
+  const body = JSON.parse(rawBody);
   console.log('Square webhook received:', body.type);
 
   if (body.type !== 'payment.updated') {
@@ -109,10 +131,22 @@ exports.handler = async (event) => {
     // This is where ElevenLabs can shout it out
   }
 
-  // 5. Decrement inventory - every coffee sale uses 1 cup
+  // 5. Decrement inventory - one cup per drink in the order
+  let cupCount = 1;
+  const { count, error: cupsError } = await supabase
+    .from('coffee_orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('order_id', orderId);
+
+  if (cupsError) {
+    console.error("Cup count lookup failed:", cupsError);
+  } else if (typeof count === 'number' && count > 0) {
+    cupCount = count;
+  }
+
   const { error: inventoryError } = await supabase.rpc('decrement_inventory', { 
     item: '12oz Cups', 
-    amount: 1 
+    amount: cupCount 
   });
   
   if (inventoryError) {

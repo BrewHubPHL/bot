@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BrewHub KDS | Kitchen Display</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        .card { transition: all 0.3s ease; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .stale-pulse { animation: pulse 2s infinite; }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-900 text-slate-100">
+
+    <div id="app">
+        <div class="flex items-center justify-center min-h-screen">
+            <div class="text-center">
+                <div class="text-4xl mb-4">☕</div>
+                <p class="text-slate-400">Booting up the espresso machine...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- SUPABASE INIT ---
+        const supabase = window.supabase.createClient(
+            'https://rruionkpgswvncypweiv.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU'
+        );
+
+        // --- STATE ---
+        let orders = [];
+        let lastUpdated = new Date();
+
+        // --- HELPERS ---
+        function timeAgo(date) {
+            const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+            if (seconds < 60) return `${seconds}s`;
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${minutes}m`;
+            const hours = Math.floor(minutes / 60);
+            return `${hours}h ${minutes % 60}m`;
+        }
+
+        function isStale(createdAt) {
+            return (new Date() - new Date(createdAt)) > 1000 * 60 * 15; // 15 mins
+        }
+
+        // --- FETCH ORDERS ---
+        async function fetchOrders() {
+            try {
+                const { data, error } = await supabase
+                    .from('orders')
+                    .select(`*, coffee_orders (id, drink_name, customizations, status)`)
+                    .in('status', ['paid', 'preparing', 'ready'])
+                    .order('created_at', { ascending: true });
+
+                if (error) throw error;
+                orders = data || [];
+                lastUpdated = new Date();
+                render();
+            } catch (err) {
+                console.error("Error fetching orders:", err);
+            }
+        }
+
+        // --- UPDATE STATUS ---
+        async function updateStatus(orderId, newStatus) {
+            // Optimistic update
+            orders = orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o);
+            if (newStatus === 'completed') {
+                orders = orders.filter(o => o.id !== orderId);
+            }
+            render();
+
+            const { error } = await supabase
+                .from('orders')
+                .update({ status: newStatus })
+                .eq('id', orderId);
+
+            if (error) {
+                console.error("Failed to update:", error);
+                fetchOrders(); // Revert on error
+            }
+        }
+
+        // --- RENDER ---
+        function render() {
+            const app = document.getElementById('app');
+            
+            const statusColors = {
+                paid: { border: 'border-emerald-500', badge: 'bg-emerald-500/10 text-emerald-400' },
+                preparing: { border: 'border-amber-500', badge: 'bg-amber-500/10 text-amber-400' },
+                ready: { border: 'border-blue-500', badge: 'bg-blue-500/10 text-blue-400' }
+            };
+
+            app.innerHTML = `
+                <div class="p-6">
+                    <!-- HEADER -->
+                    <header class="flex justify-between items-center mb-8 border-b border-slate-700 pb-4">
+                        <h1 class="text-3xl font-bold text-amber-500 tracking-tight flex items-center gap-3">
+                            <span class="text-4xl">☕</span>
+                            BrewHub <span class="text-white">KDS</span>
+                        </h1>
+                        <div class="flex items-center gap-4 text-slate-400 text-sm">
+                            <span>Last synced: ${lastUpdated.toLocaleTimeString()}</span>
+                            <button onclick="fetchOrders()" class="p-2 hover:bg-slate-700 rounded-full transition-colors" title="Refresh">
+                                🔄
+                            </button>
+                        </div>
+                    </header>
+
+                    <!-- ORDER GRID -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        ${orders.length === 0 ? `
+                            <div class="col-span-full text-center py-20 opacity-50">
+                                <h2 class="text-2xl mb-2">All caught up! 🎉</h2>
+                                <p>Time to wipe down the counters.</p>
+                            </div>
+                        ` : orders.map(order => {
+                            const colors = statusColors[order.status] || { border: 'border-slate-600', badge: 'bg-slate-700 text-slate-300' };
+                            const stale = isStale(order.created_at) && order.status !== 'ready';
+                            
+                            return `
+                                <div class="card bg-slate-800 rounded-xl border-l-4 ${colors.border} shadow-xl overflow-hidden ${stale ? 'stale-pulse' : ''}">
+                                    <!-- CARD HEADER -->
+                                    <div class="p-4 bg-slate-800/50 border-b border-slate-700 flex justify-between items-start">
+                                        <div>
+                                            <h3 class="font-bold text-lg text-white">
+                                                ${order.customer_name || 'Guest'}
+                                            </h3>
+                                            <div class="flex items-center gap-2 text-xs font-mono text-slate-400 mt-1">
+                                                <span>#${order.id.slice(0, 4)}</span>
+                                                <span>•</span>
+                                                <span>🕐 ${timeAgo(order.created_at)} ago</span>
+                                            </div>
+                                        </div>
+                                        <span class="px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${colors.badge}">
+                                            ${order.status}
+                                        </span>
+                                    </div>
+
+                                    <!-- DRINK LIST -->
+                                    <div class="p-4 space-y-3">
+                                        ${(order.coffee_orders || []).map(item => `
+                                            <div class="flex items-start gap-3">
+                                                <div class="mt-2">
+                                                    <div class="w-2 h-2 rounded-full bg-slate-500"></div>
+                                                </div>
+                                                <div>
+                                                    <p class="text-slate-200 font-medium text-lg leading-tight">
+                                                        ${item.drink_name || 'Drink'}
+                                                    </p>
+                                                    ${item.customizations ? `
+                                                        <p class="text-amber-400/80 text-sm mt-0.5">
+                                                            ${Array.isArray(item.customizations) 
+                                                                ? item.customizations.join(', ') 
+                                                                : (typeof item.customizations === 'object' 
+                                                                    ? Object.entries(item.customizations).map(([k,v]) => \`\${k}: \${v}\`).join(', ')
+                                                                    : item.customizations)}
+                                                        </p>
+                                                    ` : ''}
+                                                </div>
+                                            </div>
+                                        `).join('')}
+                                        ${(!order.coffee_orders || order.coffee_orders.length === 0) ? `
+                                            <p class="text-slate-500 italic">No items listed</p>
+                                        ` : ''}
+                                    </div>
+
+                                    <!-- FOOTER ACTIONS -->
+                                    <div class="p-3 bg-slate-900/30 border-t border-slate-700">
+                                        ${order.status === 'paid' ? `
+                                            <button onclick="updateStatus('${order.id}', 'preparing')"
+                                                class="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold transition-all">
+                                                ▶️ Start Order
+                                            </button>
+                                        ` : ''}
+                                        ${order.status === 'preparing' ? `
+                                            <button onclick="updateStatus('${order.id}', 'ready')"
+                                                class="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold transition-all shadow-lg shadow-amber-900/20">
+                                                🔔 Order Up!
+                                            </button>
+                                        ` : ''}
+                                        ${order.status === 'ready' ? `
+                                            <button onclick="updateStatus('${order.id}', 'completed')"
+                                                class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold transition-all">
+                                                ✅ Picked Up
+                                            </button>
+                                        ` : ''}
+                                    </div>
+
+                                    <!-- LATE WARNING -->
+                                    ${stale ? `
+                                        <div class="bg-red-500/20 text-red-200 text-xs py-2 text-center font-bold">
+                                            ⚠️ Running Late (>15m)
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- INIT ---
+        fetchOrders();
+
+        // Realtime subscription
+        supabase
+            .channel('kds-live')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+                console.log("Order change detected!");
+                fetchOrders();
+            })
+            .subscribe();
+
+        // Auto-refresh timer display every 30s
+        setInterval(() => render(), 30000);
+    </script>
+</body>
+</html>

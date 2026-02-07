@@ -1,7 +1,7 @@
 // PRO WAY: Customer pre-registers their tracking number
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = 'https://rruionkpgswvncypweiv.supabase.co';
+const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 // Auto-detect carrier from tracking number format

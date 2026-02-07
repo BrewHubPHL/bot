@@ -1,8 +1,16 @@
 const { SquareClient, SquareEnvironment } = require('square');
 
+const squareEnvironment = process.env.NODE_ENV === 'production'
+  ? SquareEnvironment.Production
+  : SquareEnvironment.Sandbox;
+
+const squareToken = process.env.NODE_ENV === 'production'
+  ? process.env.SQUARE_ACCESS_TOKEN
+  : process.env.SQUARE_SANDBOX_TOKEN;
+
 const client = new SquareClient({
-  token: process.env.SQUARE_SANDBOX_TOKEN,
-  environment: SquareEnvironment.Sandbox, // Change to Production when you open!
+  token: squareToken,
+  environment: squareEnvironment,
 });
 
 exports.handler = async (event) => {

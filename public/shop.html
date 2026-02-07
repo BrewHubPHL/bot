@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrewHub PHL | Shop Coffee & Merch</title>
+    <meta name="description" content="Shop BrewHub coffee bags, mugs, and merch. Pickup in Philly or ship nationwide.">
+    <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --ink: #2c1810;
+            --coffee: #3c2f2f;
+            --latte: #d4b59e;
+            --cream: #f8f4f0;
+            --paper: #fff9f2;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Work Sans', sans-serif;
+            color: var(--ink);
+            background: radial-gradient(1200px 600px at 10% -10%, #efe3d6 0%, transparent 60%),
+                        radial-gradient(900px 500px at 110% 0%, #efe9e2 0%, transparent 60%),
+                        var(--cream);
+            min-height: 100vh;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            border-bottom: 1px solid #eadfce;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(6px);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        header .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        header img { height: 36px; }
+        header a {
+            text-decoration: none;
+            color: var(--coffee);
+            font-weight: 600;
+        }
+        .hero {
+            padding: 48px 24px 24px;
+            max-width: 1100px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 32px;
+        }
+        .hero h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(2rem, 4vw, 3.2rem);
+            margin: 0 0 12px;
+            color: var(--coffee);
+        }
+        .hero p { font-size: 1.05rem; margin: 0 0 20px; }
+        .hero .pill {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: var(--latte);
+            color: var(--ink);
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+        .btn {
+            padding: 12px 18px;
+            border-radius: 10px;
+            border: 1px solid var(--coffee);
+            background: var(--coffee);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn.outline {
+            background: transparent;
+            color: var(--coffee);
+        }
+        .hero-card {
+            background: var(--paper);
+            border: 1px solid #eadfce;
+            border-radius: 16px;
+            padding: 18px;
+            box-shadow: 0 12px 30px rgba(60, 47, 47, 0.12);
+        }
+        .hero-card ul { margin: 0; padding-left: 18px; }
+        .section {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 0 24px 60px;
+        }
+        .section h2 {
+            font-family: 'Playfair Display', serif;
+            margin: 18px 0;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            border: 1px solid #efe1d2;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        }
+        .thumb {
+            height: 150px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #f0e2d4, #f7f1ea);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 42px;
+        }
+        .price { font-weight: 700; color: var(--coffee); }
+        .card p { margin: 0; color: #5a4a42; font-size: 0.92rem; }
+        .card button { margin-top: auto; }
+        .notice {
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: #fff1dc;
+            border: 1px dashed #e0caa8;
+            color: #6b4a2c;
+            font-size: 0.9rem;
+        }
+        footer {
+            text-align: center;
+            padding: 30px 16px;
+            color: #6d5c52;
+            font-size: 0.85rem;
+        }
+        @media (max-width: 860px) {
+            .hero { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <img src="logo.png" alt="BrewHub logo">
+            <span>BrewHub PHL</span>
+        </div>
+        <nav>
+            <a href="/">Home</a>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <div>
+            <span class="pill">ONLINE SHOP</span>
+            <h1>Fresh roasted coffee + BrewHub merch</h1>
+            <p>Order beans, mugs, and more. Choose pickup in Point Breeze or ship it anywhere.</p>
+            <div class="cta-row">
+                <button class="btn" onclick="document.getElementById('shop').scrollIntoView({ behavior: 'smooth' })">Shop now</button>
+                <button class="btn outline" onclick="window.location.href='/'">Back to BrewHub</button>
+            </div>
+        </div>
+        <div class="hero-card">
+            <h3>What ships fastest</h3>
+            <ul>
+                <li>House Blend 12oz (whole bean)</li>
+                <li>Espresso Roast 12oz</li>
+                <li>BrewHub ceramic mug</li>
+            </ul>
+            <p style="margin-top:10px; font-size:0.9rem; color:#6b5a52;">Pickup orders are ready same-day after 2 PM.</p>
+        </div>
+    </section>
+
+    <section class="section" id="shop">
+        <h2>Shop the lineup</h2>
+        <div class="notice">Replace each product's checkout URL in the PRODUCTS array to go live.</div>
+        <div class="grid" id="product-grid"></div>
+    </section>
+
+    <footer>
+        BrewHub PHL • Point Breeze • Philly
+    </footer>
+
+    <script>
+        const PRODUCTS = [
+            {
+                id: 'house-blend-12oz',
+                name: 'House Blend 12oz',
+                price: '$18',
+                desc: 'Balanced and chocolatey. Whole bean.',
+                emoji: '☕',
+                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
+            },
+            {
+                id: 'espresso-roast-12oz',
+                name: 'Espresso Roast 12oz',
+                price: '$19',
+                desc: 'Dark roast with crema for days.',
+                emoji: '⚡',
+                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
+            },
+            {
+                id: 'cold-brew-blend-12oz',
+                name: 'Cold Brew Blend 12oz',
+                price: '$18',
+                desc: 'Smooth, low-acid, summer-ready.',
+                emoji: '🧊',
+                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
+            },
+            {
+                id: 'brew-hub-mug',
+                name: 'BrewHub Ceramic Mug',
+                price: '$16',
+                desc: '12oz classic, matte cream glaze.',
+                emoji: '🏺',
+                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
+            },
+            {
+                id: 'brew-hub-tote',
+                name: 'Canvas Tote',
+                price: '$14',
+                desc: 'Perfect for beans, books, or both.',
+                emoji: '👜',
+                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
+            },
+            {
+                id: 'brew-hub-tee',
+                name: 'BrewHub Tee',
+                price: '$24',
+                desc: 'Soft cotton, unisex fit, espresso ink.',
+                emoji: '👕',
+                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
+            }
+        ];
+
+        const grid = document.getElementById('product-grid');
+
+        function handleCheckout(url) {
+            if (!url || url.includes('REPLACE_WITH_SQUARE_CHECKOUT_URL')) {
+                alert('Add your Square Checkout link for this item first.');
+                return;
+            }
+            window.location.href = url;
+        }
+
+        grid.innerHTML = PRODUCTS.map(product => `
+            <div class="card">
+                <div class="thumb">${product.emoji}</div>
+                <div>
+                    <strong>${product.name}</strong>
+                    <div class="price">${product.price}</div>
+                </div>
+                <p>${product.desc}</p>
+                <button class="btn" onclick="handleCheckout('${product.checkoutUrl}')">Buy now</button>
+            </div>
+        `).join('');
+    </script>
+</body>
+</html>
