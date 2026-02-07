@@ -10,7 +10,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
             --ink: #2c1810;
@@ -46,7 +45,6 @@
             align-items: center;
             gap: 12px;
             font-weight: 700;
-            letter-spacing: 0.5px;
         }
         header img { height: 36px; }
         header a {
@@ -68,18 +66,6 @@
             margin: 0 0 12px;
             color: var(--coffee);
         }
-        .hero p { font-size: 1.05rem; margin: 0 0 20px; }
-        .hero .pill {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 999px;
-            background: var(--latte);
-            color: var(--ink);
-            font-size: 0.8rem;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }
-        .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
         .btn {
             padding: 12px 18px;
             border-radius: 10px;
@@ -88,27 +74,14 @@
             color: white;
             font-weight: 600;
             cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
         }
-        .btn.outline {
-            background: transparent;
-            color: var(--coffee);
-        }
-        .hero-card {
-            background: var(--paper);
-            border: 1px solid #eadfce;
-            border-radius: 16px;
-            padding: 18px;
-            box-shadow: 0 12px 30px rgba(60, 47, 47, 0.12);
-        }
-        .hero-card ul { margin: 0; padding-left: 18px; }
         .section {
             max-width: 1100px;
             margin: 0 auto;
             padding: 0 24px 60px;
-        }
-        .section h2 {
-            font-family: 'Playfair Display', serif;
-            margin: 18px 0;
         }
         .grid {
             display: grid;
@@ -123,34 +96,21 @@
             display: flex;
             flex-direction: column;
             gap: 10px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
         }
         .thumb {
-            height: 150px;
+            height: 180px;
             border-radius: 12px;
-            background: linear-gradient(135deg, #f0e2d4, #f7f1ea);
+            overflow: hidden;
+            background: #f7f1ea;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 42px;
+            font-size: 48px;
         }
-        .price { font-weight: 700; color: var(--coffee); }
-        .card p { margin: 0; color: #5a4a42; font-size: 0.92rem; }
-        .card button { margin-top: auto; }
-        .notice {
-            padding: 12px 14px;
-            border-radius: 12px;
-            background: #fff1dc;
-            border: 1px dashed #e0caa8;
-            color: #6b4a2c;
-            font-size: 0.9rem;
-        }
-        footer {
-            text-align: center;
-            padding: 30px 16px;
-            color: #6d5c52;
-            font-size: 0.85rem;
-        }
+        .thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .price { font-weight: 700; color: var(--coffee); font-size: 1.1rem; }
+        footer { text-align: center; padding: 40px; color: #6d5c52; font-size: 0.85rem; }
         @media (max-width: 860px) {
             .hero { grid-template-columns: 1fr; }
         }
@@ -159,7 +119,7 @@
 <body>
     <header>
         <div class="brand">
-            <img src="logo.png" alt="BrewHub logo">
+            <img src="logo.png" alt="BrewHub">
             <span>BrewHub PHL</span>
         </div>
         <nav>
@@ -167,130 +127,96 @@
         </nav>
     </header>
 
-    <section class="hero">
-        <div>
-            <span class="pill">ONLINE SHOP</span>
-            <h1>Fresh roasted coffee + BrewHub merch</h1>
-            <p>Order beans, mugs, and more. Choose pickup in Point Breeze or ship it anywhere.</p>
-            <div class="cta-row">
-                <button class="btn" onclick="document.getElementById('shop').scrollIntoView({ behavior: 'smooth' })">Shop now</button>
-                <button class="btn outline" onclick="window.location.href='/'">Back to BrewHub</button>
+    <div id="shop-container">
+        <section class="hero">
+            <div>
+                <h1 id="shop-title">Loading the BrewHub lineup...</h1>
+                <p>Fresh roasted coffee + local Philly merch. Pickup in Point Breeze or ship nationwide.</p>
+                <div class="cta-row">
+                    <button class="btn" onclick="document.getElementById('product-grid').scrollIntoView({ behavior: 'smooth' })">Shop now</button>
+                </div>
             </div>
-        </div>
-        <div class="hero-card">
-            <h3>What ships fastest</h3>
-            <ul>
-                <li>House Blend 12oz (whole bean)</li>
-                <li>Espresso Roast 12oz</li>
-                <li>BrewHub ceramic mug</li>
-            </ul>
-            <p style="margin-top:10px; font-size:0.9rem; color:#6b5a52;">Pickup orders are ready same-day after 2 PM.</p>
-        </div>
-    </section>
+        </section>
 
-    <section class="section" id="shop">
-        <h2>Shop the lineup</h2>
-        <div class="notice">Products are managed in the merch_products Sheet.</div>
-        <div class="grid" id="product-grid"></div>
-    </section>
+        <section class="section">
+            <div class="grid" id="product-grid"></div>
+        </section>
+    </div>
 
     <footer>
         BrewHub PHL • Point Breeze • Philly
     </footer>
 
     <script>
-        const supabase = window.supabase.createClient(
-            'https://rruionkpgswvncypweiv.supabase.co',
-            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU'
-        );
-
         const grid = document.getElementById('product-grid');
 
-        function handleCheckout(url) {
-            if (!url) {
-                alert('Checkout link missing for this item.');
-                return;
-            }
-            window.location.href = url;
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
         }
 
         function getEmoji(name) {
             const lower = (name || '').toLowerCase();
             if (lower.includes('mug')) return '🏺';
             if (lower.includes('tee') || lower.includes('shirt')) return '👕';
-            if (lower.includes('tote') || lower.includes('bag')) return '👜';
             if (lower.includes('bean')) return '☕';
             return '✨';
         }
 
-        async function checkShopStatus() {
-            const { data } = await supabase
-                .from('site_settings')
-                .select('value')
-                .eq('key', 'shop_enabled')
-                .single();
+        async function initShop() {
+            try {
+                // Fetch from your Netlify Proxy function
+                const res = await fetch('/.netlify/functions/shop-data');
+                const data = await res.json();
 
-            if (data && data.value === false) {
-                document.getElementById('shop').innerHTML = `
-                    <div style="text-align:center; padding: 60px 20px;">
-                        <h2>Shop is currently resting.</h2>
-                        <p>We're roasting fresh beans! Check back soon.</p>
-                        <button class="btn" onclick="window.location.href='/'">Return Home</button>
-                    </div>`;
-                return false;
+                // Logic check: Uses 'shopEnabled' from your shop-data.js
+                if (data.shopEnabled === false) {
+                    document.getElementById('shop-container').innerHTML = `
+                        <div style="text-align:center; padding: 100px 20px;">
+                            <h1 style="font-family:'Playfair Display'; color:var(--coffee);">The Shop is Resting.</h1>
+                            <p>We're roasting fresh beans in Point Breeze. Check back soon!</p>
+                            <br>
+                            <a href="/" class="btn">Return Home</a>
+                        </div>`;
+                    return;
+                }
+
+                document.getElementById('shop-title').innerText = "Fresh roasted coffee + BrewHub merch";
+                renderProducts(data.products || []);
+            } catch (err) {
+                console.error("Shop Load Error:", err);
+                grid.innerHTML = "<p>Unable to load the shop. Please refresh or try again later.</p>";
             }
-            return true;
         }
 
         function renderProducts(products) {
             if (!products || products.length === 0) {
-                grid.innerHTML = '<div class="card"><strong>No products yet.</strong><p>Check back soon.</p></div>';
+                grid.innerHTML = "<p>No products available right now.</p>";
                 return;
             }
 
-            grid.innerHTML = products.map(product => {
-                const price = typeof product.price_cents === 'number'
-                    ? `$${(product.price_cents / 100).toFixed(2)}`
-                    : '$0.00';
-                const thumb = product.image_url
-                    ? `<img src="${product.image_url}" alt="${product.name}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;">`
-                    : getEmoji(product.name);
+            grid.innerHTML = products.map(p => {
+                const priceFormatted = `$${(p.price_cents / 100).toFixed(2)}`;
+                const productThumb = p.image_url 
+                    ? `<img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.name)}">`
+                    : getEmoji(p.name);
 
                 return `
                     <div class="card">
-                        <div class="thumb">${thumb}</div>
+                        <div class="thumb">${productThumb}</div>
                         <div>
-                            <strong>${product.name}</strong>
-                            <div class="price">${price}</div>
+                            <strong style="font-size:1.1rem;">${escapeHtml(p.name)}</strong>
+                            <div class="price">${priceFormatted}</div>
                         </div>
-                        <p>${product.description || ''}</p>
-                        <button class="btn" onclick="handleCheckout('${product.checkout_url || ''}')">Buy now</button>
+                        <p style="font-size:0.9rem; color:#5a4a42; margin: 5px 0 15px;">${escapeHtml(p.description || '')}</p>
+                        <button class="btn" style="width:100%" onclick="window.location.href='${escapeHtml(p.checkout_url)}'">Buy now</button>
                     </div>
                 `;
             }).join('');
         }
 
-        async function loadProducts() {
-            const isOpen = await checkShopStatus();
-            if (!isOpen) return;
-
-            const { data, error } = await supabase
-                .from('merch_products')
-                .select('name, price_cents, description, image_url, checkout_url, is_active, sort_order')
-                .eq('is_active', true)
-                .order('sort_order', { ascending: true })
-                .order('name', { ascending: true });
-
-            if (error) {
-                console.error('Merch load failed:', error);
-                grid.innerHTML = '<div class="card"><strong>Shop offline.</strong><p>Please try again later.</p></div>';
-                return;
-            }
-
-            renderProducts(data || []);
-        }
-
-        loadProducts();
+        // Kick off the load
+        initShop();
     </script>
 </body>
 </html>
