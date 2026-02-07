@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
             --ink: #2c1810;
@@ -189,7 +190,7 @@
 
     <section class="section" id="shop">
         <h2>Shop the lineup</h2>
-        <div class="notice">Replace each product's checkout URL in the PRODUCTS array to go live.</div>
+        <div class="notice">Products are managed in the merch_products Sheet.</div>
         <div class="grid" id="product-grid"></div>
     </section>
 
@@ -198,78 +199,98 @@
     </footer>
 
     <script>
-        const PRODUCTS = [
-            {
-                id: 'house-blend-12oz',
-                name: 'House Blend 12oz',
-                price: '$18',
-                desc: 'Balanced and chocolatey. Whole bean.',
-                emoji: '☕',
-                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
-            },
-            {
-                id: 'espresso-roast-12oz',
-                name: 'Espresso Roast 12oz',
-                price: '$19',
-                desc: 'Dark roast with crema for days.',
-                emoji: '⚡',
-                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
-            },
-            {
-                id: 'cold-brew-blend-12oz',
-                name: 'Cold Brew Blend 12oz',
-                price: '$18',
-                desc: 'Smooth, low-acid, summer-ready.',
-                emoji: '🧊',
-                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
-            },
-            {
-                id: 'brew-hub-mug',
-                name: 'BrewHub Ceramic Mug',
-                price: '$16',
-                desc: '12oz classic, matte cream glaze.',
-                emoji: '🏺',
-                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
-            },
-            {
-                id: 'brew-hub-tote',
-                name: 'Canvas Tote',
-                price: '$14',
-                desc: 'Perfect for beans, books, or both.',
-                emoji: '👜',
-                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
-            },
-            {
-                id: 'brew-hub-tee',
-                name: 'BrewHub Tee',
-                price: '$24',
-                desc: 'Soft cotton, unisex fit, espresso ink.',
-                emoji: '👕',
-                checkoutUrl: 'REPLACE_WITH_SQUARE_CHECKOUT_URL'
-            }
-        ];
+        const supabase = window.supabase.createClient(
+            'https://rruionkpgswvncypweiv.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU'
+        );
 
         const grid = document.getElementById('product-grid');
 
         function handleCheckout(url) {
-            if (!url || url.includes('REPLACE_WITH_SQUARE_CHECKOUT_URL')) {
-                alert('Add your Square Checkout link for this item first.');
+            if (!url) {
+                alert('Checkout link missing for this item.');
                 return;
             }
             window.location.href = url;
         }
 
-        grid.innerHTML = PRODUCTS.map(product => `
-            <div class="card">
-                <div class="thumb">${product.emoji}</div>
-                <div>
-                    <strong>${product.name}</strong>
-                    <div class="price">${product.price}</div>
-                </div>
-                <p>${product.desc}</p>
-                <button class="btn" onclick="handleCheckout('${product.checkoutUrl}')">Buy now</button>
-            </div>
-        `).join('');
+        function getEmoji(name) {
+            const lower = (name || '').toLowerCase();
+            if (lower.includes('mug')) return '🏺';
+            if (lower.includes('tee') || lower.includes('shirt')) return '👕';
+            if (lower.includes('tote') || lower.includes('bag')) return '👜';
+            if (lower.includes('bean')) return '☕';
+            return '✨';
+        }
+
+        async function checkShopStatus() {
+            const { data } = await supabase
+                .from('site_settings')
+                .select('value')
+                .eq('key', 'shop_enabled')
+                .single();
+
+            if (data && data.value === false) {
+                document.getElementById('shop').innerHTML = `
+                    <div style="text-align:center; padding: 60px 20px;">
+                        <h2>Shop is currently resting.</h2>
+                        <p>We're roasting fresh beans! Check back soon.</p>
+                        <button class="btn" onclick="window.location.href='/'">Return Home</button>
+                    </div>`;
+                return false;
+            }
+            return true;
+        }
+
+        function renderProducts(products) {
+            if (!products || products.length === 0) {
+                grid.innerHTML = '<div class="card"><strong>No products yet.</strong><p>Check back soon.</p></div>';
+                return;
+            }
+
+            grid.innerHTML = products.map(product => {
+                const price = typeof product.price_cents === 'number'
+                    ? `$${(product.price_cents / 100).toFixed(2)}`
+                    : '$0.00';
+                const thumb = product.image_url
+                    ? `<img src="${product.image_url}" alt="${product.name}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;">`
+                    : getEmoji(product.name);
+
+                return `
+                    <div class="card">
+                        <div class="thumb">${thumb}</div>
+                        <div>
+                            <strong>${product.name}</strong>
+                            <div class="price">${price}</div>
+                        </div>
+                        <p>${product.description || ''}</p>
+                        <button class="btn" onclick="handleCheckout('${product.checkout_url || ''}')">Buy now</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadProducts() {
+            const isOpen = await checkShopStatus();
+            if (!isOpen) return;
+
+            const { data, error } = await supabase
+                .from('merch_products')
+                .select('name, price_cents, description, image_url, checkout_url, is_active, sort_order')
+                .eq('is_active', true)
+                .order('sort_order', { ascending: true })
+                .order('name', { ascending: true });
+
+            if (error) {
+                console.error('Merch load failed:', error);
+                grid.innerHTML = '<div class="card"><strong>Shop offline.</strong><p>Please try again later.</p></div>';
+                return;
+            }
+
+            renderProducts(data || []);
+        }
+
+        loadProducts();
     </script>
 </body>
 </html>

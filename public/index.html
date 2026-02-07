@@ -139,6 +139,7 @@
                 </div>
                 <button id="voice-btn" class="primary-btn voice-btn">🎤 VOICE CHAT</button>
                 <button onclick="window.location.href='/portal.html'" class="primary-btn" style="margin-top:8px; background:white; color:var(--hub-brown); border:1px solid var(--hub-brown);">📦 RESIDENTS: TRACK PACKAGES</button>
+                <button id="shop-btn" onclick="window.location.href='/shop.html'" class="primary-btn" style="margin-top:8px; background:#f7f1ea; color:var(--hub-brown); border:1px solid var(--hub-brown); display:none;">🛍️ SHOP COFFEE & MERCH</button>
             </div>
         </section>
     </main>
@@ -168,6 +169,24 @@
             'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU'
         );
 
+        async function loadShopToggle() {
+            try {
+                const { data, error } = await supabaseClient
+                    .from('site_settings')
+                    .select('value')
+                    .eq('key', 'shop_enabled')
+                    .single();
+
+                if (error) return;
+
+                const enabled = data?.value === true || data?.value === 'true';
+                const shopBtn = document.getElementById('shop-btn');
+                if (shopBtn && enabled) shopBtn.style.display = 'block';
+            } catch (err) {
+                console.warn('Shop toggle fetch failed:', err);
+            }
+        }
+
         window.onload = () => setTimeout(() => {
             const splash = document.getElementById('splash-overlay');
             splash.style.opacity = '0';
@@ -175,6 +194,7 @@
             
             const savedEmail = localStorage.getItem('brewhub_email');
             if (savedEmail) document.getElementById('email').value = savedEmail;
+            loadShopToggle();
         }, 1800);
 
         // Staff Auth
