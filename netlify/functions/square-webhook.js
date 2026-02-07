@@ -1,9 +1,23 @@
 const { createClient } = require('@supabase/supabase-js');
+const { SquareClient, SquareEnvironment } = require('square');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+const squareEnvironment = process.env.NODE_ENV === 'production'
+  ? SquareEnvironment.Production
+  : SquareEnvironment.Sandbox;
+
+const squareToken = process.env.NODE_ENV === 'production'
+  ? process.env.SQUARE_ACCESS_TOKEN
+  : process.env.SQUARE_SANDBOX_TOKEN;
+
+const square = new SquareClient({
+  token: squareToken,
+  environment: squareEnvironment,
+});
 
 // Generate unique voucher codes like BRW-K8L9P2
 const generateVoucherCode = () => {
@@ -131,23 +145,58 @@ exports.handler = async (event) => {
     // This is where ElevenLabs can shout it out
   }
 
-  // 5. Decrement inventory - one cup per drink in the order
-  let cupCount = 1;
-  const { count, error: cupsError } = await supabase
-    .from('coffee_orders')
-    .select('id', { count: 'exact', head: true })
-    .eq('order_id', orderId);
+  // 5. Decrement inventory - derive quantities from Square line items
+  let cupCount = 0;
+  let beanCount = 0;
+  let lineItems = [];
 
-  if (cupsError) {
-    console.error("Cup count lookup failed:", cupsError);
-  } else if (typeof count === 'number' && count > 0) {
-    cupCount = count;
+  if (payment.order_id) {
+    try {
+      const { result } = await square.ordersApi.retrieveOrder(payment.order_id);
+      lineItems = result?.order?.lineItems || [];
+    } catch (err) {
+      console.error('Square order lookup failed:', err);
+    }
   }
 
-  const { error: inventoryError } = await supabase.rpc('decrement_inventory', { 
-    item: '12oz Cups', 
-    amount: cupCount 
-  });
+  if (lineItems.length > 0) {
+    for (const item of lineItems) {
+      const name = (item?.name || '').toLowerCase();
+      const quantity = Number(item?.quantity || 0);
+
+      if (name.includes('whole bean') || name.includes('beans')) {
+        beanCount += quantity || 0;
+      } else {
+        cupCount += quantity || 0;
+      }
+    }
+  }
+
+  if (cupCount === 0) {
+    const { count, error: cupsError } = await supabase
+      .from('coffee_orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('order_id', orderId);
+
+    if (cupsError) {
+      console.error("Cup count lookup failed:", cupsError);
+    } else if (typeof count === 'number' && count > 0) {
+      cupCount = count;
+    }
+  }
+
+  if (cupCount > 0) {
+    const { error: inventoryError } = await supabase.rpc('decrement_inventory', { 
+      item: '12oz Cups', 
+      amount: cupCount 
+    });
+
+    if (inventoryError) {
+      console.error("Inventory decrement failed:", inventoryError);
+    } else {
+      console.log(`[INVENTORY] Decremented 12oz Cups by ${cupCount}`);
+    }
+  }
   
   if (inventoryError) {
     console.error("Inventory decrement failed:", inventoryError);
@@ -156,12 +205,12 @@ exports.handler = async (event) => {
   }
 
   // 6. If it's a bulk bean sale, decrement beans too
-  if (payment.note && payment.note.includes('Whole Bean')) {
+  if (beanCount > 0) {
     await supabase.rpc('decrement_inventory', { 
       item: 'Espresso Beans', 
-      amount: 1 
+      amount: beanCount 
     });
-    console.log(`[INVENTORY] Decremented Espresso Beans by 1`);
+    console.log(`[INVENTORY] Decremented Espresso Beans by ${beanCount}`);
   }
 
   return { statusCode: 200, body: JSON.stringify({ received: true }) };
