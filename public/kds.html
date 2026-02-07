@@ -39,6 +39,15 @@
             'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU'
         );
 
+        async function authHeaders() {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) throw new Error('Not signed in');
+            return {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+            };
+        }
+
         // --- STATE ---
         let orders = [];
         let lastUpdated = new Date();
@@ -77,21 +86,25 @@
 
         // --- UPDATE STATUS ---
         async function updateStatus(orderId, newStatus) {
-            // Optimistic update
-            orders = orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o);
-            if (newStatus === 'completed') {
-                orders = orders.filter(o => o.id !== orderId);
-            }
-            render();
+            try {
+                const response = await fetch('/.netlify/functions/update-order-status', {
+                    method: 'POST',
+                    headers: await authHeaders(),
+                    body: JSON.stringify({ orderId, status: newStatus })
+                });
 
-            const { error } = await supabase
-                .from('orders')
-                .update({ status: newStatus })
-                .eq('id', orderId);
+                if (!response.ok) throw new Error('Update failed');
 
-            if (error) {
-                console.error("Failed to update:", error);
-                fetchOrders(); // Revert on error
+                // Optimistic update
+                orders = orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o);
+                if (newStatus === 'completed') {
+                    orders = orders.filter(o => o.id !== orderId);
+                }
+                render();
+            } catch (err) {
+                console.error("KDS Update Error:", err);
+                alert("Failed to update status. Check connection.");
+                fetchOrders();
             }
         }
 
