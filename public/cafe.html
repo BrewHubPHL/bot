@@ -449,11 +449,20 @@
         <p class="loyalty-text"><strong id="loyaltyPoints">0</strong> / 10 beans to free coffee</p>
       </div>
       
+      <!-- Customer Lookup -->
+      <div class="card">
+        <h3>👤 Find Customer</h3>
+        <input type="text" id="customerSearch" placeholder="Phone or email..." onkeypress="if(event.key==='Enter')searchCustomer()" style="width:100%; padding:10px; border:1px solid #333; border-radius:6px; background:#222; color:#fff; margin-bottom:8px;">
+        <button onclick="searchCustomer()" style="width:100%; padding:10px; background:#f39c12; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Search</button>
+        <div id="customerSearchResult" style="margin-top:10px; font-size:0.9em;"></div>
+      </div>
+      
       <!-- Current Customer -->
       <div class="card" id="customerCard" style="display: none;">
-        <h3>👤 Current Customer</h3>
+        <h3>✓ Customer Attached</h3>
         <div class="customer-name" id="customerName">-</div>
         <div class="customer-email" id="customerEmail">-</div>
+        <button onclick="clearCustomer()" style="margin-top:10px; padding:8px; background:#666; border:none; border-radius:6px; color:#fff; cursor:pointer; width:100%;">Clear Customer</button>
       </div>
     </aside>
   </main>
@@ -518,25 +527,43 @@
         return;
       }
 
-      // Check if it's a loyalty card barcode
-      const { data: customer, error } = await supabase
-        .from('loyalty_customers')
-        .select('*')
-        .eq('barcode_id', code)
-        .single();
-
-      if (customer) {
-        setCurrentCustomer(customer);
-        const displayName = customer.first_name || customer.email || 'Friend';
-        showToast(`Welcome back, ${displayName}!`);
-        return;
-      }
-
       // Check if it's a voucher code
       if (code.startsWith('BRW-') || code.length === 10) {
         document.getElementById('voucherCode').value = code;
         await redeemVoucher();
         return;
+      }
+
+      // Check if it's a customer QR (contains email)
+      // QR codes from portal will contain customer email
+      if (code.includes('@')) {
+        const { data: customer } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('email', code)
+          .single();
+
+        if (customer) {
+          setCurrentCustomer(customer);
+          showToast(`Welcome back, ${customer.name || 'Friend'}!`);
+          return;
+        }
+      }
+
+      // Try as phone number
+      const cleanCode = code.replace(/\D/g, '');
+      if (cleanCode.length >= 10) {
+        const { data: customer } = await supabase
+          .from('customers')
+          .select('*')
+          .ilike('phone', `%${cleanCode.slice(-10)}%`)
+          .single();
+
+        if (customer) {
+          setCurrentCustomer(customer);
+          showToast(`Welcome back, ${customer.name || 'Friend'}!`);
+          return;
+        }
       }
 
       showToast('Unknown barcode: ' + code, 'error');
@@ -634,18 +661,92 @@
     }
 
     // ===== CUSTOMER FUNCTIONS =====
+    async function searchCustomer() {
+      const input = document.getElementById('customerSearch').value.trim();
+      const resultDiv = document.getElementById('customerSearchResult');
+      
+      if (!input) {
+        resultDiv.innerHTML = '<span style="color:#888;">Enter phone or email</span>';
+        return;
+      }
+      
+      resultDiv.innerHTML = '<span style="color:#888;">Searching...</span>';
+      
+      // Determine if input is phone or email
+      const isEmail = input.includes('@');
+      const column = isEmail ? 'email' : 'phone';
+      
+      // Search customers table
+      let query = supabase.from('customers').select('*');
+      
+      if (isEmail) {
+        query = query.ilike('email', `%${input}%`);
+      } else {
+        // Clean phone input and search
+        const cleanPhone = input.replace(/\D/g, '');
+        query = query.ilike('phone', `%${cleanPhone}%`);
+      }
+      
+      const { data, error } = await query.limit(5);
+      
+      if (error) {
+        resultDiv.innerHTML = '<span style="color:#e74c3c;">Search error</span>';
+        return;
+      }
+      
+      if (!data || data.length === 0) {
+        resultDiv.innerHTML = '<span style="color:#e74c3c;">No customer found</span>';
+        return;
+      }
+      
+      if (data.length === 1) {
+        // Exact match - attach immediately
+        setCurrentCustomer(data[0]);
+        resultDiv.innerHTML = '<span style="color:#27ae60;">✓ Customer attached</span>';
+        document.getElementById('customerSearch').value = '';
+      } else {
+        // Multiple matches - show list
+        resultDiv.innerHTML = data.map(c => `
+          <div onclick="selectCustomer('${c.id}')" style="padding:8px; margin:4px 0; background:#333; border-radius:6px; cursor:pointer;">
+            <strong>${c.name || 'Unknown'}</strong><br>
+            <small style="color:#888;">${c.email || c.phone || ''}</small>
+          </div>
+        `).join('');
+      }
+    }
+    
+    async function selectCustomer(id) {
+      const { data: customer } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (customer) {
+        setCurrentCustomer(customer);
+        document.getElementById('customerSearchResult').innerHTML = '<span style="color:#27ae60;">✓ Customer attached</span>';
+        document.getElementById('customerSearch').value = '';
+      }
+    }
+    
     function setCurrentCustomer(customer) {
       currentCustomer = customer;
       updateCustomerCard();
       initLoyaltyBeans(customer.loyalty_points || 0);
+    }
+    
+    function clearCustomer() {
+      currentCustomer = null;
+      updateCustomerCard();
+      initLoyaltyBeans(0);
+      document.getElementById('customerSearchResult').innerHTML = '';
     }
 
     function updateCustomerCard() {
       const card = document.getElementById('customerCard');
       if (currentCustomer) {
         card.style.display = 'block';
-        const fullName = [currentCustomer.first_name, currentCustomer.last_name].filter(Boolean).join(' ') || 'Guest';
-        document.getElementById('customerName').textContent = fullName;
+        document.getElementById('customerName').textContent = currentCustomer.name || 'Guest';
         document.getElementById('customerEmail').textContent = currentCustomer.email || currentCustomer.phone || '';
       } else {
         card.style.display = 'none';
