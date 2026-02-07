@@ -77,7 +77,8 @@ exports.handler = async (event) => {
 
   if (loyaltyError) {
     console.error("Loyalty increment failed:", loyaltyError);
-  } else if (loyalty && loyalty.loyalty_points % 10 === 0) {
+  } else if (loyalty && loyalty.loyalty_points % 500 === 0) {
+    // 50 pts per purchase, 500 pts = free coffee (10 purchases)
     // Generate voucher code and QR
     const newVoucherCode = generateVoucherCode();
     
