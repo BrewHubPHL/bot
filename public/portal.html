@@ -372,9 +372,9 @@
         }
         
         // Print keychain card like it's 1996
-        function printKeychainCard() {
-            const { data: session } = sb.auth.getSession();
-            const email = session?.session?.user?.email;
+        async function printKeychainCard() {
+            const { data: { session } } = await sb.auth.getSession();
+            const email = session?.user?.email;
             if (!email) {
                 alert('Please log in first!');
                 return;
