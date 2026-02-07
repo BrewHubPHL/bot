@@ -300,6 +300,15 @@
     const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
     const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
 
+    async function authHeaders() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not signed in');
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      };
+    }
+
     let parcels = [];
     let scanBuffer = '';
     let scanTimeout = null;
@@ -338,7 +347,7 @@
         // First, scan-only to check for pre-registration
         const res = await fetch('/.netlify/functions/parcel-check-in', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders(),
           body: JSON.stringify({ tracking_number: tracking, scan_only: true })
         });
 
@@ -369,7 +378,7 @@
 
         const res = await fetch('/.netlify/functions/parcel-check-in', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders(),
           body: JSON.stringify(body)
         });
 

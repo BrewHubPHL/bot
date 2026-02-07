@@ -1,4 +1,5 @@
 const { SquareClient, SquareEnvironment } = require('square');
+const { authorize, json } = require('./_auth');
 
 const squareEnvironment = process.env.NODE_ENV === 'production'
   ? SquareEnvironment.Production
@@ -14,6 +15,9 @@ const client = new SquareClient({
 });
 
 exports.handler = async (event) => {
+  const auth = await authorize(event);
+  if (!auth.ok) return auth.response;
+
   const { amount, orderId, deviceId } = JSON.parse(event.body);
 
   try {

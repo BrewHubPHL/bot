@@ -4,10 +4,15 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
+    const incomingSecret = event.headers?.['x-brewhub-secret'];
     const headers = {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
     };
+
+    if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
+        return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) };
+    }
 
     try {
         // Check shop status

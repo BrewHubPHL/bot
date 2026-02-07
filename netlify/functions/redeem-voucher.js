@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { authorize } = require('./_auth');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(
@@ -7,6 +8,9 @@ const supabase = createClient(
 );
 
 exports.handler = async (event) => {
+  const auth = await authorize(event);
+  if (!auth.ok) return auth.response;
+
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: "Method Not Allowed" };
   }

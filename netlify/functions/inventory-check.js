@@ -1,9 +1,12 @@
 const { createClient } = require('@supabase/supabase-js');
+const { authorize } = require('./_auth');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-exports.handler = async () => {
+exports.handler = async (event) => {
+  const auth = await authorize(event);
+  if (!auth.ok) return auth.response;
   try {
     // 1. Find items below threshold using RPC function
     const { data: lowStockItems, error } = await supabase.rpc('get_low_stock_items');

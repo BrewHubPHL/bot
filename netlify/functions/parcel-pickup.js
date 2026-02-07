@@ -1,9 +1,13 @@
 const { createClient } = require('@supabase/supabase-js');
+const { authorize } = require('./_auth');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
+  const auth = await authorize(event);
+  if (!auth.ok) return auth.response;
+
   const { tracking_number } = JSON.parse(event.body);
 
   const { data, error } = await supabase

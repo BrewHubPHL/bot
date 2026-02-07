@@ -197,12 +197,6 @@ exports.handler = async (event) => {
       console.log(`[INVENTORY] Decremented 12oz Cups by ${cupCount}`);
     }
   }
-  
-  if (inventoryError) {
-    console.error("Inventory decrement failed:", inventoryError);
-  } else {
-    console.log(`[INVENTORY] Decremented 12oz Cups by 1`);
-  }
 
   // 6. If it's a bulk bean sale, decrement beans too
   if (beanCount > 0) {

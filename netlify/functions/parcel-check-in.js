@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { authorize } = require('./_auth');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -16,6 +17,15 @@ function identifyCarrier(tracking) {
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' }, body: '' };
+  }
+
+  const auth = await authorize(event);
+  if (!auth.ok) {
+    return {
+      statusCode: auth.response.statusCode,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: auth.response.body,
+    };
   }
 
   try {

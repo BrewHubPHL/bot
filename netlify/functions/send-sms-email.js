@@ -1,4 +1,25 @@
 export default async (req, context) => {
+  const incomingSecret = req.headers.get('x-brewhub-secret');
+  if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
+    const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+    if (!token) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+
+    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const allowlist = (process.env.STAFF_ALLOWLIST || '')
+      .split(',')
+      .map(e => e.trim().toLowerCase())
+      .filter(Boolean);
+
+    const { data, error } = await supabase.auth.getUser(token);
+    const email = (data?.user?.email || '').toLowerCase();
+    if (error || !data?.user || (allowlist.length && !allowlist.includes(email))) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
+  }
+
   try {
     const { recipient_name, phone, carrier, tracking } = await req.json();
 
