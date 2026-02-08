@@ -1,4 +1,3 @@
-const { authorize } = require('./_auth');
 const { checkQuota } = require('./_usage');
 
 exports.handler = async function(event, context) {
@@ -11,13 +10,8 @@ exports.handler = async function(event, context) {
 
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
 
-  // Require staff auth for ConvAI sessions
-  const auth = await authorize(event);
-  if (!auth.ok) {
-    return auth.response;
-  }
-
-  // Apply a hard quota even for staff to avoid runaway costs
+  // Public endpoint for Elise voice chat - but rate limited to prevent abuse
+  // Apply strict quota for public ConvAI to avoid runaway costs
   const hasQuota = await checkQuota('elevenlabs_convai');
   if (!hasQuota) {
     return {

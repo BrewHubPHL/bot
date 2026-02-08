@@ -4,6 +4,10 @@
     --brand-secondary: #d4b59e;  /* The "Latte" color */
     --brand-accent: #2c1810;     /* The "Ink/Espresso" color */
     
+    /* Legacy Variables (used in index.html and other pages) */
+    --hub-brown: #3c2f2f;        /* Alias for brand-primary */
+    --hub-tan: #d4b59e;          /* Alias for brand-secondary */
+    
     /* UI States */
     --status-ready: #4caf50;     /* Order Up / In Stock */
     --status-late: #ff9800;      /* Running Late (KDS) */
