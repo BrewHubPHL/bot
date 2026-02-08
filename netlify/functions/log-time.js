@@ -41,50 +41,35 @@ exports.handler = async (event) => {
     const { employee_email, action_type } = JSON.parse(event.body);
 
     if (!employee_email || !action_type) {
-      return {
-        statusCode: 400,
-        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'Missing email or action' })
-      };
+      return json(400, { error: 'Missing email or action' });
     }
 
     // Strict mode: Only allow users to clock THEMSELVES in/out.
     if (auth.via === 'jwt' && auth.user.email.toLowerCase() !== employee_email.toLowerCase()) {
        console.warn(`[AUTH MISMATCH] Token: ${auth.user.email} -> Claiming: ${employee_email}`);
-       return {
-         statusCode: 403,
-         headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' },
-         body: JSON.stringify({ error: "You can only clock in for yourself." })
-       };
+       return json(403, { error: "You can only clock in for yourself." });
     }
 
+    // Use correct columns for time_logs table
     const payload = {
       employee_email,
       action_type,
-      timestamp: new Date().toISOString()
+      clock_in: action_type === 'in' ? new Date().toISOString() : null,
+      clock_out: action_type === 'out' ? new Date().toISOString() : null,
+      status: 'Pending'
     };
-
-    console.log('[LOG-TIME] Recording:', payload);
 
     const { error } = await supabase.from('time_logs').insert([payload]);
 
     if (error) {
       console.error('[LOG-TIME] DB Error:', error);
-      throw error;
+      return json(500, { error: 'Logging failed', details: error.message || error });
     }
 
-    return {
-      statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ success: true, message: `Clocked ${action_type} successfully` })
-    };
+    return json(200, { success: true, message: `Clocked ${action_type} successfully` });
 
   } catch (err) {
     console.error('[LOG-TIME] Error:', err);
-    return {
-      statusCode: 500,
-      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Logging failed' })
-    };
+    return json(500, { error: 'Logging failed', details: err.message || err });
   }
 };

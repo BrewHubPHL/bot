@@ -10,6 +10,7 @@
     const CONFIG = {
         // Try multiple possible endpoints (in case of rename)
         endpoints: [
+            '/.netlify/functions/log-time', // Correct Netlify function endpoint
             '/api/time-logs',
             '/api/timelog',
             '/api/clock',
