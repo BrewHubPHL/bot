@@ -1,0 +1,30 @@
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="description" content="Staff Utility Mode">
+    <meta name="author" content="Your Name">
+    <meta name="keywords" content="Staff Utility Mode">
+    <link rel="stylesheet" href="staff-utility-mode.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Staff Utility Mode</h1>
+        </header>
+        <main>
+            <section>
+                <h2>Section 1</h2>
+                <p>Content for Section 1</p>
+            </section>
+            <section>
+                <h2>Section 2</h2>
+                <p>Content for Section 2</p>
+            </section>
+        </main>
+        <footer>
+            <p>Footer content</p>
+        </footer>
+    </div>
+    <script src="clock-handler.js"></script>
+</body>

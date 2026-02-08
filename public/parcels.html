@@ -10,14 +10,13 @@
   <script src="/js/auth.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/brand-system.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: var(--font-body);
-      background: var(--bg-main);
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #0a0a0f;
       min-height: 100vh;
-      color: var(--brand-primary);
+      color: #fff;
     }
     h1 {
       font-family: var(--font-heading);
@@ -28,28 +27,28 @@
       color: #fff;
     }
     .header {
-      background: var(--card-bg);
+      background: rgba(255,255,255,0.03);
       padding: 1rem 2rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid var(--border-soft);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
     }
     .logo {
       font-size: 1.5rem;
       font-weight: 700;
-      color: var(--brand-primary);
+      color: #3498db;
     }
-    .logo span { color: var(--brand-secondary); }
+    .logo span { color: #fff; }
     .nav-links a {
-      color: var(--brand-primary);
+      color: rgba(255,255,255,0.7);
       text-decoration: none;
       margin-left: 2rem;
       font-size: 0.9rem;
       transition: color 0.2s;
       opacity: 0.7;
     }
-    .nav-links a:hover, .nav-links a.active { color: var(--brand-secondary); opacity: 1; }
+    .nav-links a:hover, .nav-links a.active { color: #3498db; opacity: 1; }
     
     .container {
       display: grid;

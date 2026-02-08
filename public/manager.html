@@ -8,46 +8,39 @@
   <script src="/js/auth.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/brand-system.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    /* Manager Dashboard - Dark Theme (NOT using brand-system.css) */
     body {
-      font-family: var(--font-body);
-      background: var(--bg-main);
+      font-family: 'Inter', sans-serif;
+      background: #0f0f0f;
       min-height: 100vh;
-      color: var(--brand-primary);
+      color: #f5f5f5;
     }
-    h1 {
-      font-family: var(--font-heading);
-      color: var(--brand-primary);
-    }
-    .btn {
-      background-color: var(--brand-accent);
-      color: #fff;
-    }
+    
     .header {
-      background: var(--card-bg);
+      background: #1a1a1a;
       padding: 1rem 2rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid var(--border-soft);
+      border-bottom: 1px solid #333;
     }
     .logo {
       font-size: 1.5rem;
       font-weight: 700;
-      color: var(--brand-primary);
+      color: #f5f5f5;
     }
-    .logo span { color: var(--brand-secondary); }
+    .logo span { color: #f39c12; }
     .nav-links a {
-      color: var(--brand-primary);
+      color: #ccc;
       text-decoration: none;
       margin-left: 2rem;
       font-size: 0.9rem;
       transition: color 0.2s;
-      opacity: 0.7;
     }
-    .nav-links a:hover, .nav-links a.active { color: var(--brand-secondary); opacity: 1; }
+    .nav-links a:hover, .nav-links a.active { color: #f39c12; }
     
     .container {
       padding: 2rem;
@@ -63,19 +56,20 @@
       margin-bottom: 2rem;
     }
     .stat-card {
-      background: rgba(255,255,255,0.05);
+      background: #1a1a1a;
       border-radius: 16px;
       padding: 1.5rem;
-      border: 1px solid rgba(255,255,255,0.08);
+      border: 1px solid #333;
     }
     .stat-label {
       font-size: 0.85rem;
-      color: rgba(255,255,255,0.5);
+      color: #888;
       margin-bottom: 0.5rem;
     }
     .stat-value {
       font-size: 2rem;
       font-weight: 700;
+      color: #f5f5f5;
     }
     .stat-value.revenue { color: #27ae60; }
     .stat-value.orders { color: #3498db; }
@@ -84,7 +78,7 @@
     .stat-change {
       font-size: 0.8rem;
       margin-top: 0.5rem;
-      color: rgba(255,255,255,0.4);
+      color: #888;
     }
     .stat-change.up { color: #27ae60; }
     .stat-change.down { color: #e74c3c; }
@@ -96,7 +90,7 @@
       gap: 2rem;
     }
     
-    /* Inventory Section */
+    /* Section Headers */
     .section-header {
       display: flex;
       justify-content: space-between;
@@ -105,45 +99,44 @@
     }
     .section-header h2 {
       font-size: 1.1rem;
-      color: rgba(255,255,255,0.9);
+      color: #f5f5f5;
     }
     .refresh-btn {
-      background: rgba(255,255,255,0.1);
+      background: #333;
       border: none;
       border-radius: 8px;
       padding: 0.5rem 1rem;
-      color: rgba(255,255,255,0.7);
+      color: #ccc;
       cursor: pointer;
       font-size: 0.85rem;
-      transition: background 0.2s;
     }
-    .refresh-btn:hover { background: rgba(255,255,255,0.15); }
+    .refresh-btn:hover { background: #444; }
     
+    /* Inventory Table */
     .inventory-table {
-      background: rgba(255,255,255,0.03);
+      background: #1a1a1a;
       border-radius: 16px;
       overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.08);
+      border: 1px solid #333;
     }
     .inventory-header {
       display: grid;
       grid-template-columns: 2fr 1fr 1fr 120px;
       padding: 1rem 1.5rem;
-      background: rgba(255,255,255,0.05);
+      background: #222;
       font-size: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      color: rgba(255,255,255,0.5);
+      color: #888;
     }
     .inventory-row {
       display: grid;
       grid-template-columns: 2fr 1fr 1fr 120px;
       padding: 1rem 1.5rem;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
+      border-bottom: 1px solid #222;
       align-items: center;
-      transition: background 0.2s;
     }
-    .inventory-row:hover { background: rgba(255,255,255,0.02); }
+    .inventory-row:hover { background: #1f1f1f; }
     .inventory-row.low-stock {
       background: rgba(243, 156, 18, 0.1);
       border-left: 3px solid #f39c12;
@@ -152,71 +145,44 @@
       background: rgba(231, 76, 60, 0.1);
       border-left: 3px solid #e74c3c;
     }
-    .item-name {
-      font-weight: 500;
-    }
-    .item-category {
-      font-size: 0.8rem;
-      color: rgba(255,255,255,0.4);
-    }
-    .stock-level {
-      font-weight: 600;
-    }
+    .item-name { font-weight: 500; color: #f5f5f5; }
+    .item-category { font-size: 0.8rem; color: #888; }
+    .stock-level { font-weight: 600; color: #f5f5f5; }
     .stock-level.low { color: #f39c12; }
     .stock-level.critical { color: #e74c3c; }
-    .threshold {
-      color: rgba(255,255,255,0.4);
-      font-size: 0.9rem;
-    }
-    .stock-controls {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-    }
+    .threshold { color: #888; font-size: 0.9rem; }
+    .stock-controls { display: flex; gap: 0.5rem; align-items: center; }
     .stock-btn {
       width: 32px;
       height: 32px;
       border-radius: 8px;
       border: none;
-      background: rgba(255,255,255,0.1);
+      background: #333;
       color: #fff;
       font-size: 1.1rem;
       cursor: pointer;
-      transition: background 0.2s;
     }
-    .stock-btn:hover { background: rgba(255,255,255,0.2); }
+    .stock-btn:hover { background: #444; }
     .stock-btn.minus:hover { background: rgba(231, 76, 60, 0.3); }
     .stock-btn.plus:hover { background: rgba(39, 174, 96, 0.3); }
     
-    /* Sidebar */
-    .sidebar {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
+    /* Sidebar Cards */
+    .sidebar { display: flex; flex-direction: column; gap: 1.5rem; }
     .card {
-      background: rgba(255,255,255,0.03);
+      background: #1a1a1a;
       border-radius: 16px;
       padding: 1.5rem;
-      border: 1px solid rgba(255,255,255,0.08);
+      border: 1px solid #333;
     }
     .card h3 {
       font-size: 1rem;
       margin-bottom: 1rem;
-      color: rgba(255,255,255,0.9);
+      color: #f5f5f5;
     }
     
-    /* Recent Activity */
-    .activity-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    .activity-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75rem;
-    }
+    /* Activity List */
+    .activity-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .activity-item { display: flex; align-items: flex-start; gap: 0.75rem; }
     .activity-icon {
       width: 32px;
       height: 32px;
@@ -231,37 +197,17 @@
     .activity-icon.voucher { background: rgba(243, 156, 18, 0.2); }
     .activity-icon.parcel { background: rgba(155, 89, 182, 0.2); }
     .activity-icon.alert { background: rgba(231, 76, 60, 0.2); }
-    .activity-text {
-      font-size: 0.9rem;
-      line-height: 1.4;
-    }
-    .activity-time {
-      font-size: 0.75rem;
-      color: rgba(255,255,255,0.4);
-      margin-top: 0.25rem;
-    }
+    .activity-text { font-size: 0.9rem; line-height: 1.4; color: #ccc; }
+    .activity-time { font-size: 0.75rem; color: #666; margin-top: 0.25rem; }
     
     /* Top Items */
-    .top-items-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    .top-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .top-item-name {
-      font-size: 0.95rem;
-    }
-    .top-item-count {
-      font-size: 0.85rem;
-      color: rgba(255,255,255,0.5);
-    }
+    .top-items-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .top-item { display: flex; justify-content: space-between; align-items: center; }
+    .top-item-name { font-size: 0.95rem; color: #f5f5f5; }
+    .top-item-count { font-size: 0.85rem; color: #888; }
     .top-item-bar {
       height: 4px;
-      background: rgba(255,255,255,0.1);
+      background: #333;
       border-radius: 2px;
       margin-top: 0.5rem;
       overflow: hidden;
@@ -272,10 +218,8 @@
       border-radius: 2px;
     }
     
-    /* QR Voucher Preview */
-    .qr-preview {
-      text-align: center;
-    }
+    /* QR Preview */
+    .qr-preview { text-align: center; }
     .qr-image {
       width: 150px;
       height: 150px;
@@ -286,21 +230,15 @@
       align-items: center;
       justify-content: center;
     }
-    .qr-image img {
-      width: 130px;
-      height: 130px;
-    }
+    .qr-image img { width: 130px; height: 130px; }
     .qr-code-text {
       font-family: 'Courier New', monospace;
       font-size: 1.1rem;
       font-weight: 600;
       letter-spacing: 2px;
+      color: #f5f5f5;
     }
-    .qr-status {
-      font-size: 0.85rem;
-      color: rgba(255,255,255,0.5);
-      margin-top: 0.5rem;
-    }
+    .qr-status { font-size: 0.85rem; color: #888; margin-top: 0.5rem; }
   </style>
 </head>
 <body>
@@ -313,7 +251,7 @@
       <a href="manager.html" class="active">Dashboard</a>
     </nav>
   </header>
-  
+
   <main class="container">
     <!-- Stats Grid -->
     <div class="stats-grid">
@@ -338,7 +276,7 @@
         <div class="stat-change">Awaiting pickup: <span id="awaitingPickup">0</span></div>
       </div>
     </div>
-    
+
     <!-- Main Grid -->
     <div class="main-grid">
       <!-- Inventory Section -->
@@ -347,7 +285,6 @@
           <h2>📦 Inventory Status</h2>
           <button class="refresh-btn" onclick="loadInventory()">↻ Refresh</button>
         </div>
-        
         <div class="inventory-table">
           <div class="inventory-header">
             <span>Item</span>
@@ -355,31 +292,20 @@
             <span>Threshold</span>
             <span>Adjust</span>
           </div>
-          <div id="inventoryList">
-            <!-- Inventory items will be injected here -->
-          </div>
+          <div id="inventoryList"></div>
         </div>
       </section>
-      
+
       <!-- Sidebar -->
       <aside class="sidebar">
-        <!-- Recent Activity -->
         <div class="card">
           <h3>⚡ Recent Activity</h3>
-          <div class="activity-list" id="activityList">
-            <!-- Activity will be injected here -->
-          </div>
+          <div class="activity-list" id="activityList"></div>
         </div>
-        
-        <!-- Top Selling -->
         <div class="card">
           <h3>🏆 Top Sellers Today</h3>
-          <div class="top-items-list" id="topItems">
-            <!-- Top items will be injected here -->
-          </div>
+          <div class="top-items-list" id="topItems"></div>
         </div>
-        
-        <!-- Latest Voucher QR -->
         <div class="card">
           <h3>🎫 Latest Voucher</h3>
           <div class="qr-preview" id="latestVoucher">
@@ -403,8 +329,7 @@
       { name: 'Cup Lids (L)', category: 'Supplies', current: 150, threshold: 100, unit: 'pcs' },
       { name: 'Paper Cups (16oz)', category: 'Supplies', current: 45, threshold: 100, unit: 'pcs' },
     ];
-    
-    // Demo activity
+
     const activities = [
       { type: 'order', text: 'New order #a3f2 - 2x Latte', time: '2 min ago' },
       { type: 'voucher', text: 'Voucher BRW-K8L9P2 redeemed', time: '15 min ago' },
@@ -412,34 +337,26 @@
       { type: 'parcel', text: 'Package picked up by John S.', time: '2 hrs ago' },
       { type: 'order', text: 'Order #b7c1 marked ready', time: '2 hrs ago' },
     ];
-    
-    // Demo top sellers
+
     const topSellers = [
       { name: 'Iced Oat Latte', count: 24, percent: 100 },
       { name: 'Cappuccino', count: 18, percent: 75 },
       { name: 'Drip Coffee', count: 15, percent: 62 },
       { name: 'Matcha Latte', count: 12, percent: 50 },
     ];
-    
+
     function getStockClass(current, threshold) {
       if (current <= threshold * 0.3) return 'critical';
       if (current <= threshold) return 'low';
       return '';
     }
-    
+
     function renderInventory() {
-      // Sort by stock level - low stock first
-      const sorted = [...inventory].sort((a, b) => {
-        const aRatio = a.current / a.threshold;
-        const bRatio = b.current / b.threshold;
-        return aRatio - bRatio;
-      });
-      
+      const sorted = [...inventory].sort((a, b) => (a.current / a.threshold) - (b.current / b.threshold));
       const container = document.getElementById('inventoryList');
       container.innerHTML = sorted.map((item, i) => {
         const stockClass = getStockClass(item.current, item.threshold);
         const rowClass = stockClass ? `inventory-row ${stockClass === 'critical' ? 'critical' : 'low-stock'}` : 'inventory-row';
-        
         return `
           <div class="${rowClass}">
             <div>
@@ -456,12 +373,12 @@
         `;
       }).join('');
     }
-    
+
     function adjustStock(index, delta) {
       inventory[index].current = Math.max(0, inventory[index].current + delta);
       renderInventory();
     }
-    
+
     function renderActivity() {
       const container = document.getElementById('activityList');
       container.innerHTML = activities.map(a => `
@@ -476,7 +393,7 @@
         </div>
       `).join('');
     }
-    
+
     function renderTopSellers() {
       const container = document.getElementById('topItems');
       container.innerHTML = topSellers.map(item => `
@@ -491,19 +408,17 @@
         </div>
       `).join('');
     }
-    
+
     async function loadSalesReport() {
       try {
         const res = await fetch('/.netlify/functions/sales-report');
         const data = await res.json();
-        
         document.getElementById('totalRevenue').textContent = '$' + (data.total_revenue / 100).toFixed(2);
         document.getElementById('totalOrders').textContent = data.order_count;
         document.getElementById('totalVouchers').textContent = data.vouchers_issued || 0;
         document.getElementById('revenueChange').textContent = '↑ vs yesterday';
       } catch (err) {
         console.log('Using demo data');
-        // Demo values
         document.getElementById('totalRevenue').textContent = '$847.50';
         document.getElementById('totalOrders').textContent = '63';
         document.getElementById('totalVouchers').textContent = '4';
@@ -512,16 +427,17 @@
         document.getElementById('revenueChange').textContent = '↑ 12% vs yesterday';
       }
     }
-    
+
     // Initialize
     renderInventory();
     renderActivity();
     renderTopSellers();
     loadSalesReport();
   </script>
+  
   <script src="/js/auth.js"></script>
   <script>
-    // Protect this page - MANAGER ONLY (thomas@brewhubphl.com)
+    // Protect this page - MANAGER ONLY
     (async () => {
       const user = await brewAuth.protectPage({ requireManager: true });
       if (!user) return;

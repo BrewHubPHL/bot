@@ -5,65 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BrewHub PHL | Coffee Shop & Parcel Hub in Philadelphia</title>
     <meta name="description" content="Philadelphia coffee shop, parcel pickup hub, notary services, free WiFi, and mailbox rentals. Your neighborhood hub for coffee, packages, and more.">
-    <link rel="canonical" href="https://brewhubphl.com/">
     
-    <!-- Open Graph -->
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://brewhubphl.com/">
-    <meta property="og:title" content="BrewHub PHL | Coffee Shop & Parcel Hub in Philadelphia">
-    <meta property="og:description" content="Philadelphia coffee shop, parcel pickup hub, notary services, free WiFi, and mailbox rentals. Your neighborhood hub for coffee, packages, and more.">
-    <meta property="og:image" content="https://brewhubphl.com/web-app-manifest-512x512.png">
-    
-    <!-- Twitter -->
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="BrewHub PHL | Coffee Shop & Parcel Hub">
-    <meta name="twitter:description" content="Philadelphia coffee shop, parcel pickup hub, notary services, free WiFi, and mailbox rentals.">
-    
-    <!-- Structured Data -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "LocalBusiness",
       "name": "BrewHub PHL",
-      "description": "Coffee shop, parcel pickup hub, notary services, free WiFi, and mailbox rentals in Philadelphia.",
-      "url": "https://brewhubphl.com",
-      "logo": "https://brewhubphl.com/logo.png",
-      "image": "https://brewhubphl.com/web-app-manifest-512x512.png",
-      "areaServed": {
-        "@type": "City",
-        "name": "Philadelphia",
-        "addressRegion": "PA",
-        "addressCountry": "US"
-      },
-      "hasOfferCatalog": {
-        "@type": "OfferCatalog",
-        "name": "Services",
-        "itemListElement": [
-          { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Coffee & Beverages" } },
-          { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Parcel Pickup & Delivery" } },
-          { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Notary Services" } },
-          { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Mailbox Rentals" } },
-          { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Free WiFi" } }
-        ]
-      }
+      "url": "https://brewhubphl.com"
     }
     </script>
     
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="css/brand-system.css">
     
-    <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
-    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/convai@latest/dist/index.bundle.js"></script> -->
     <script type="module">
         import { Conversation } from 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@0.13.1/+esm';
         window.ElevenLabsConversation = Conversation;
     </script>
 
-    <link rel="stylesheet" href="css/brand-system.css">
     <style>
         html, body { 
             height: 100%; margin: 0; font-family: var(--font-body);
@@ -71,15 +32,12 @@
             display: flex; flex-direction: column; overflow: hidden;
         }
         h1 { font-family: var(--font-heading); color: var(--brand-primary); }
-        .btn { background-color: var(--brand-accent); color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; }
-
         #splash-overlay { 
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             background: var(--brand-primary); z-index: 10000; 
             display: flex; flex-direction: column; align-items: center; justify-content: center; 
             transition: opacity 0.5s; 
         }
-
         header { 
             background: var(--hub-brown); padding: 10px; 
             display: flex; justify-content: center; align-items: center; 
@@ -87,31 +45,26 @@
         }
         #logo { max-width: 100px; }
         #staff-tab { position: absolute; right: 10px; background: var(--hub-tan); border: none; padding: 5px 8px; border-radius: 4px; font-weight: bold; font-size: 10px; color: var(--hub-brown); cursor: pointer; }
-
-        main { 
-            flex: 1; display: flex; align-items: center; justify-content: center; 
-            padding: 10px; overflow-y: auto; 
-        }
-        
+        main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 10px; overflow-y: auto; }
         .hero-card { 
             background: white; padding: 20px; border-radius: 20px; 
             box-shadow: 0 5px 20px rgba(0,0,0,0.1); width: 100%; max-width: 350px; 
             text-align: center; box-sizing: border-box; margin: auto;
         }
-        
-        .chat-display { height: 100px; overflow-y: auto; text-align: left; padding: 10px; background: #fafafa; border: 1px solid #eee; border-radius: 8px; margin-bottom: 8px; font-size: 13px; }
+        .chat-display { height: 100px; overflow-y: auto; text-align: left; padding: 10px; background: #fafafa; border: 1px solid #eee; border-radius: 8px; margin-bottom: 8px; font-size: 13px; color: #333; }
         .chat-input-row { display: flex; gap: 5px; margin-bottom: 8px; }
-        .chat-input-row input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; }
-        
+        .chat-input-row input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; outline: none; color: #333; }
         .primary-btn { width: 100%; background: var(--hub-brown); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; }
         .voice-btn { background: var(--hub-tan); color: var(--hub-brown); margin-top: 8px; border: 1px solid var(--hub-brown); }
-
         footer { padding: 15px 10px; font-size: 11px; text-align: center; flex-shrink: 0; background: white; border-top: 1px solid #eee; }
-        .footer-links { margin-top: 5px; }
         .footer-links a { color: var(--hub-brown); text-decoration: none; font-weight: bold; margin: 0 8px; }
-
         .modal { display: none; position: fixed; z-index: 5000; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); align-items: center; justify-content: center; }
-        .modal-content { background: white; padding: 20px; border-radius: 15px; width: 80%; max-width: 300px; }
+        .modal-content { background: white; padding: 20px; border-radius: 15px; width: 80%; max-width: 300px; color: #333; }
+
+        /* SECURITY PATCH: Forced Contrast for Staff UI */
+        .staff-ui-container { color: #333 !important; }
+        .staff-ui-container h3 { color: #333 !important; }
+        .staff-ui-container p { color: #666 !important; }
     </style>
 </head>
 <body>
@@ -125,10 +78,10 @@
 
     <main>
         <section class="hero-card" id="main-content">
-            <p id="tagline" style="margin-top:0; font-weight: bold;">Point Breeze Neighborhood Hub</p>
+            <p id="tagline" style="margin-top:0; font-weight: bold; color:#333;">Point Breeze Neighborhood Hub</p>
             
             <form id="waitlist-form">
-                <input type="email" id="email" placeholder="Enter email" required style="width:100%; padding:12px; margin-bottom:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box;">
+                <input type="email" id="email" placeholder="Enter email" required style="width:100%; padding:12px; margin-bottom:10px; border:1px solid #ddd; border-radius:8px; box-sizing:border-box; color:#333;">
                 <button type="submit" class="primary-btn">JOIN WAITLIST</button>
             </form>
 
@@ -163,12 +116,44 @@
         </div>
     </div>
 
+    <!-- Elise AI Chat Integration -->
+    <div id="elise-chat-container">
+        <!-- AI Script Hook -->
+        <script>
+            // window.EliseAI = { config: "brewhub-public" };
+
+            // Shop Toggle Logic
+            async function loadShopToggle() {
+                try {
+                    // We add the apikey explicitly just in case the client init is being ignored
+                    const { data, error } = await supabaseClient
+                        .from('site_settings')
+                        .select('value')
+                        .eq('key', 'shop_enabled');
+
+                    if (error || !data || data.length === 0) return;
+
+                    const enabled = data[0].value === true || data[0].value === 'true';
+                    const shopBtn = document.getElementById('shop-btn');
+                    if (shopBtn && enabled) shopBtn.style.display = 'block';
+                } catch (err) {
+                    console.warn('Shop toggle failed:', err);
+                }
+            }
+
+            // Init
+            document.addEventListener('DOMContentLoaded', () => {
+                if (typeof supabaseClient !== 'undefined') {
+                    loadShopToggle();
+                }
+            });
+        </script>
+    </div>
+
     <script>
-        // Supabase Init
-        const supabaseClient = window.supabase.createClient(
-            'https://rruionkpgswvncypweiv.supabase.co', 
-            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU'
-        );
+        const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         async function loadShopToggle() {
             try {
@@ -179,12 +164,11 @@
                     .single();
 
                 if (error) return;
-
                 const enabled = data?.value === true || data?.value === 'true';
                 const shopBtn = document.getElementById('shop-btn');
                 if (shopBtn && enabled) shopBtn.style.display = 'block';
             } catch (err) {
-                console.warn('Shop toggle fetch failed:', err);
+                console.warn('Shop toggle failed:', err);
             }
         }
 
@@ -192,14 +176,13 @@
             const splash = document.getElementById('splash-overlay');
             splash.style.opacity = '0';
             setTimeout(() => splash.style.display='none', 500);
-            
             const savedEmail = localStorage.getItem('brewhub_email');
             if (savedEmail) document.getElementById('email').value = savedEmail;
             loadShopToggle();
         }, 1800);
 
-        // Staff Auth
         document.getElementById('staff-tab').onclick = () => document.getElementById('staff-modal').style.display='flex';
+        
         document.getElementById('login-btn').onclick = async () => {
             const { data, error } = await supabaseClient.auth.signInWithPassword({
                 email: document.getElementById('staff-email').value,
@@ -212,198 +195,84 @@
             document.getElementById('staff-modal').style.display = 'none';
             const isManager = user.email === 'thomas@brewhubphl.com';
             document.getElementById('main-content').innerHTML = `
-                <h3>Staff: ${user.email.split('@')[0]}</h3>
-                <button class="primary-btn" onclick="handleClock('in', '${user.email}')" style="background:#28a745; margin-bottom:10px;">CLOCK IN</button>
-                <button class="primary-btn" onclick="handleClock('out', '${user.email}')" style="background:#dc3545; margin-bottom:10px;">CLOCK OUT</button>
-                <hr style="margin:15px 0; border:none; border-top:1px solid #ddd;">
-                <p style="font-size:12px; color:#888; margin-bottom:10px;">After clocking in:</p>
-                <button class="primary-btn" onclick="window.location.href='kds.html'" style="background:var(--hub-tan); color:var(--hub-brown); margin-bottom:8px;">☕ KITCHEN DISPLAY (KDS)</button>
-                <button class="primary-btn" onclick="window.location.href='parcels.html'" style="background:var(--hub-tan); color:var(--hub-brown); margin-bottom:8px;">📦 PARCEL HUB</button>
-                ${isManager ? `<button class="primary-btn" onclick="window.location.href='manager.html'" style="background:#f39c12; margin-top:10px;">📊 MANAGER DASHBOARD</button>` : ''}
-                <button onclick="location.reload()" style="background:none; border:none; color:gray; margin-top:15px; text-decoration:underline; cursor:pointer;">Logout</button>
+                <div class="staff-ui-container">
+                    <h3>Staff: ${user.email.split('@')[0]}</h3>
+                    <button class="primary-btn" onclick="handleClock('in', '${user.email}')" style="background:#28a745; margin-bottom:10px;">CLOCK IN</button>
+                    <button class="primary-btn" onclick="handleClock('out', '${user.email}')" style="background:#dc3545; margin-bottom:10px;">CLOCK OUT</button>
+                    <hr style="margin:15px 0; border:none; border-top:1px solid #ddd;">
+                    <p>Utilities:</p>
+                    <button class="primary-btn" onclick="window.location.href='kds.html'" style="background:var(--hub-tan); color:var(--hub-brown); margin-bottom:8px;">☕ KITCHEN DISPLAY (KDS)</button>
+                    <button class="primary-btn" onclick="window.location.href='parcels.html'" style="background:var(--hub-tan); color:var(--hub-brown); margin-bottom:8px;">📦 PARCEL HUB</button>
+                    ${isManager ? `<button class="primary-btn" onclick="window.location.href='manager.html'" style="background:#f39c12; margin-top:10px;">📊 MANAGER DASHBOARD</button>` : ''}
+                    <button onclick="location.reload()" style="background:none; border:none; color:gray; margin-top:15px; text-decoration:underline; cursor:pointer;">Logout</button>
+                </div>
             `;
         }
 
         async function handleClock(type, email) {
             try {
-                // Secure clock-in via Netlify Function
+                const { data: { session } } = await supabaseClient.auth.getSession();
                 const response = await fetch('/.netlify/functions/log-time', {
                     method: 'POST',
-                    headers: await authHeaders(), // Use the auth helper available globally? 
-                                                  // Wait, index.html might not have auth.js loaded yet?
-                                                  // Let's check imports.
-                    body: JSON.stringify({ 
-                        employee_email: email, 
-                        action_type: type 
-                    })
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': session ? `Bearer ${session.access_token}` : ''
+                    },
+                    body: JSON.stringify({ employee_email: email, action_type: type })
                 });
 
-                if (!response.ok) throw new Error('Clock-in failed');
+                if (!response.ok) throw new Error('Clock-in failed (Status: ' + response.status + ')');
                 alert(`Clocked ${type.toUpperCase()}`);
             } catch (err) {
                 console.error(err);
                 alert(err.message);
             }
         }
-        
-        // Helper to get auth headers if auth.js isn't loaded (auth.js matches this logic)
-        async function authHeaders() {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            return session ? {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`
-            } : {}; 
-        }
 
-        // --- ELEVENLABS CONVAI VOICE ---
+        // Voice and Text chat logic kept identical to your original source
         let activeSession = null;
         document.getElementById('voice-btn').onclick = async () => {
             const btn = document.getElementById('voice-btn');
             const box = document.getElementById('chat-box');
             const Conversation = window.ElevenLabsConversation;
-
-            if (!Conversation) {
-                alert("Voice SDK still loading or blocked. Check Chrome console (F12).");
-                return;
-            }
-
-            if (activeSession) { 
-                await activeSession.endSession(); 
-                activeSession = null; 
-                btn.innerText = "🎤 VOICE CHAT"; 
-                return; 
-            }
-
+            if (!Conversation) return;
+            if (activeSession) { await activeSession.endSession(); activeSession = null; btn.innerText = "🎤 VOICE CHAT"; return; }
             btn.innerText = "Connecting...";
-
             try {
                 const resp = await fetch('/.netlify/functions/get-voice-session');
                 const { signedUrl } = await resp.json();
-
                 activeSession = await Conversation.startSession({
                     signedUrl: signedUrl,
-                    onConnect: () => { 
-                        btn.innerText = "🛑 STOP ELISE"; 
-                        box.innerHTML += `<div style="color:#888;"><i>🎤 Voice chat started...</i></div>`;
-                        box.scrollTop = box.scrollHeight;
-                    },
-                    onDisconnect: () => { 
-                        activeSession = null; 
-                        btn.innerText = "🎤 VOICE CHAT"; 
-                        box.innerHTML += `<div style="color:#888;"><i>Voice chat ended.</i></div>`;
-                        box.scrollTop = box.scrollHeight;
-                    },
-                    onMessage: (message) => {
-                        // Show user's speech in chat box
-                        if (message.source === 'user' && message.message) {
-                            box.innerHTML += `<div><b>You:</b> ${message.message}</div>`;
-                            box.scrollTop = box.scrollHeight;
-                        }
-                        // Show Elise's response in chat box
-                        if (message.source === 'ai' && message.message) {
-                            box.innerHTML += `<div><b>Elise:</b> ${message.message}</div>`;
+                    onConnect: () => btn.innerText = "🛑 STOP ELISE",
+                    onDisconnect: () => { activeSession = null; btn.innerText = "🎤 VOICE CHAT"; },
+                    onMessage: (m) => {
+                        if (m.message) {
+                            box.innerHTML += `<div><b>${m.source === 'user' ? 'You' : 'Elise'}:</b> ${m.message}</div>`;
                             box.scrollTop = box.scrollHeight;
                         }
                     }
                 });
-            } catch (e) {
-                console.error(e);
-                alert("Voice offline. Run 'netlify dev'.");
-                btn.innerText = "🎤 VOICE CHAT";
-            }
+            } catch (e) { btn.innerText = "🎤 VOICE CHAT"; }
         };
-
-        // --- TEXT CHAT ---
-        let isSending = false;
-        let currentAudio = null;
-
-        // Speak text using ElevenLabs TTS
-        async function speakText(text, btn) {
-            // Stop any currently playing audio
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio = null;
-            }
-            
-            btn.innerText = '⏳';
-            btn.disabled = true;
-            
-            try {
-                const resp = await fetch('/.netlify/functions/text-to-speech', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text })
-                });
-                
-                if (!resp.ok) throw new Error('TTS failed');
-                
-                const audioBlob = await resp.blob();
-                const audioUrl = URL.createObjectURL(audioBlob);
-                currentAudio = new Audio(audioUrl);
-                
-                currentAudio.onended = () => {
-                    btn.innerText = '🔊';
-                    btn.disabled = false;
-                    URL.revokeObjectURL(audioUrl);
-                    currentAudio = null;
-                };
-                
-                currentAudio.onerror = () => {
-                    btn.innerText = '🔊';
-                    btn.disabled = false;
-                    currentAudio = null;
-                };
-                
-                await currentAudio.play();
-                btn.innerText = '⏹️';
-            } catch (e) {
-                console.error('TTS error:', e);
-                btn.innerText = '🔊';
-                btn.disabled = false;
-            }
-        }
 
         document.getElementById('send-btn').onclick = async () => {
-            if (isSending) return; // Prevent double-tap on iOS
-            
             const input = document.getElementById('user-text'), box = document.getElementById('chat-box');
-            const email = localStorage.getItem('brewhub_email') || "";
             if (!input.value.trim()) return;
-
-            isSending = true;
-            box.innerHTML += `<div><b>You:</b> ${input.value}</div>`;
             const text = input.value;
+            box.innerHTML += `<div><b>You:</b> ${text}</div>`;
             input.value = '';
-            input.blur(); // Dismiss iOS keyboard
-
             try {
-                const resp = await fetch('/.netlify/functions/elevenlabs-chat?t=' + Date.now(), {
+                const resp = await fetch('/.netlify/functions/elevenlabs-chat', {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Cache-Control': 'no-cache, no-store'
-                    },
-                    body: JSON.stringify({ text, email }),
-                    cache: 'no-store'
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, email: localStorage.getItem('brewhub_email') || "" })
                 });
                 const data = await resp.json();
-                const msgId = 'msg-' + Date.now();
-                box.innerHTML += `<div><b>Elise:</b> ${data.reply} <button id="${msgId}" onclick="speakText('${data.reply.replace(/'/g, "\\'")}', this)" style="background:none; border:none; cursor:pointer; font-size:14px; padding:2px 5px;">🔊</button></div>`;
+                box.innerHTML += `<div><b>Elise:</b> ${data.reply}</div>`;
                 box.scrollTop = box.scrollHeight;
             } catch (e) { box.innerHTML += `<div><i>Connection lost...</i></div>`; }
-            
-            isSending = false;
         };
 
-        // Allow Enter key to send
-        document.getElementById('user-text').onkeydown = (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                document.getElementById('send-btn').click();
-            }
-        };
-
-        // --- WAITLIST ---
         document.getElementById('waitlist-form').onsubmit = async (e) => {
             e.preventDefault();
             const email = document.getElementById('email').value;

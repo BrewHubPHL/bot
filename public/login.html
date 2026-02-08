@@ -131,20 +131,13 @@
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // Allowed staff emails
-    const ALLOWED_EMAILS = ['thomas@brewhubphl.com'];
-
-    // If someone visits login directly (not redirected from protected page), send them home
-    const redirectParam = new URLSearchParams(window.location.search).get('redirect');
-    if (!redirectParam) {
-      window.location.href = '/';
-      return;
-    }
+    // REMOVED: Client-side allowlist - backend staff_directory table is now SSoT
+    // Staff validation happens server-side in _auth.js
 
     // Check if already logged in
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session && ALLOWED_EMAILS.includes(session.user.email)) {
+      if (session) {
         // Redirect to intended page or dashboard
         const redirect = new URLSearchParams(window.location.search).get('redirect') || '/manager.html';
         window.location.href = redirect;
@@ -162,26 +155,8 @@
       btn.textContent = 'Signing in...';
       error.style.display = 'none';
 
-      // Check if email is allowed
-      if (!ALLOWED_EMAILS.includes(email.toLowerCase())) {
-        const funnyMessages = [
-          "Nice try, but this isn't your cafe... yet. ☕",
-          "Error 418: I'm a teapot, and you're not staff. 🫖",
-          "Hold up — you're not on the VIP list. 🚫",
-          "This door only opens for coffee wizards. 🧙‍♂️",
-          "Denied! But hey, come grab a latte sometime. ☕",
-          "Nope. But points for trying! 😏",
-          "Access denied. The beans have spoken. 🫘",
-          "You shall not pass! ...without a staff badge. 🧙",
-          "Plot twist: you don't work here. 🎬",
-          "404: Staff credentials not found in your soul. 👻"
-        ];
-        error.textContent = funnyMessages[Math.floor(Math.random() * funnyMessages.length)];
-        error.style.display = 'block';
-        btn.disabled = false;
-        btn.textContent = 'Sign In';
-        return;
-      }
+      // REMOVED: Client-side email check - let Supabase auth handle it
+      // The backend will reject non-staff users when they try to access protected pages
 
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email,
@@ -196,7 +171,7 @@
         return;
       }
 
-      // Success - redirect
+      // Success - redirect (backend will enforce staff_directory check on protected pages)
       const redirect = new URLSearchParams(window.location.search).get('redirect') || '/manager.html';
       window.location.href = redirect;
     });

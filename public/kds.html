@@ -12,13 +12,12 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/js/auth.js"></script>
-    <link rel="stylesheet" href="css/brand-system.css">
     <style>
-        body { margin: 0; font-family: var(--font-body); background-color: var(--bg-main); color: var(--brand-primary); }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background-color: var(--bg-main); color: var(--brand-primary); }
         h1 { font-family: var(--font-heading); color: var(--brand-primary); }
         .btn { background-color: var(--brand-accent); color: white; }
         .card { background: var(--card-bg); border: 1px solid var(--border-soft); transition: all 0.3s ease; }
-        .card:hover { transform: translateY(-2px); box-shadow: 0 20px 40px rgba(0,0,0,0.1); }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         .stale-pulse { animation: pulse 2s infinite; color: var(--status-alert); }
     </style>
