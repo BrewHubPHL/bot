@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { authorize, json } = require('./_auth');
 
 const supabase = createClient(
   process.env.SUPABASE_URL, 
@@ -6,8 +7,13 @@ const supabase = createClient(
 );
 
 exports.handler = async (event, context) => {
+  // 1. Secure: Managers Only (RBAC enforced)
+  // High-sensitivity: Require token issued within last 15 minutes
+  const auth = await authorize(event, { requireManager: true, maxTokenAgeMinutes: 15 });
+  if (!auth.ok) return auth.response;
+
   try {
-    // 1. Pull data from the Daily Sales View
+    // 2. Pull data from the Daily Sales View
     const { data, error } = await supabase
       .from('daily_sales_report')
       .select('*')
@@ -18,24 +24,19 @@ exports.handler = async (event, context) => {
     const report = `
       ☕ BrewHubPHL Daily Sales Summary
       ---------------------------------
-      Orders: ${data.total_orders}
-      Revenue: $${data.gross_revenue.toFixed(2)}
-      Vouchers Used: ${data.vouchers_redeemed}
+      Orders: ${data?.total_orders || 0}
+      Revenue: $${(data?.gross_revenue || 0).toFixed(2)}
+      Vouchers Used: ${data?.vouchers_redeemed || 0}
       ---------------------------------
       Report Generated: ${new Date().toLocaleString()}
     `;
 
-    // 2. Log it so you can see it in Netlify/Terminal logs
     console.log(report);
 
-    // 3. Return the data for the "Beautification Committee"
-    return { 
-      statusCode: 200, 
-      body: JSON.stringify({ message: "Daily report logged", data }) 
-    };
+    return json(200, { message: "Daily report generated", report, data });
   } catch (err) {
     console.error("Reporting Error:", err.message);
-    return { statusCode: 500, body: "Report Failed" };
+    return json(500, { error: "Report Failed" });
   }
 };
 

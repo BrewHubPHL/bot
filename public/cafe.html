@@ -17,37 +17,47 @@
   <script src="/js/auth.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/brand-system.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: 'Inter', -apple-system, sans-serif;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      font-family: var(--font-body);
+      background: var(--bg-main);
       min-height: 100vh;
+      color: var(--brand-primary);
+    }
+    h1 {
+      font-family: var(--font-heading);
+      color: var(--brand-primary);
+    }
+    .btn {
+      background-color: var(--brand-accent);
       color: #fff;
     }
     .header {
-      background: rgba(255,255,255,0.05);
+      background: var(--card-bg);
       backdrop-filter: blur(10px);
       padding: 1rem 2rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
+      border-bottom: 1px solid var(--border-soft);
     }
     .logo {
       font-size: 1.5rem;
       font-weight: 700;
-      color: #f39c12;
+      color: var(--brand-primary);
     }
-    .logo span { color: #fff; }
+    .logo span { color: var(--brand-secondary); }
     .nav-links a {
-      color: rgba(255,255,255,0.7);
+      color: var(--brand-primary);
       text-decoration: none;
       margin-left: 2rem;
       font-size: 0.9rem;
       transition: color 0.2s;
+      opacity: 0.7;
     }
-    .nav-links a:hover, .nav-links a.active { color: #f39c12; }
+    .nav-links a:hover, .nav-links a.active { color: var(--brand-secondary); opacity: 1; }
     
     .container {
       display: grid;
@@ -628,22 +638,25 @@
     async function checkout() {
       if (cart.length === 0) return;
 
-      const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
       const items = cart.map(c => `${c.qty}x ${c.name}`).join(', ');
 
       try {
-        // Create order in Supabase (note: items stored via order_items table or in note)
-        const { data: order, error } = await supabase
-          .from('orders')
-          .insert({
-            total_amount_cents: total,
-            status: 'pending',
+        // Create order via secure server-side function
+        const orderRes = await fetch('/.netlify/functions/create-order', {
+          method: 'POST',
+          headers: await authHeaders(),
+          body: JSON.stringify({
+            cart: cart.map(item => ({
+              name: item.name,
+              qty: item.qty
+            })),
             user_id: currentCustomer?.id || null
           })
-          .select()
-          .single();
+        });
 
-        if (error) throw error;
+        const orderResult = await orderRes.json();
+        if (!orderRes.ok) throw new Error(orderResult.error || 'Order creation failed');
+        const order = orderResult.order;
 
         // Send to Square for payment
         const res = await fetch('/.netlify/functions/collect-payment', {
@@ -651,7 +664,6 @@
           headers: await authHeaders(),
           body: JSON.stringify({
             orderId: order.id,
-            amount: total,
             note: items
           })
         });

@@ -1,4 +1,8 @@
 export default async (req, context) => {
+  const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+  // Check internal service secret first
   const incomingSecret = req.headers.get('x-brewhub-secret');
   if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
     const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
@@ -6,17 +10,48 @@ export default async (req, context) => {
 
     if (!token) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
 
-    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-    const allowlist = (process.env.STAFF_ALLOWLIST || '')
-      .split(',')
-      .map(e => e.trim().toLowerCase())
-      .filter(Boolean);
-
+    // Validate JWT
     const { data, error } = await supabase.auth.getUser(token);
-    const email = (data?.user?.email || '').toLowerCase();
-    if (error || !data?.user || (allowlist.length && !allowlist.includes(email))) {
+    if (error || !data?.user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
+
+    const email = (data.user.email || '').toLowerCase();
+
+    // ═══════════════════════════════════════════════════════════
+    // LIVE REVOCATION CHECK (prevents 1-hour JWT window exploit)
+    // ═══════════════════════════════════════════════════════════
+    const { data: revoked } = await supabase
+      .from('revoked_users')
+      .select('revoked_at')
+      .eq('user_id', data.user.id)
+      .single();
+
+    if (revoked?.revoked_at) {
+      // Compare revoked_at against JWT issued-at time
+      const payloadPart = token.split('.')[1];
+      const payload = JSON.parse(atob(payloadPart));
+      const iat = payload.iat ? payload.iat * 1000 : 0;
+      const revokedAt = new Date(revoked.revoked_at).getTime();
+      
+      if (revokedAt >= iat) {
+        console.error(`[SMS-EMAIL] Blocked revoked user: ${email}`);
+        return new Response(JSON.stringify({ error: 'Access revoked' }), { status: 403 });
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SSoT CHECK: Query staff_directory table (replaces env var)
+    // ═══════════════════════════════════════════════════════════
+    const { data: staffRecord, error: staffError } = await supabase
+      .from('staff_directory')
+      .select('role')
+      .eq('email', email)
+      .single();
+
+    if (staffError || !staffRecord) {
+      console.error(`[SMS-EMAIL] Blocked non-staff: ${email}`);
+      return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
     }
   }
 
@@ -60,6 +95,7 @@ export default async (req, context) => {
     const data = await res.json();
     return new Response(JSON.stringify({ success: res.ok, id: data.id }), { status: res.status });
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    console.error(error);
+    return new Response(JSON.stringify({ error: 'Send failed' }), { status: 500 });
   }
 };

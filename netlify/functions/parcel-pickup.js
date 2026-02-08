@@ -18,7 +18,10 @@ exports.handler = async (event) => {
     })
     .eq('tracking_number', tracking_number);
 
-  if (error) return { statusCode: 500, body: error.message };
+  if (error) {
+    console.error(error);
+    return { statusCode: 500, body: JSON.stringify({ error: 'Pickup failed' }) };
+  }
 
   return { statusCode: 200, body: JSON.stringify({ message: "Cleared from inventory" }) };
 };

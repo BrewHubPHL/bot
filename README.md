@@ -1,3 +1,7 @@
+## 🔒 Security
+This project implements strict architectural security (HMAC, RLS, and Atomic Locks). 
+Please review [README_SECURITY.md](./README_SECURITY.md) before making changes to the backend.
+
 # BrewHub PHL
 
 BrewHub PHL is a Netlify-hosted static site backed by Supabase. It includes a customer homepage, resident portal, staff POS, parcel operations, inventory scanning, and a kitchen display system (KDS).

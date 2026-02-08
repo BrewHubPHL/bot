@@ -1,6 +1,7 @@
 const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
 const { randomUUID } = require('crypto');
+const { checkQuota } = require('./_usage');
 
 const square = new SquareClient({
   token: process.env.SQUARE_ACCESS_TOKEN, 
@@ -15,6 +16,12 @@ const supabase = createClient(
 );
 
 exports.handler = async (event) => {
+  // Wallet Protection: Rate limit public checkout creation
+  const isUnderLimit = await checkQuota('square_checkout');
+  if (!isUnderLimit) {
+    return { statusCode: 429, body: "Too many checkout requests. Please try again in a few minutes." };
+  }
+
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': '*' }, body: '' };
   }
@@ -26,14 +33,41 @@ exports.handler = async (event) => {
 
     if (!cart || cart.length === 0) return { statusCode: 400, body: "Cart empty" };
 
-    // 1. Prepare Square Line Items
+    // Server-side price lookup — NEVER trust client-supplied prices
+    const itemNames = cart.map(i => i.name);
+    const { data: dbProducts, error: dbErr } = await supabase
+      .from('merch_products')
+      .select('name, price_cents')
+      .in('name', itemNames)
+      .eq('is_active', true);
+
+    if (dbErr) throw new Error('Failed to load product prices');
+
+    const priceMap = {};
+    for (const p of (dbProducts || [])) {
+      priceMap[p.name] = p.price_cents;
+    }
+
+    // Validate every item has a server-side price
+    for (const item of cart) {
+      if (priceMap[item.name] === undefined) {
+        return {
+          statusCode: 400,
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({ error: `Unknown product: ${item.name}` })
+        };
+      }
+    }
+
+    // 1. Prepare Square Line Items using SERVER prices
     let totalCents = 0;
     const lineItems = cart.map(item => {
-      totalCents += (item.price * item.quantity);
+      const serverPrice = priceMap[item.name];
+      totalCents += (serverPrice * item.quantity);
       return {
         name: item.name,
         quantity: item.quantity.toString(),
-        basePriceMoney: { amount: BigInt(item.price), currency: 'USD' },
+        basePriceMoney: { amount: BigInt(serverPrice), currency: 'USD' },
         note: item.modifiers ? item.modifiers.join(', ') : ''
       };
     });
@@ -94,6 +128,6 @@ exports.handler = async (event) => {
 
   } catch (err) {
     console.error(err);
-    return { statusCode: 500, body: err.message };
+    return { statusCode: 500, body: JSON.stringify({ error: 'Checkout failed' }) };
   }
 };

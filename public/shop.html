@@ -10,23 +10,25 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/brand-system.css">
     <style>
-        :root {
-            --ink: #2c1810;
-            --coffee: #3c2f2f;
-            --latte: #d4b59e;
-            --cream: #f8f4f0;
-            --paper: #fff9f2;
-        }
-        * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: 'Work Sans', sans-serif;
-            color: var(--ink);
-            background: radial-gradient(1200px 600px at 10% -10%, #efe3d6 0%, transparent 60%),
-                        radial-gradient(900px 500px at 110% 0%, #efe9e2 0%, transparent 60%),
-                        var(--cream);
+            font-family: var(--font-body);
+            color: var(--brand-primary);
+            background: var(--bg-main);
             min-height: 100vh;
+        }
+        h1 {
+            font-family: var(--font-heading);
+            color: var(--brand-primary);
+        }
+        .btn {
+            background-color: var(--brand-accent);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
         }
         header {
             display: flex;

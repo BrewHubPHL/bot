@@ -7,15 +7,18 @@
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="/js/auth.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
+    <link rel="stylesheet" href="css/brand-system.css">
     <style>
         * { box-sizing: border-box; }
-        body { font-family: -apple-system, sans-serif; background: #121212; color: white; margin: 0; padding: 0; min-height: 100vh; }
-        
-        .header { background: rgba(255,255,255,0.03); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
-        .logo { font-size: 1.3rem; font-weight: 700; color: #f39c12; }
-        .logo span { color: #fff; }
-        .nav-links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 1.5rem; font-size: 0.9rem; }
-        .nav-links a:hover, .nav-links a.active { color: #f39c12; }
+        body { font-family: var(--font-body); background: var(--bg-main); color: var(--brand-primary); margin: 0; padding: 0; min-height: 100vh; }
+        h1 { font-family: var(--font-heading); color: var(--brand-primary); }
+        .btn { background-color: var(--brand-accent); color: #fff; }
+
+        .header { background: var(--card-bg); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-soft); }
+        .logo { font-size: 1.3rem; font-weight: 700; color: var(--brand-primary); }
+        .logo span { color: var(--brand-secondary); }
+        .nav-links a { color: var(--brand-primary); text-decoration: none; margin-left: 1.5rem; font-size: 0.9rem; opacity: 0.7; }
+        .nav-links a:hover, .nav-links a.active { color: var(--brand-secondary); opacity: 1; }
         
         .container { max-width: 500px; margin: 0 auto; padding: 20px; }
         h2 { color: #f39c12; margin-bottom: 5px; text-align: center; }
@@ -124,6 +127,16 @@
         let pendingStock = 0;
         let recentUpdates = [];
 
+        // ===== AUTH HEADERS =====
+        async function authHeaders() {
+            const { data: { session } } = await sb.auth.getSession();
+            if (!session) throw new Error('Not signed in');
+            return {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+            };
+        }
+
         // ===== HARDWARE SCANNER SUPPORT (Socket Mobile S740) =====
         // Bluetooth scanners type fast (<50ms between chars) and end with Enter
         let scanBuffer = '';
@@ -230,54 +243,112 @@
             await lookupBarcode(barcode);
         }
 
+        // ============================================================
+        // SCHEMA-STRICT BARCODE VALIDATION (mirrors server-side)
+        // ============================================================
+        // Supported formats:
+        //   UPC-A:    12 digits
+        //   EAN-13:   13 digits  
+        //   EAN-8:    8 digits
+        //   CODE-128: 6-20 alphanumeric
+        //   Internal: BRW-XXXXXX (BrewHub format)
+        
+        const BARCODE_FORMATS = {
+            UPC_A:    /^[0-9]{12}$/,
+            EAN_13:   /^[0-9]{13}$/,
+            EAN_8:    /^[0-9]{8}$/,
+            CODE_128: /^[A-Z0-9]{6,20}$/,
+            INTERNAL: /^BRW-[A-Z0-9]{6}$/
+        };
+
+        function validateBarcode(input) {
+            // Type check
+            if (!input || typeof input !== 'string') {
+                return { valid: false, sanitized: null, error: 'Input must be a string' };
+            }
+
+            // Length guard
+            if (input.length > 50) {
+                return { valid: false, sanitized: null, error: 'Input too long' };
+            }
+
+            // ASCII-only filter (rejects emojis, non-printable chars)
+            const ASCII_SAFE = /^[\x20-\x7E]+$/;
+            if (!ASCII_SAFE.test(input)) {
+                return { valid: false, sanitized: null, error: 'Invalid characters' };
+            }
+
+            // Normalize
+            const normalized = input.trim().toUpperCase();
+
+            // Min length
+            if (normalized.length < 6) {
+                return { valid: false, sanitized: null, error: 'Too short' };
+            }
+
+            // Match against known formats
+            for (const [format, regex] of Object.entries(BARCODE_FORMATS)) {
+                if (regex.test(normalized)) {
+                    return { valid: true, sanitized: normalized, format, error: null };
+                }
+            }
+
+            return { valid: false, sanitized: null, error: 'Unknown format' };
+        }
+
         async function lookupBarcode(barcode) {
-            if (!barcode || !barcode.trim()) return;
-            barcode = barcode.trim();
+            const validation = validateBarcode(barcode);
+            if (!validation.valid) {
+                document.getElementById('status').innerText = `⚠️ ${validation.error}`;
+                return;
+            }
+            barcode = validation.sanitized;
             
             document.getElementById('status').innerText = 'Looking up: ' + barcode;
             document.getElementById('manual-barcode').value = '';
 
-            const { data, error } = await sb
-                .from('inventory')
-                .select('*')
-                .eq('barcode', barcode)
-                .single();
+            try {
+                const response = await fetch(`/.netlify/functions/inventory-lookup?barcode=${encodeURIComponent(barcode)}`, {
+                    headers: await authHeaders()
+                });
 
-            if (error || !data) {
-                // Not found - offer to create
-                if (confirm(`Barcode "${barcode}" not found.\n\nAdd as new item?`)) {
-                    const name = prompt('Enter item name:');
-                    if (name) {
-                        await createItem(barcode, name);
+                const result = await response.json();
+
+                if (!response.ok || !result.found) {
+                    // Not found - offer to create
+                    if (confirm(`Barcode "${barcode}" not found.\n\nAdd as new item?`)) {
+                        const name = prompt('Enter item name:');
+                        if (name) {
+                            await createItem(barcode, name);
+                        }
+                    } else {
+                        document.getElementById('status').innerText = 'Ready - scan with S740 or camera';
                     }
-                } else {
-                    document.getElementById('status').innerText = 'Ready - scan with S740 or camera';
+                    return;
                 }
-                return;
-            }
 
-            showItem(data);
+                showItem(result.item);
+            } catch (err) {
+                console.error('Lookup error:', err);
+                document.getElementById('status').innerText = 'Lookup failed - try again';
+            }
         }
 
         async function createItem(barcode, name) {
-            const { data, error } = await sb
-                .from('inventory')
-                .insert({ 
-                    barcode, 
-                    item_name: name, 
-                    current_stock: 0,
-                    min_threshold: 10,
-                    unit: 'units'
-                })
-                .select()
-                .single();
+            try {
+                const response = await fetch('/.netlify/functions/create-inventory-item', {
+                    method: 'POST',
+                    headers: await authHeaders(),
+                    body: JSON.stringify({ barcode, name })
+                });
 
-            if (error) {
-                alert('Error creating item: ' + error.message);
-                return;
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || 'Failed to create item');
+
+                showItem(result.item);
+            } catch (err) {
+                alert('Error creating item: ' + err.message);
             }
-
-            showItem(data);
         }
 
         function showItem(item) {
@@ -312,34 +383,50 @@
             if (!currentItem) return;
             
             const originalStock = currentItem.current_stock || 0;
-            const change = pendingStock - originalStock;
+            const delta = pendingStock - originalStock;
             
-            const { error } = await sb
-                .from('inventory')
-                .update({ 
-                    current_stock: pendingStock,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', currentItem.id);
-
-            if (error) {
-                alert('Error saving: ' + error.message);
-                return;
+            if (delta === 0) {
+                 clearItem();
+                 return;
             }
 
-            // Add to history
-            recentUpdates.unshift({
-                name: currentItem.item_name,
-                change: change,
-                newStock: pendingStock
-            });
-            if (recentUpdates.length > 5) recentUpdates.pop();
-            renderHistory();
+            try {
+                // Secure atomic update via Netlify Function
+                const response = await fetch('/.netlify/functions/adjust-inventory', {
+                    method: 'POST',
+                    headers: await authHeaders(),
+                    body: JSON.stringify({ 
+                        itemId: currentItem.id,
+                        itemName: currentItem.item_name,
+                        barcode: currentItem.barcode,
+                        delta: delta 
+                    })
+                });
 
-            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-            document.getElementById('status').innerText = '✅ Saved: ' + currentItem.item_name;
-            
-            clearItem();
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Update failed');
+                }
+
+                // Add to history
+                recentUpdates.unshift({
+                    name: currentItem.item_name,
+                    change: delta,
+                    newStock: pendingStock
+                });
+                if (recentUpdates.length > 5) recentUpdates.pop();
+                renderHistory();
+
+                if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                document.getElementById('status').innerText = '✅ Saved: ' + currentItem.item_name;
+                
+                clearItem();
+
+            } catch (err) {
+                console.error("Stock Update Error:", err);
+                alert('Error saving: ' + err.message);
+            }
+        }
         }
 
         function clearItem() {

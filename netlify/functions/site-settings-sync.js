@@ -43,6 +43,6 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: JSON.stringify({ success: true }) };
   } catch (err) {
     console.error('site-settings-sync error:', err);
-    return { statusCode: 500, body: err.message };
+    return { statusCode: 500, body: JSON.stringify({ error: 'Sync failed' }) };
   }
 };

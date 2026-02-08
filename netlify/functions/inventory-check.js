@@ -24,6 +24,7 @@ exports.handler = async (event) => {
 
     return { statusCode: 200, body: JSON.stringify({ alert: false }) };
   } catch (err) {
-    return { statusCode: 500, body: err.message };
+    console.error(err);
+    return { statusCode: 500, body: JSON.stringify({ error: 'Inventory check failed' }) };
   }
 };

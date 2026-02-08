@@ -24,28 +24,23 @@
     <script src="https://cdn.jsdelivr.net/npm/@elevenlabs/convai@latest/dist/index.bundle.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-
+    <link rel="stylesheet" href="/css/brand-system.css">
     <style>
-        :root { 
-            --hub-brown: #3c2f2f; 
-            --hub-tan: #d4b59e; 
-            --hub-light: #f8f4f0; 
-            --glass: rgba(255, 255, 255, 0.95);
-        }
-
         /* Prevent Scroll & Force Native App Feel */
         html, body { 
             height: 100%; overflow: hidden; margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: radial-gradient(circle at center, #ffffff 0%, var(--hub-light) 100%);
-            color: var(--hub-brown);
+            font-family: var(--font-body);
+            background: var(--bg-main);
+            color: var(--brand-primary);
             -webkit-tap-highlight-color: transparent;
         }
         body { display: flex; flex-direction: column; }
+        h1 { font-family: var(--font-heading); color: var(--brand-primary); }
+        .btn { background: var(--brand-accent); color: white; }
         
         header { 
-            background: var(--hub-brown); color: #fff; padding: 40px 20px 20px; 
-            text-align: center; border-bottom: 5px solid var(--hub-tan); position: relative; flex-shrink: 0;
+            background: var(--brand-primary); color: #fff; padding: 40px 20px 20px; 
+            text-align: center; border-bottom: 5px solid var(--brand-secondary); position: relative; flex-shrink: 0;
         }
         #logo { max-width: 220px; width: 100%; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.3)); }
 
@@ -237,8 +232,26 @@
 
         async function staffAction(type) {
             const { data: { user } } = await _supabase.auth.getUser();
-            await _supabase.from('time_logs').insert([{ employee_email: user.email, action_type: type }]);
-            alert(`✅ ${type} Recorded`);
+            const { data: { session } } = await _supabase.auth.getSession();
+            if (!session) { alert('Session expired. Please log in again.'); return; }
+
+            try {
+                const res = await fetch('/.netlify/functions/log-time', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session.access_token}`
+                    },
+                    body: JSON.stringify({ employee_email: user.email, action_type: type })
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || 'Clock failed');
+                }
+                alert(`\u2705 ${type} Recorded`);
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
         }
 
         // Waitlist

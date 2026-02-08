@@ -1,5 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
-const { authorize } = require('./_auth');
+const { authorize, sanitizedError } = require('./_auth');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(
@@ -23,40 +23,55 @@ exports.handler = async (event) => {
   console.log(`[REDEEM] Attempt burn: "${voucherCode}"`);
 
   try {
-    // Atomic burn: only update if not already redeemed
-    const { data: burnRow, error: burnError } = await supabase
-      .from('vouchers')
-      .update({
-        is_redeemed: true,
-        redeemed_at: new Date().toISOString(),
-        applied_to_order_id: orderId
-      })
-      .eq('code', voucherCode)
-      .eq('is_redeemed', false)
-      .select()
-      .single();
+    // ═══════════════════════════════════════════════════════════════════════════
+    // RACE-TO-REDEEM FIX: Use atomic RPC with pg_advisory_xact_lock
+    // ═══════════════════════════════════════════════════════════════════════════
+    // The RPC performs ALL of the following atomically in a single transaction:
+    // 1. Acquires transaction-level advisory lock on user ID
+    // 2. Checks for active refund locks (rejects if refund in progress)
+    // 3. Validates voucher ownership and order status
+    // 4. Burns the voucher and applies discount to order
+    //
+    // This prevents the 10ms race window between refund.created and redemption.
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    const { data: result, error: rpcError } = await supabase.rpc('atomic_redeem_voucher', {
+      p_voucher_code: voucherCode,
+      p_order_id: orderId,
+      p_user_id: auth.userId || null
+    });
 
-    if (burnError) {
-      console.error('[REDEEM] Burn error:', burnError);
-      return { statusCode: 500, body: JSON.stringify({ error: 'Burn failed' }) };
+    if (rpcError) {
+      console.error('[REDEEM] RPC error:', rpcError);
+      return { statusCode: 500, body: JSON.stringify({ error: 'Redemption failed' }) };
     }
 
-    if (!burnRow) {
-      return { statusCode: 400, body: JSON.stringify({ error: "Voucher not found or already used" }) };
+    const redeemResult = result?.[0] || result;
+    
+    if (!redeemResult?.success) {
+      const errorCode = redeemResult?.error_code || 'UNKNOWN';
+      const errorMessage = redeemResult?.error_message || 'Redemption failed';
+      
+      console.warn(`[REDEEM BLOCKED] ${errorCode}: ${errorMessage}`);
+      
+      // Map error codes to appropriate HTTP status codes
+      const statusMap = {
+        'VOUCHER_NOT_FOUND': 404,
+        'ALREADY_REDEEMED': 400,
+        'REFUND_IN_PROGRESS': 423,  // Locked
+        'ORDER_NOT_FOUND': 404,
+        'ORDER_COMPLETE': 400,
+        'OWNERSHIP_MISMATCH': 403,
+        'RACE_CONDITION': 409  // Conflict
+      };
+      
+      return { 
+        statusCode: statusMap[errorCode] || 400, 
+        body: JSON.stringify({ error: errorMessage, code: errorCode }) 
+      };
     }
 
-    // 3. Apply the discount to the order in Supabase
-    // We set total_amount_cents to 0 (or apply a discount)
-    await supabase
-      .from('orders')
-      .update({ 
-        total_amount_cents: 0, 
-        status: 'paid', // Vouchers count as instant payment
-        notes: `Redeemed via voucher: ${code}` 
-      })
-      .eq('id', orderId);
-
-    console.log(`[VOUCHER REDEEMED] ${voucherCode} applied to order ${orderId}`);
+    console.log(`[VOUCHER REDEEMED] ${voucherCode} applied to order ${orderId} (voucher ID: ${redeemResult.voucher_id})`);
 
     return { 
       statusCode: 200, 
@@ -64,6 +79,8 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error("Redemption Error:", err.message);
-    return { statusCode: 500, body: "Internal Server Error" };
+    return sanitizedError(err, 'REDEEM');
   }
 };
+
+// Note: Rollback is no longer needed - atomic RPC handles all-or-nothing transaction

@@ -4,6 +4,18 @@ const { authorize } = require('./_auth');
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
+// Fire-and-forget trigger for notification worker (best-effort, cron is backup)
+function triggerWorker() {
+  fetch(`${supabaseUrl}/functions/v1/notification-worker`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.WORKER_SECRET}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ trigger: 'parcel-checkin' })
+  }).catch(() => {}); // Swallow errors - cron is backup
+}
+
 // Auto-detect carrier from tracking number format
 function identifyCarrier(tracking) {
   if (/^1Z[A-Z0-9]{16}$/i.test(tracking)) return 'UPS';
@@ -60,25 +72,26 @@ exports.handler = async (event) => {
         .update({ status: 'arrived', arrived_at: new Date().toISOString() })
         .eq('id', expected.id);
 
-      // Insert into parcels table with status 'arrived' to trigger SMS via DB
-      const { data, error } = await supabase
-        .from('parcels')
-        .insert([{
-          tracking_number,
-          carrier: detectedCarrier,
-          recipient_name: expected.customer_name,
-          recipient_phone: expected.customer_phone,
-          unit_number: expected.unit_number,
-          status: 'arrived',
-          received_at: new Date().toISOString(),
-          match_type: 'pre-registered'
-        }])
-        .select()
-        .single();
+      // ═══════════════════════════════════════════════════════════
+      // ATOMIC CHECK-IN: Parcel + Notification Queue in ONE transaction
+      // If either fails, both roll back. No limbo state.
+      // ═══════════════════════════════════════════════════════════
+      const { data, error } = await supabase.rpc('atomic_parcel_checkin', {
+        p_tracking_number: tracking_number,
+        p_carrier: detectedCarrier,
+        p_recipient_name: expected.customer_name,
+        p_recipient_phone: expected.customer_phone,
+        p_recipient_email: expected.customer_email,
+        p_unit_number: expected.unit_number,
+        p_match_type: 'pre-registered'
+      });
 
       if (error) throw error;
 
-      // SMS handled by Supabase trigger on_parcel_arrived
+      console.log(`[QUEUE] Notification queued: ${data[0]?.queue_task_id}`);
+
+      // Fire-and-forget: Immediately trigger worker (cron is backup)
+      triggerWorker();
 
       return {
         statusCode: 200,
@@ -90,6 +103,7 @@ exports.handler = async (event) => {
           carrier: detectedCarrier,
           recipient: expected.customer_name,
           unit: expected.unit_number,
+          queue_task_id: data[0]?.queue_task_id,
           message: `✅ Auto-matched! Package for ${expected.customer_name} (Unit ${expected.unit_number || 'N/A'})`
         })
       };
@@ -127,11 +141,12 @@ exports.handler = async (event) => {
     let finalRecipient = recipient_name;
     let unitNumber = null;
     let recipientPhone = null;
+    let recipientEmail = null;
 
     if (resident_id) {
       const { data: resident } = await supabase
         .from('residents')
-        .select('name, unit_number, phone')
+        .select('name, unit_number, phone, email')
         .eq('id', resident_id)
         .single();
 
@@ -139,28 +154,31 @@ exports.handler = async (event) => {
         finalRecipient = resident.name;
         unitNumber = resident.unit_number;
         recipientPhone = resident.phone;
+        recipientEmail = resident.email;
       }
     }
 
-    // Insert parcel with manual match - status 'arrived' triggers SMS via DB
-    const { data, error } = await supabase
-      .from('parcels')
-      .insert([{
-        tracking_number,
-        carrier: detectedCarrier,
-        recipient_name: finalRecipient,
-        recipient_phone: recipientPhone,
-        unit_number: unitNumber,
-        status: 'arrived',
-        received_at: new Date().toISOString(),
-        match_type: 'manual'
-      }])
-      .select()
-      .single();
+    // ═══════════════════════════════════════════════════════════
+    // ATOMIC CHECK-IN: Parcel + Notification Queue in ONE transaction
+    // If either fails, both roll back. No limbo state.
+    // ═══════════════════════════════════════════════════════════
+    const { data, error } = await supabase.rpc('atomic_parcel_checkin', {
+      p_tracking_number: tracking_number,
+      p_carrier: detectedCarrier,
+      p_recipient_name: finalRecipient,
+      p_recipient_phone: recipientPhone,
+      p_recipient_email: recipientEmail,
+      p_unit_number: unitNumber,
+      p_match_type: 'manual'
+    });
 
     if (error) throw error;
 
     console.log(`[PHILLY] ${detectedCarrier} package ${tracking_number} checked in for ${finalRecipient}`);
+    console.log(`[QUEUE] Notification queued: ${data[0]?.queue_task_id}`);
+
+    // Fire-and-forget: Immediately trigger worker (cron is backup)
+    triggerWorker();
 
     return {
       statusCode: 200,
@@ -172,6 +190,7 @@ exports.handler = async (event) => {
         carrier: detectedCarrier,
         recipient: finalRecipient,
         unit: unitNumber,
+        queue_task_id: data[0]?.queue_task_id,
         message: `📦 Checked in for ${finalRecipient}`
       })
     };
@@ -181,7 +200,7 @@ exports.handler = async (event) => {
     return {
       statusCode: 500,
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ error: err.message })
+      body: JSON.stringify({ error: 'Check-in failed' })
     };
   }
 };

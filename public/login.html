@@ -5,35 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Staff Login | BrewHub</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="css/brand-system.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: 'Segoe UI', -apple-system, sans-serif;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      font-family: var(--font-body);
+      background-color: var(--bg-main);
+      color: var(--brand-primary);
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #fff;
+    }
+    h1 {
+      font-family: var(--font-heading);
+      color: var(--brand-primary);
+    }
+    .btn, .login-btn {
+      background-color: var(--brand-accent);
+      color: white;
     }
     .login-card {
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(255,255,255,0.1);
+      background: white;
+      border: 1px solid var(--border-soft);
       border-radius: 20px;
       padding: 3rem;
       width: 90%;
       max-width: 400px;
       text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.05);
     }
     .logo {
       font-size: 2rem;
       font-weight: 700;
       margin-bottom: 0.5rem;
-      color: #f39c12;
+      color: var(--brand-primary);
     }
-    .logo span { color: #fff; }
+    .logo span { color: var(--brand-secondary); }
     .subtitle {
-      color: rgba(255,255,255,0.5);
+      color: var(--brand-primary);
+      opacity: 0.6;
       margin-bottom: 2rem;
       font-size: 0.9rem;
     }
@@ -43,24 +54,24 @@
     input {
       width: 100%;
       padding: 1rem;
-      border: 1px solid rgba(255,255,255,0.2);
+      border: 1px solid var(--border-soft);
       border-radius: 10px;
-      background: rgba(0,0,0,0.3);
-      color: #fff;
+      background: #fff;
+      color: var(--brand-primary);
       font-size: 1rem;
     }
-    input::placeholder { color: rgba(255,255,255,0.4); }
+    input::placeholder { color: #999; }
     input:focus {
       outline: none;
-      border-color: #f39c12;
+      border-color: var(--brand-secondary);
     }
     .login-btn {
       width: 100%;
       padding: 1rem;
       border: none;
       border-radius: 10px;
-      background: #f39c12;
-      color: #000;
+      background: var(--brand-accent);
+      color: #fff;
       font-size: 1rem;
       font-weight: 600;
       cursor: pointer;
@@ -68,7 +79,7 @@
       transition: all 0.2s;
     }
     .login-btn:hover {
-      background: #e67e22;
+      opacity: 0.9;
       transform: scale(1.02);
     }
     .login-btn:disabled {
@@ -76,9 +87,9 @@
       cursor: not-allowed;
     }
     .error {
-      background: rgba(231, 76, 60, 0.2);
-      border: 1px solid #e74c3c;
-      color: #e74c3c;
+      background: #fff0f0;
+      border: 1px solid var(--status-alert);
+      color: var(--status-alert);
       padding: 0.75rem;
       border-radius: 8px;
       margin-bottom: 1rem;
@@ -87,11 +98,12 @@
     .back-link {
       display: block;
       margin-top: 1.5rem;
-      color: rgba(255,255,255,0.5);
+      color: var(--brand-primary);
+      opacity: 0.5;
       text-decoration: none;
       font-size: 0.85rem;
     }
-    .back-link:hover { color: #f39c12; }
+    .back-link:hover { color: var(--brand-secondary); }
   </style>
 </head>
 <body>

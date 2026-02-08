@@ -5,18 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BrewHub Resident Portal</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="css/brand-system.css">
     <style>
-        :root { --brand: #d2b48c; --dark: #2c1810; --bg: #fdfbf7; }
-        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--dark); max-width: 600px; margin: 0 auto; padding: 20px; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        h1, h2 { color: var(--dark); }
-        button { background: var(--dark); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 16px; }
-        button:hover { opacity: 0.9; }
-        button:disabled { background: #999; cursor: not-allowed; }
-        input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
-        .badge { background: #e0f2f1; color: #00695c; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; }
+        body { font-family: var(--font-body); background: var(--bg-main); color: var(--brand-primary); max-width: 600px; margin: 0 auto; padding: 20px; }
+        h1, h2, h3 { font-family: var(--font-heading); color: var(--brand-primary); }
+        .card { background: var(--card-bg); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid var(--border-soft); }
+        button, .btn { background: var(--brand-accent); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 16px; }
+        button:hover, .btn:hover { opacity: 0.9; }
+        button:disabled, .btn:disabled { background: #999; cursor: not-allowed; }
+        input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid var(--border-soft); border-radius: 8px; box-sizing: border-box; background: white; color: var(--brand-primary); }
+        .badge { background: var(--brand-secondary); color: var(--brand-primary); padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; }
         .hidden { display: none; }
-        .voucher { border: 2px dashed var(--brand); padding: 10px; text-align: center; margin-top: 10px; background: #fff8e1; }
+        .voucher { border: 2px dashed var(--brand-secondary); padding: 10px; text-align: center; margin-top: 10px; background: #fff8e1; }
     </style>
 </head>
 <body>
@@ -289,36 +289,52 @@
             // Check if email confirmation is required (no session returned)
             const needsEmailConfirmation = !data.session;
 
-            // Create customer record in database immediately
-            // (RLS allows anon insert so this works before email confirmation)
-            const { error: dbError } = await sb
-                .from('customers')
-                .insert({ 
+            // If we have a session, create customer record now
+            if (data.session?.access_token) {
+                const createRes = await fetch('/.netlify/functions/create-customer', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${data.session.access_token}`
+                    },
+                    body: JSON.stringify({
+                        email,
+                        name,
+                        address,
+                        phone,
+                        sms_opt_in: smsOptIn
+                    })
+                });
+
+                const createResult = await createRes.json();
+
+                if (!createRes.ok) {
+                    isRegistering = false;
+                    btn.disabled = false;
+                    console.error("DB error:", createResult);
+                    // Don't scare user - account is created, just profile issue
+                    if (needsEmailConfirmation) {
+                        msg.innerHTML = `
+                            <div style="background:#d4edda; padding:15px; border-radius:8px; text-align:center;">
+                                <strong>📧 Check your email!</strong><br><br>
+                                We sent a confirmation link to <strong>${email}</strong><br><br>
+                                Click the link, then come back here to log in.
+                            </div>
+                        `;
+                    } else {
+                        msg.innerText = "Account created! Please log in.";
+                    }
+                    return;
+                }
+            } else {
+                // Store pending profile until the user confirms email and logs in
+                localStorage.setItem('pending_customer_profile', JSON.stringify({
                     email,
                     name,
                     address,
                     phone,
-                    sms_opt_in: smsOptIn,
-                    loyalty_points: 0
-                });
-
-            if (dbError) {
-                isRegistering = false;
-                btn.disabled = false;
-                console.error("DB error:", dbError);
-                // Don't scare user - account is created, just profile issue
-                if (needsEmailConfirmation) {
-                    msg.innerHTML = `
-                        <div style="background:#d4edda; padding:15px; border-radius:8px; text-align:center;">
-                            <strong>📧 Check your email!</strong><br><br>
-                            We sent a confirmation link to <strong>${email}</strong><br><br>
-                            Click the link, then come back here to log in.
-                        </div>
-                    `;
-                } else {
-                    msg.innerText = "Account created! Please log in.";
-                }
-                return;
+                    sms_opt_in: smsOptIn
+                }));
             }
 
             // If email confirmation required, show clear instructions
@@ -362,6 +378,31 @@
             loadLoyalty(user.email);
             loadVouchers(user.id);
             generateQRCode(user.email);
+
+            // If we have a pending profile, create it now with auth
+            const pendingRaw = localStorage.getItem('pending_customer_profile');
+            if (pendingRaw) {
+                try {
+                    const pending = JSON.parse(pendingRaw);
+                    const { data: { session } } = await sb.auth.getSession();
+                    if (session?.access_token) {
+                        const createRes = await fetch('/.netlify/functions/create-customer', {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${session.access_token}`
+                            },
+                            body: JSON.stringify(pending)
+                        });
+
+                        if (createRes.ok) {
+                            localStorage.removeItem('pending_customer_profile');
+                        }
+                    }
+                } catch (err) {
+                    console.error('Pending profile error:', err);
+                }
+            }
         }
         
         // Generate QR code with email for cafe scanning
@@ -530,40 +571,41 @@
             `).join('');
         }
 
-        // Search for package by tracking number OR email
+        // Search for package by tracking number (email restricted to logged-in user)
         async function searchPackage() {
             const input = document.getElementById('tracking-search').value.trim();
             const result = document.getElementById('package-result');
             
+            // Get the logged-in user's email for security filtering
+            const { data: { session } } = await sb.auth.getSession();
+            const userEmail = session?.user?.email;
+            
+            if (!userEmail) {
+                result.innerHTML = '<p style="color:#c00;">Please log in to search packages.</p>';
+                return;
+            }
+            
             if (!input) {
-                result.innerHTML = '<p style="color:#666;">Enter a tracking number or email to search.</p>';
+                result.innerHTML = '<p style="color:#666;">Enter a tracking number to search.</p>';
                 return;
             }
 
             result.innerHTML = '<p>Searching...</p>';
 
-            // Check if input looks like an email
-            const isEmail = input.includes('@');
-            let query;
-
-            if (isEmail) {
-                // Search by resident email - may return multiple packages
-                query = sb
-                    .from('parcels')
-                    .select('*')
-                    .ilike('resident_email', input)
-                    .eq('picked_up', false)
-                    .order('created_at', { ascending: false });
-            } else {
-                // Search by tracking number
-                query = sb
-                    .from('parcels')
-                    .select('*')
-                    .ilike('tracking_number', `%${input}%`)
-                    .limit(5);
+            // SECURITY: Parcels are looked up via expected_parcels which has the email
+            // Query expected_parcels for the user's pre-registered packages
+            let query = sb
+                .from('expected_parcels')
+                .select('*')
+                .eq('customer_email', userEmail)
+                .order('registered_at', { ascending: false });
+            
+            // If input is a tracking number, add filter
+            if (!input.includes('@')) {
+                query = query.ilike('tracking_number', `%${input}%`);
             }
 
-            const { data, error } = await query;
+            const { data, error } = await query.limit(10);
 
             if (error) {
                 console.error('Search error:', error);
@@ -580,7 +622,7 @@
                 result.innerHTML = `
                     <div style="background:#fff3cd; padding:15px; border-radius:8px; border:1px solid #ffc107;">
                         <strong>📭 No packages found</strong>
-                        <p style="margin:5px 0 0; font-size:0.9rem;">${isEmail ? 'No pending packages for this email.' : "This tracking number hasn't been checked in yet."}</p>
+                        <p style="margin:5px 0 0; font-size:0.9rem;">No matching packages found for your account.</p>
                     </div>
                 `;
                 return;
@@ -591,28 +633,29 @@
             
             if (data.length === 1) {
                 const p = data[0];
-                const status = p.picked_up ? 'Picked Up' : 'Ready for Pickup';
-                const statusColor = p.picked_up ? '#6c757d' : '#28a745';
+                const status = p.status === 'arrived' ? 'Ready for Pickup' : (p.status || 'Pending');
+                const statusColor = p.status === 'arrived' ? '#28a745' : '#6c757d';
                 
                 result.innerHTML = `
                     <div style="background:#d4edda; padding:15px; border-radius:8px; border:1px solid #28a745;">
                         <strong style="color:${statusColor};">📦 ${status}</strong>
                         <p style="margin:8px 0 0; font-size:0.9rem;">
                             <strong>Carrier:</strong> ${p.carrier || 'Unknown'}<br>
-                            <strong>Checked in:</strong> ${formatDate(p.created_at)}
+                            <strong>Tracking:</strong> ...${(p.tracking_number || '').slice(-6)}<br>
+                            <strong>Registered:</strong> ${formatDate(p.registered_at)}
                         </p>
-                        ${!p.picked_up ? '<p style="margin-top:10px; font-size:0.85rem; color:#155724;">Show ID at the counter to pick up your package.</p>' : ''}
+                        ${p.status === 'arrived' ? '<p style="margin-top:10px; font-size:0.85rem; color:#155724;">Show ID at the counter to pick up your package.</p>' : '<p style="margin-top:10px; font-size:0.85rem; color:#666;">We\'ll notify you when it arrives.</p>'}
                     </div>
                 `;
             } else {
                 // Multiple packages
                 result.innerHTML = `
                     <div style="background:#d4edda; padding:15px; border-radius:8px; border:1px solid #28a745;">
-                        <strong>📦 ${data.length} Package${data.length > 1 ? 's' : ''} Found</strong>
+                        <strong>📦 ${data.length} Package${data.length > 1 ? 's' : ''} Tracked</strong>
                         ${data.map(p => `
                             <div style="margin-top:10px; padding:10px; background:white; border-radius:6px;">
-                                <strong>${p.carrier || 'Package'}</strong> - ${p.picked_up ? '✓ Picked up' : '🟢 Ready'}<br>
-                                <span style="font-size:0.85rem; color:#666;">Checked in: ${formatDate(p.created_at)}</span>
+                                <strong>${p.carrier || 'Package'}</strong> - ${p.status === 'arrived' ? '🟢 Ready' : '⏳ ' + (p.status || 'Pending')}<br>
+                                <span style="font-size:0.85rem; color:#666;">...${(p.tracking_number || '').slice(-6)} | Registered: ${formatDate(p.registered_at)}</span>
                             </div>
                         `).join('')}
                         <p style="margin-top:10px; font-size:0.85rem; color:#155724;">Show ID at the counter to pick up.</p>

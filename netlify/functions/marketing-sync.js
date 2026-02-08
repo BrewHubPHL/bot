@@ -1,7 +1,14 @@
 const { createClient } = require('@supabase/supabase-js');
+const { filterTombstoned } = require('./_gdpr');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
+  // Internal-only: called by supabase-to-sheets.js or scheduled tasks
+  const incomingSecret = event.headers?.['x-brewhub-secret'];
+  if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
+    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
+  }
+
   const mode = event.queryStringParameters?.mode || 'push';
 
   // Check env vars first
@@ -26,7 +33,7 @@ exports.handler = async (event) => {
       if (record.day_of_week && record.topic) {
         // Marketing Bot Post -> SocialPosts tab
         const sheetPayload = {
-          auth_key: "BrewHub-Marketing-2026",
+          auth_key: process.env.GOOGLE_SHEETS_AUTH_KEY,
           target_sheet: "SocialPosts",
           day: record.day_of_week,
           topic: record.topic,
@@ -59,7 +66,7 @@ exports.handler = async (event) => {
       });
 
       const sheetPayload = {
-        auth_key: "BrewHub-Marketing-2026",
+        auth_key: process.env.GOOGLE_SHEETS_AUTH_KEY,
         username: record.username,
         likes: record.likes,
         caption: record.caption,
@@ -84,25 +91,53 @@ exports.handler = async (event) => {
 
     // DIRECTION B: PULL (Sheets -> Supabase)
     if (mode === 'pull') {
+      // ═══════════════════════════════════════════════════════════════════════════
+      // ZOMBIE SYNC PREVENTION: Pull from Sheets is PERMANENTLY DISABLED
+      // ═══════════════════════════════════════════════════════════════════════════
+      // 
+      // Why this matters:
+      // 1. Google Sheets is NOT the Source of Truth - Supabase is.
+      // 2. If a resident is "tombstoned" in Supabase (GDPR deletion), but their
+      //    data remains in the Sheet, a pull sync would resurrect the zombie.
+      // 3. Attackers with Sheet access could directly insert/modify records to
+      //    bypass GDPR deletion logic.
+      //
+      // Security Controls:
+      // - This endpoint returns 403 unconditionally
+      // - Even if enabled, filterTombstoned() would block resurrection
+      // - Tombstones are checked BEFORE any upsert (fail-safe)
+      //
+      // To re-enable (NOT RECOMMENDED):
+      // 1. Implement row-level checksums in the Sheet
+      // 2. Add last_modified_by column to detect unauthorized edits
+      // 3. Compare checksums before accepting any record
+      // ═══════════════════════════════════════════════════════════════════════════
+      
+      console.warn('[MARKETING SYNC] Pull from Sheets is PERMANENTLY DISABLED (Zombie Prevention)');
+      
+      // Log the attempt for security monitoring
+      console.warn('[SECURITY AUDIT] Pull attempt blocked. Origin:', {
+        ip: event.headers?.['x-forwarded-for'] || 'unknown',
+        userAgent: event.headers?.['user-agent'] || 'unknown',
+        timestamp: new Date().toISOString()
+      });
+      
+      return { 
+          statusCode: 403, 
+          body: JSON.stringify({
+            error: 'Pull disabled',
+            reason: 'Supabase is the Single Source of Truth. Google Sheets are downstream-only.',
+            mitigation: 'Updates in Sheets do not propagate back to DB to prevent zombie data resurrection.'
+          })
+      };
+
+      /* 
+      // DISABLED CODE FOLLOWS:
       const response = await fetch(process.env.MARKETING_SHEET_URL);
       const sheetData = await response.json();
-
-      // Dedupe by id - keep last occurrence
-      const deduped = Object.values(
-        sheetData.reduce((acc, row) => {
-          if (row.id) acc[row.id] = row;
-          return acc;
-        }, {})
-      );
-
-      console.log(`[MARKETING] Syncing ${deduped.length} unique leads (from ${sheetData.length} rows)`);
-
-      const { error } = await supabase
-        .from('marketing_leads')
-        .upsert(deduped, { onConflict: 'id' });
-
-      if (error) throw error;
-      return { statusCode: 200, body: `Synced ${deduped.length} leads back to DB` };
+      
+      ... 
+      */
     }
 
     // DIRECTION C: EXPORT (Bulk Supabase -> Sheets)
@@ -115,10 +150,13 @@ exports.handler = async (event) => {
 
       if (error) throw error;
 
-      console.log(`[MARKETING] Exporting ${mentions.length} mentions to Sheets`);
+      // GDPR FIX: Filter out tombstoned records before export
+      const safeMentions = await filterTombstoned('local_mentions', mentions, 'username');
+
+      console.log(`[MARKETING] Exporting ${safeMentions.length} mentions to Sheets`);
 
       // Format all records
-      const records = mentions.map(record => {
+      const records = safeMentions.map(record => {
         const postedDate = record.posted_at ? new Date(record.posted_at) : new Date();
         const formattedDate = postedDate.toLocaleDateString('en-US', { 
           month: 'short', day: 'numeric', year: 'numeric' 
@@ -142,7 +180,7 @@ exports.handler = async (event) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          auth_key: "BrewHub-Marketing-2026",
+          auth_key: process.env.GOOGLE_SHEETS_AUTH_KEY,
           bulk: true,
           records: records
         })
@@ -159,6 +197,6 @@ exports.handler = async (event) => {
 
   } catch (err) {
     console.error("Sync Error:", err);
-    return { statusCode: 500, body: err.message };
+    return { statusCode: 500, body: JSON.stringify({ error: 'Sync failed' }) };
   }
 };

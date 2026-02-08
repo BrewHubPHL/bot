@@ -1,0 +1,20 @@
+:root {
+    /* Brand Colors */
+    --brand-primary: #3c2f2f;    /* The "Coffee" color */
+    --brand-secondary: #d4b59e;  /* The "Latte" color */
+    --brand-accent: #2c1810;     /* The "Ink/Espresso" color */
+    
+    /* UI States */
+    --status-ready: #4caf50;     /* Order Up / In Stock */
+    --status-late: #ff9800;      /* Running Late (KDS) */
+    --status-alert: #f44336;     /* Out of Stock / Error */
+
+    /* Surfaces */
+    --bg-main: #f8f4f0;          /* The "Cream" background */
+    --card-bg: #ffffff;
+    --border-soft: #efe1d2;
+
+    /* Typography */
+    --font-heading: 'Playfair Display', serif;
+    --font-body: 'Work Sans', sans-serif;
+}

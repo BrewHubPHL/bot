@@ -1,3 +1,6 @@
+const { authorize } = require('./_auth');
+const { checkQuota } = require('./_usage');
+
 exports.handler = async function(event, context) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -7,6 +10,22 @@ exports.handler = async function(event, context) {
   };
 
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+
+  // Require staff auth for ConvAI sessions
+  const auth = await authorize(event);
+  if (!auth.ok) {
+    return auth.response;
+  }
+
+  // Apply a hard quota even for staff to avoid runaway costs
+  const hasQuota = await checkQuota('elevenlabs_convai');
+  if (!hasQuota) {
+    return {
+      statusCode: 429,
+      headers,
+      body: JSON.stringify({ error: 'Daily voice quota reached. Come back tomorrow!' })
+    };
+  }
 
   try {
     const agentId = process.env.ELEVENLABS_AGENT_ID;
@@ -42,10 +61,11 @@ exports.handler = async function(event, context) {
     };
 
   } catch (error) {
+    console.error(error);
     return { 
       statusCode: 500, 
       headers, 
-      body: JSON.stringify({ error: "Server Error", message: error.message }) 
+      body: JSON.stringify({ error: 'Voice session failed' }) 
     };
   }
 };

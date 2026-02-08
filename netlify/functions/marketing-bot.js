@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { checkQuota } = require('./_usage');
 
 // Initialize Supabase
 const supabase = createClient(
@@ -11,6 +12,19 @@ const supabase = createClient(
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 exports.handler = async (event) => {
+  // 1. Quota Check (Circuit Breaker)
+  const isUnderLimit = await checkQuota('gemini_marketing');
+  if (!isUnderLimit) {
+    console.error('[WALLET PROTECTION] Gemini daily budget exceeded.');
+    return { statusCode: 429, body: "Quota exceeded" };
+  }
+
+  // 2. Auth Guard
+  const incomingSecret = event.headers?.['x-brewhub-secret'];
+  if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
+    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
+  }
+
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const today = days[new Date().getDay()];
 

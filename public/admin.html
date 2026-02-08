@@ -5,11 +5,13 @@
     <title>BrewHub Admin | BrewBot Control</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/js/auth.js"></script>
+    <link rel="stylesheet" href="css/brand-system.css">
     <style>
-        body { font-family: sans-serif; background: #1a1a1a; color: white; text-align: center; padding: 50px; }
-        .status-box { border: 2px solid #333; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .active { color: #00ff00; }
-        button { background: #ff4757; color: white; border: none; padding: 15px 30px; border-radius: 5px; cursor: pointer; font-size: 1.2rem; }
+        body { font-family: var(--font-body); background: var(--bg-main); color: var(--brand-primary); text-align: center; padding: 50px; }
+        h1 { font-family: var(--font-heading); color: var(--brand-primary); }
+        .btn, button { background: var(--brand-accent); color: white; border: none; padding: 15px 30px; border-radius: 5px; cursor: pointer; font-size: 1.2rem; }
+        .status-box { border: 2px solid var(--border-soft); padding: 20px; border-radius: 10px; margin-bottom: 20px; background: var(--card-bg); }
+        .active { color: var(--status-ready); }
         button:active { transform: scale(0.98); }
     </style>
 </head>

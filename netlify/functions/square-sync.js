@@ -20,6 +20,12 @@ const supabase = createClient(
 );
 
 exports.handler = async (event) => {
+  // Auth: Only callable from internal Supabase webhook chain
+  const secret = event.headers?.['x-brewhub-secret'];
+  if (!secret || secret !== process.env.INTERNAL_SYNC_SECRET) {
+    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
+  }
+
   const { record } = JSON.parse(event.body || '{}');
 
   try {

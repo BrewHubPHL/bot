@@ -5,16 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BrewHub | Payroll</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="public/css/brand-system.css">
     <style>
-        :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; }
-        body { font-family: -apple-system, sans-serif; background: var(--hub-light); color: var(--hub-brown); padding: 20px; }
-        .card { background: white; padding: 25px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); max-width: 1000px; margin: auto; }
-        h2 { border-bottom: 2px solid var(--hub-tan); padding-bottom: 10px; display: flex; justify-content: space-between; }
+        body { font-family: var(--font-body); background: var(--bg-main); color: var(--brand-primary); padding: 20px; }
+        h1, h2 { font-family: var(--font-heading); color: var(--brand-primary); }
+        .btn, button { background: var(--brand-accent); color: white; }
+        .card { background: var(--card-bg); padding: 25px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); max-width: 1000px; margin: auto; border: 1px solid var(--border-soft); }
+        h2 { border-bottom: 2px solid var(--brand-secondary); padding-bottom: 10px; display: flex; justify-content: space-between; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th { background: var(--hub-brown); color: white; padding: 12px; text-align: left; }
-        td { padding: 12px; border-bottom: 1px solid #eee; }
+        th { background: var(--brand-primary); color: white; padding: 12px; text-align: left; }
+        td { padding: 12px; border-bottom: 1px solid var(--border-soft); }
         .pill { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; }
-        .btn-back { text-decoration: none; color: var(--hub-brown); font-weight: bold; font-size: 13px; }
+        .btn-back { text-decoration: none; color: var(--brand-primary); font-weight: bold; font-size: 13px; }
     </style>
 </head>
 <body>

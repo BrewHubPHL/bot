@@ -63,18 +63,19 @@
         window.ElevenLabsConversation = Conversation;
     </script>
 
+    <link rel="stylesheet" href="css/brand-system.css">
     <style>
-        :root { --hub-brown: #3c2f2f; --hub-tan: #d4b59e; --hub-light: #f8f4f0; }
-
         html, body { 
-            height: 100%; margin: 0; font-family: -apple-system, sans-serif;
-            background: var(--hub-light); color: var(--hub-brown);
+            height: 100%; margin: 0; font-family: var(--font-body);
+            background-color: var(--bg-main); color: var(--brand-primary);
             display: flex; flex-direction: column; overflow: hidden;
         }
-        
+        h1 { font-family: var(--font-heading); color: var(--brand-primary); }
+        .btn { background-color: var(--brand-accent); color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; }
+
         #splash-overlay { 
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: var(--hub-brown); z-index: 10000; 
+            background: var(--brand-primary); z-index: 10000; 
             display: flex; flex-direction: column; align-items: center; justify-content: center; 
             transition: opacity 0.5s; 
         }
@@ -224,13 +225,34 @@
         }
 
         async function handleClock(type, email) {
-            const { error } = await supabaseClient.from('time_logs').insert([{ 
-                employee_email: email, 
-                action_type: type, 
-                clock_in: type === 'in' ? new Date().toISOString() : null,
-                clock_out: type === 'out' ? new Date().toISOString() : null
-            }]);
-            if (error) alert(error.message); else alert(`Clocked ${type.toUpperCase()}`);
+            try {
+                // Secure clock-in via Netlify Function
+                const response = await fetch('/.netlify/functions/log-time', {
+                    method: 'POST',
+                    headers: await authHeaders(), // Use the auth helper available globally? 
+                                                  // Wait, index.html might not have auth.js loaded yet?
+                                                  // Let's check imports.
+                    body: JSON.stringify({ 
+                        employee_email: email, 
+                        action_type: type 
+                    })
+                });
+
+                if (!response.ok) throw new Error('Clock-in failed');
+                alert(`Clocked ${type.toUpperCase()}`);
+            } catch (err) {
+                console.error(err);
+                alert(err.message);
+            }
+        }
+        
+        // Helper to get auth headers if auth.js isn't loaded (auth.js matches this logic)
+        async function authHeaders() {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            return session ? {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+            } : {}; 
         }
 
         // --- ELEVENLABS CONVAI VOICE ---

@@ -12,22 +12,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Welcome to the Hub | BrewHub PHL</title>
-    
+    <link rel="stylesheet" href="css/brand-system.css">
     <style>
-        :root { 
-            --hub-brown: #3c2f2f; 
-            --hub-tan: #d4b59e; 
-            --hub-light: #f8f4f0; 
-        }
-
         body { 
-            font-family: 'Segoe UI', sans-serif; 
-            background: var(--hub-light);
-            margin: 0; color: var(--hub-brown); display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center;
+            font-family: var(--font-body); 
+            background: var(--bg-main);
+            margin: 0; color: var(--brand-primary); display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center;
         }
+        h1 { font-family: var(--font-heading); color: var(--brand-primary); }
+        .btn { background: var(--brand-accent); color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; display: inline-block; }
 
         .thank-you-card { 
-            background: #fff; padding: 50px; border-radius: 30px; box-shadow: 0 15px 45px rgba(0,0,0,0.05); max-width: 500px; width: 90%; 
+            background: var(--card-bg); padding: 50px; border-radius: 30px; box-shadow: 0 15px 45px rgba(0,0,0,0.05); max-width: 500px; width: 90%; 
+            border: 1px solid var(--border-soft);
         }
 
         h1 { font-size: 2.5em; margin-bottom: 15px; color: var(--hub-brown); }

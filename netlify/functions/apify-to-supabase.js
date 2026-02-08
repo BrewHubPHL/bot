@@ -3,6 +3,12 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
+  // Auth: Apify webhook must include our sync secret
+  const secret = event.headers?.['x-brewhub-secret'];
+  if (!secret || secret !== process.env.INTERNAL_SYNC_SECRET) {
+    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
+  }
+
   // 1. Apify sends a POST when the run succeeds
   const { resource } = JSON.parse(event.body || '{}');
   const datasetId = resource?.defaultDatasetId;

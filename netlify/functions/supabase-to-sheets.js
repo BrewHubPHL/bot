@@ -11,31 +11,76 @@ exports.handler = async (event) => {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
 
+    // Internal-only: called by Supabase webhooks
+    const incomingSecret = event.headers?.['x-brewhub-secret'];
+    if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
+        return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
+    }
+
     try {
         const payload = JSON.parse(event.body);
-        const { record, type, table, auth_key } = payload;
+        let { record, old_record, type, table, auth_key } = payload;
+        
+        // SSoT Fix: Handle Deletions
+        if (type === 'DELETE' && old_record) {
+            record = old_record;
+            // Add a flag we can use later or just rely on 'type'
+        }
 
         console.log(`Incoming Webhook: Table=${table}, Type=${type}`);
 
-        const isAllowedType = (type === 'INSERT' || (type === 'UPDATE' && table === 'employee_profiles'));
+        // SSoT Fix: Allow DELETE events to propagate (Audit Log)
+        const isAllowedType = (type === 'INSERT' || type === 'DELETE' || (type === 'UPDATE' && table === 'employee_profiles'));
         if (!record || !isAllowedType) {
             return { statusCode: 200, body: `Ignored event.` };
         }
 
         const GS_URL = process.env.GOOGLE_SCRIPT_URL;
-        let sheetData = { auth_key: auth_key || "BrewHub-Sync-2027-Secure" };
+        let sheetData = { auth_key: process.env.GOOGLE_SHEETS_AUTH_KEY };
 
         // 2. DATA ROUTING
         
         // --- MARKETING: Route to specialized handler ---
-        if (table === 'marketing_posts') {
+        if (table === 'marketing_posts' || table === 'marketing_leads') {
+            // If it's a DELETE, we might want to tell marketing-sync to handle it (if supported)
+            // or just log it. For now, let's just log in sheets that it was deleted if possible.
+            // But marketing-sync PUSH logic expects specific fields.
+            
+            if (type === 'DELETE') {
+                 // GDPR FIX: Propagate deletion to Google Sheet
+                 // Send a "delete" command to the Sheet with the record identifier
+                 const email = (record.email || record.username || '').toLowerCase();
+                 if (email) {
+                     console.log(`[GDPR] Propagating deletion to Sheet: ${email}`);
+                     try {
+                         await fetch(process.env.MARKETING_SHEET_URL, {
+                             method: 'POST',
+                             headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify({
+                                 auth_key: process.env.GOOGLE_SHEETS_AUTH_KEY,
+                                 action: 'DELETE',
+                                 email: email,
+                                 reason: 'GDPR Deletion from Supabase SSoT'
+                             })
+                         });
+                     } catch (sheetErr) {
+                         console.error('[GDPR] Sheet deletion failed:', sheetErr);
+                         // Don't fail the webhook - the tombstone in DB is the SSoT
+                     }
+                 }
+                 return { statusCode: 200, body: "GDPR deletion propagated" };
+            }
+
             console.log("➡️ Routing to Marketing Sync...");
             const baseUrl = process.env.URL || 'https://brewhubphl.com';
             
             await fetch(`${baseUrl}/.netlify/functions/marketing-sync?mode=push`, {
                 method: 'POST',
                 body: JSON.stringify({ record: record }),
-                headers: { 'Content-Type': 'application/json' }
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-brewhub-secret': process.env.INTERNAL_SYNC_SECRET
+                }
             });
 
             return { statusCode: 200, body: "Routed to Marketing Sync" };
@@ -88,6 +133,6 @@ exports.handler = async (event) => {
 
     } catch (error) {
         console.error('Error:', error);
-        return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
+        return { statusCode: 500, body: JSON.stringify({ error: 'Sync failed' }) };
     }
 };

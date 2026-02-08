@@ -99,7 +99,7 @@ Keep responses short, friendly, and helpful (1-2 sentences max). Use emojis spar
         return {
             statusCode: 500,
             headers,
-            body: JSON.stringify({ error: error.message })
+            body: JSON.stringify({ error: 'Chat failed' })
         };
     }
 };
