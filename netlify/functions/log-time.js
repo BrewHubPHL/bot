@@ -50,7 +50,7 @@ exports.handler = async (event) => {
        return json(403, { error: "You can only clock in for yourself." });
     }
 
-    // Use correct columns for time_logs table
+    // Only use columns that exist in your table
     const payload = {
       employee_email,
       action_type,
