@@ -53,11 +53,11 @@
 
       // Lookup staff from database (RLS allows self-read)
       // Use cache if email matches to avoid unnecessary queries on back/forward
-      if (!staffCache || staffCache.email !== session.user.email.toLowerCase()) {
+      if (!staffCache || staffCache.email?.toLowerCase() !== session.user.email.toLowerCase()) {
         const { data: staffRow, error } = await client
           .from('staff_directory')
           .select('email, role, full_name')
-          .eq('email', session.user.email.toLowerCase())
+          .ilike('email', session.user.email)
           .single();
 
         if (error || !staffRow) {
