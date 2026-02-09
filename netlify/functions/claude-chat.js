@@ -12,7 +12,7 @@ exports.handler = async (event) => {
     }
 
     // Rate limit to prevent Denial-of-Wallet attacks
-    const hasQuota = await checkQuota('grok_chat');
+    const hasQuota = await checkQuota('claude_chat');
     if (!hasQuota) {
         return {
             statusCode: 429,
@@ -23,28 +23,35 @@ exports.handler = async (event) => {
 
     try {
         let userText = "Hello";
+        let conversationHistory = [];
         if (event.body) {
             const body = JSON.parse(event.body);
             userText = body.text || "Hello";
+            conversationHistory = body.history || [];
         }
 
-        const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+        const claudeKey = process.env.CLAUDE_API_KEY;
         
-        // Use Grok API for real AI responses
-        if (grokKey) {
+        // Use Claude API for AI responses
+        if (claudeKey) {
             try {
-                const grokResp = await fetch('https://api.x.ai/v1/chat/completions', {
+                // Build messages array with conversation history
+                const messages = [
+                    ...conversationHistory.slice(-10), // Keep last 10 messages for context
+                    { role: 'user', content: userText }
+                ];
+
+                const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${grokKey}`,
+                        'x-api-key': claudeKey,
+                        'anthropic-version': '2023-06-01',
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        model: 'grok-2',
-                        messages: [
-                            {
-                                role: 'system',
-                                content: `You are Elise, a friendly digital barista and concierge for BrewHub, a coffee shop opening soon in Point Breeze, Philadelphia. 
+                        model: 'claude-sonnet-4-20250514',
+                        max_tokens: 150,
+                        system: `You are Elise, a friendly digital barista and concierge for BrewHub, a coffee shop opening soon in Point Breeze, Philadelphia. 
 
 Key info:
 - BrewHub is a neighborhood coffee hub opening soon in Point Breeze, Philly
@@ -54,34 +61,30 @@ Key info:
 - Good wifi and workspace vibes
 - Hiring announcements on Instagram
 - Join waitlist on the website for opening updates
+- parcel services include options for monthly mailbox rentals with 24/7 access or basic shipping and receiving during business hours
+- we also offer a cozy lounge area with comfortable seating, free Wi-Fi, and a selection of coffee and tea for our mailbox renters and local community to enjoy while they work or wait for their packages
 
-Keep responses short, friendly, and helpful (1-2 sentences max). Use emojis sparingly.`
-                            },
-                            {
-                                role: 'user',
-                                content: userText
-                            }
-                        ],
-                        max_tokens: 150
+Keep responses short, friendly, and helpful (1-2 sentences max). Use emojis sparingly.`,
+                        messages: messages
                     })
                 });
 
-                if (grokResp.ok) {
-                    const grokData = await grokResp.json();
-                    const reply = grokData.choices?.[0]?.message?.content || "Hey! How can I help you today?";
+                if (claudeResp.ok) {
+                    const claudeData = await claudeResp.json();
+                    const reply = claudeData.content?.[0]?.text || "Hey! How can I help you today?";
                     return {
                         statusCode: 200,
                         headers,
                         body: JSON.stringify({ reply })
                     };
                 } else {
-                    console.error('Grok API error:', grokResp.status, await grokResp.text());
+                    console.error('Claude API error:', claudeResp.status, await claudeResp.text());
                 }
             } catch (e) {
-                console.error('Grok error:', e.message);
+                console.error('Claude error:', e.message);
             }
         } else {
-            console.error('No GROK_API_KEY or XAI_API_KEY found');
+            console.error('No CLAUDE_API_KEY found');
         }
 
         // Fallback: Simple keyword responses

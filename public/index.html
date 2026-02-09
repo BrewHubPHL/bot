@@ -235,6 +235,7 @@
 
         // Voice and Text chat logic kept identical to your original source
         let activeSession = null;
+        let chatHistory = []; // Track conversation for Claude context
         document.getElementById('voice-btn').onclick = async () => {
             const btn = document.getElementById('voice-btn');
             const box = document.getElementById('chat-box');
@@ -266,14 +267,22 @@
             box.innerHTML += `<div><b>You:</b> ${text}</div>`;
             input.value = '';
             try {
-                const resp = await fetch('/.netlify/functions/elevenlabs-chat', {
+                const resp = await fetch('/.netlify/functions/claude-chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text, email: localStorage.getItem('brewhub_email') || "" })
+                    body: JSON.stringify({ 
+                        text, 
+                        email: localStorage.getItem('brewhub_email') || "",
+                        history: chatHistory
+                    })
                 });
                 const data = await resp.json();
                 box.innerHTML += `<div><b>Elise:</b> ${data.reply}</div>`;
                 box.scrollTop = box.scrollHeight;
+                // Update history for next message
+                chatHistory.push({ role: 'user', content: text });
+                chatHistory.push({ role: 'assistant', content: data.reply });
+                if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20); // Keep last 10 exchanges
             } catch (e) { box.innerHTML += `<div><i>Connection lost...</i></div>`; }
         };
 
