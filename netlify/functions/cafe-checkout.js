@@ -6,17 +6,36 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Server-side price list - the ONLY source of truth for cafe prices
-const CAFE_MENU = {
-  'Latte': 450,           // $4.50
-  'Espresso': 300,        // $3.00
-  'Cappuccino': 450,      // $4.50
-  'Americano': 350,       // $3.50
-  'Croissant': 350,       // $3.50
-  'Muffin': 300,          // $3.00
-  'Cold Brew': 500,       // $5.00
-  'Drip Coffee': 250,     // $2.50
+// Fallback menu if DB is unreachable (defense-in-depth)
+const FALLBACK_MENU = {
+  'Latte': 450,
+  'Espresso': 300,
+  'Cappuccino': 450,
+  'Americano': 350,
+  'Croissant': 350,
+  'Muffin': 300,
+  'Cold Brew': 500,
+  'Drip Coffee': 250,
 };
+
+// Load cafe menu from merch_products table
+async function getCafeMenu() {
+  const { data, error } = await supabase
+    .from('merch_products')
+    .select('name, price_cents')
+    .eq('is_active', true);
+  
+  if (error || !data || data.length === 0) {
+    console.warn('[CAFE] Using fallback menu - DB unavailable or empty');
+    return FALLBACK_MENU;
+  }
+  
+  const menu = {};
+  for (const item of data) {
+    menu[item.name] = item.price_cents;
+  }
+  return menu;
+}
 
 exports.handler = async (event) => {
   // CORS
@@ -46,6 +65,9 @@ exports.handler = async (event) => {
     if (!Array.isArray(cart) || cart.length === 0) {
       return json(400, { error: 'Cart cannot be empty' });
     }
+
+    // Load menu from DB (with fallback)
+    const CAFE_MENU = await getCafeMenu();
 
     // Validate and calculate total using SERVER-SIDE prices only
     let totalCents = 0;
@@ -94,6 +116,39 @@ exports.handler = async (event) => {
     if (itemErr) {
       console.error('Coffee orders insert error:', itemErr);
       // Order was created, items failed - log but don't fail completely
+    }
+
+    // Send order confirmation email if customer email provided
+    const { customer_email, customer_name } = JSON.parse(event.body || '{}');
+    if (customer_email && process.env.RESEND_API_KEY) {
+      const itemList = validatedItems.map(i => `${i.drink_name} - $${i.price.toFixed(2)}`).join('<br>');
+      fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+        },
+        body: JSON.stringify({
+          from: 'BrewHub PHL <info@brewhubphl.com>',
+          to: [customer_email],
+          subject: `BrewHub Order Confirmed ☕ #${order.id.slice(0,8)}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px;">
+              <h1 style="color: #333;">Thanks for your order!</h1>
+              <p>Hi ${customer_name || 'there'},</p>
+              <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <p style="margin: 0;"><strong>Order #:</strong> ${order.id.slice(0,8).toUpperCase()}</p>
+                <p style="margin: 10px 0 0 0;"><strong>Items:</strong></p>
+                <p style="margin: 5px 0;">${itemList}</p>
+                <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
+                <p style="margin: 0; font-size: 1.2em;"><strong>Total: $${(totalCents/100).toFixed(2)}</strong></p>
+              </div>
+              <p>Your order is being prepared. See you soon!</p>
+              <p>— The BrewHub PHL Team</p>
+            </div>
+          `
+        })
+      }).catch(err => console.error('[CAFE] Email send error:', err));
     }
 
     return json(200, { 

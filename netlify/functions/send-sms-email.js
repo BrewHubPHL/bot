@@ -35,55 +35,97 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { recipient_name, phone, tracking } = JSON.parse(event.body || '{}');
+    const { recipient_name, phone, email, tracking } = JSON.parse(event.body || '{}');
 
-    if (!phone) {
-      return json(400, { error: 'Missing phone number' });
+    if (!phone && !email) {
+      return json(400, { error: 'Missing phone or email' });
     }
-
-    // Format phone number to E.164 (+1XXXXXXXXXX)
-    const cleanPhone = phone.replace(/\D/g, '');
-    const formattedPhone = cleanPhone.startsWith('1') ? `+${cleanPhone}` : `+1${cleanPhone}`;
 
     const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking || 'Parcel'}) is at the Hub. 📦 Grab a coffee when you swing by! Reply STOP to opt out.`;
+    let smsSuccess = false;
+    let emailSuccess = false;
+    let smsSid = null;
 
-    // Use Twilio API
-    const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-    const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-    const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
+    // Try SMS first if phone provided
+    if (phone) {
+      const cleanPhone = phone.replace(/\D/g, '');
+      const formattedPhone = cleanPhone.startsWith('1') ? `+${cleanPhone}` : `+1${cleanPhone}`;
 
-    if (!twilioSid || !twilioToken || !twilioPhone) {
-      console.error('[SEND-SMS] Missing Twilio credentials');
-      return json(500, { error: 'SMS not configured' });
+      const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+      const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+      const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
+
+      if (twilioSid && twilioToken && twilioPhone) {
+        const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+        const authHeader = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
+
+        const res = await fetch(twilioUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${authHeader}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            From: twilioPhone,
+            To: formattedPhone,
+            Body: message
+          }).toString()
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          smsSuccess = true;
+          smsSid = data.sid;
+          console.log(`[SEND-SMS] Twilio success: ${data.sid}`);
+        } else {
+          console.error('[SEND-SMS] Twilio error:', data);
+        }
+      }
     }
 
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-    const authHeader = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
+    // Email fallback: send if SMS failed OR if email was requested
+    if (email && (!smsSuccess || !phone)) {
+      const resendKey = process.env.RESEND_API_KEY;
+      if (resendKey) {
+        const emailRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${resendKey}`,
+          },
+          body: JSON.stringify({
+            from: 'BrewHub PHL <info@brewhubphl.com>',
+            to: [email],
+            subject: 'Your Parcel is Ready at the Hub! 📦☕',
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px;">
+                <h1>Package Arrived!</h1>
+                <p>Hi ${recipient_name || 'Neighbor'},</p>
+                <p>Your package <strong>(${tracking || 'Parcel'})</strong> is at <strong>BrewHub PHL</strong>.</p>
+                <p>Stop by during cafe hours to pick it up. Fresh coffee waiting!</p>
+                <p>— Thomas & The BrewHub PHL Team</p>
+              </div>
+            `
+          })
+        });
 
-    const res = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${authHeader}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        From: twilioPhone,
-        To: formattedPhone,
-        Body: message
-      }).toString()
-    });
+        if (emailRes.ok) {
+          emailSuccess = true;
+          console.log(`[SEND-SMS] Email fallback sent to ${email}`);
+        } else {
+          console.error('[SEND-SMS] Email fallback failed:', await emailRes.text());
+        }
+      }
+    }
 
-    const data = await res.json();
-
-    if (!res.ok) {
-      console.error('[SEND-SMS] Twilio error:', data);
-      return json(res.status, { error: data.message || 'SMS failed', code: data.code });
+    if (!smsSuccess && !emailSuccess) {
+      return json(500, { error: 'Both SMS and email failed' });
     }
     
     return {
       statusCode: 200,
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ success: true, sid: data.sid, status: data.status })
+      body: JSON.stringify({ success: true, sms: smsSuccess, email: emailSuccess, sid: smsSid })
     };
   } catch (error) {
     console.error('[SEND-SMS] Error:', error);

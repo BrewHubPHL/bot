@@ -24,15 +24,10 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 const WORKER_SECRET = Deno.env.get('WORKER_SECRET') // For authenticated cron calls
 
-// SMS gateways for carrier-based SMS-via-email
-const SMS_GATEWAYS: Record<string, string> = {
-  'verizon': '@vtext.com',
-  'xfinity': '@vtext.com',
-  'att': '@txt.att.net',
-  'tmobile': '@tmomail.net',
-  'googlefi': '@msg.fi.google.com',
-  'cricket': '@sms.cricketwireless.net'
-}
+// Twilio credentials
+const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')
+const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')
+const TWILIO_PHONE_NUMBER = Deno.env.get('TWILIO_PHONE_NUMBER')
 
 serve(async (req) => {
   // Auth check for external triggers
@@ -164,29 +159,35 @@ async function sendParcelNotification(payload: any) {
     }
   }
 
-  // Send SMS via email gateway if phone provided
-  if (recipient_phone) {
-    // For now, try Verizon gateway as fallback (user can specify carrier later)
-    const smsAddress = `${recipient_phone.replace(/\D/g, '')}@vtext.com`
+  // Send SMS via Twilio if phone provided
+  if (recipient_phone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER) {
+    // Format phone to E.164
+    const cleanPhone = recipient_phone.replace(/\D/g, '')
+    const formattedPhone = cleanPhone.startsWith('1') ? `+${cleanPhone}` : `+1${cleanPhone}`
     
-    const smsRes = await fetch('https://api.resend.com/emails', {
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`
+    const authHeader = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)
+    const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking_number || 'Parcel'}) is at the Hub. 📦 Grab a coffee when you swing by! Reply STOP to opt out.`
+    
+    const smsRes = await fetch(twilioUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Authorization': `Basic ${authHeader}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify({
-        from: 'BrewHub Alerts <alerts@brewhubphl.com>',
-        to: [smsAddress],
-        subject: '',
-        text: `📦 ${recipient_name}: Your ${carrier || 'package'} (${tracking_number || 'pickup'}) is at BrewHub PHL! Stop by anytime.`,
-      }),
+      body: new URLSearchParams({
+        From: TWILIO_PHONE_NUMBER,
+        To: formattedPhone,
+        Body: message
+      }).toString()
     })
 
     // SMS failures are logged but don't fail the whole task if email was sent
     if (!smsRes.ok && !recipient_email) {
       const errData = await smsRes.json()
-      throw new Error(`Resend SMS failed: ${JSON.stringify(errData)}`)
+      throw new Error(`Twilio SMS failed: ${JSON.stringify(errData)}`)
+    } else if (smsRes.ok) {
+      console.log(`[WORKER] SMS sent to ${formattedPhone}`)
     }
   }
 }
