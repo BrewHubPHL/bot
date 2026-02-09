@@ -42,12 +42,29 @@
     .sidebar { display: flex; flex-direction: column; gap: 1.5rem; }
     .card { background: #1a1a1a; border-radius: 16px; padding: 1.5rem; border: 1px solid #333; }
     .activity-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    
+    /* KDS Mini */
+    .kds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .kds-card { background: #1a1a1a; border-radius: 12px; border: 1px solid #333; overflow: hidden; }
+    .kds-card.paid { border-top: 4px solid #27ae60; }
+    .kds-card.preparing { border-top: 4px solid #f39c12; }
+    .kds-card.ready { border-top: 4px solid #3498db; }
+    .kds-header { padding: 0.75rem 1rem; background: #222; display: flex; justify-content: space-between; align-items: center; }
+    .kds-items { padding: 0.75rem 1rem; font-size: 0.9rem; }
+    .kds-item { padding: 0.25rem 0; border-bottom: 1px solid #2a2a2a; }
+    .kds-item:last-child { border-bottom: none; }
+    .kds-actions { padding: 0.75rem 1rem; background: #1a1a1a; display: flex; gap: 0.5rem; }
+    .kds-btn { flex: 1; padding: 0.5rem; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.75rem; }
+    .kds-btn.start { background: #27ae60; color: #fff; }
+    .kds-btn.ready { background: #f39c12; color: #fff; }
+    .kds-btn.done { background: #3498db; color: #fff; }
   </style>
 </head>
 <body>
   <header class="header">
     <div class="logo" onclick="window.location.href='/index.html'">Brew<span>Hub</span> Dashboard</div>
     <nav class="nav-links">
+      <a href="kds.html">KDS</a>
       <a href="cafe.html">Cafe POS</a>
       <a href="parcels.html">Parcel Hub</a>
       <a href="scan.html">Inventory</a>
@@ -59,7 +76,7 @@
   <main class="container">
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-label">Today's Revenue</div>
+        <div class="stat-label">Today's Revenue <button onclick="loadSalesReport()" style="background:none;border:none;cursor:pointer;font-size:0.8rem;">🔄</button></div>
         <div class="stat-value revenue" id="totalRevenue">$0.00</div>
         <div class="stat-change" id="revenueChange">Syncing...</div>
       </div>
@@ -106,6 +123,17 @@
         </div>
       </aside>
     </div>
+
+    <!-- KDS Section -->
+    <section style="margin-top: 2rem;">
+      <div class="section-header">
+        <h2>☕ Active Orders (KDS)</h2>
+        <button style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;" onclick="loadKdsOrders()">↻ Refresh</button>
+      </div>
+      <div class="kds-grid" id="kdsGrid">
+        <div style="padding: 1rem; color: #666;">Loading orders...</div>
+      </div>
+    </section>
 
     <!-- Payroll Section -->
     <section style="margin-top: 2rem;">
@@ -154,6 +182,83 @@
     function adjustStock(index, delta) {
       inventory[index].current = Math.max(0, inventory[index].current + delta);
       renderInventory();
+    }
+
+    // --- KDS Functions ---
+    let kdsOrders = [];
+    
+    async function loadKdsOrders() {
+      try {
+        const client = window.brewAuth.client;
+        if (!client) return;
+        
+        const { data, error } = await client
+          .from('orders')
+          .select('*, coffee_orders(*)')
+          .in('status', ['paid', 'preparing', 'ready'])
+          .order('created_at', { ascending: true });
+        
+        if (error) throw error;
+        kdsOrders = data || [];
+        renderKds();
+      } catch (err) {
+        console.error('KDS fetch failed:', err);
+        document.getElementById('kdsGrid').innerHTML = '<div style="padding:1rem;color:#e74c3c;">Failed to load orders</div>';
+      }
+    }
+    
+    function renderKds() {
+      const grid = document.getElementById('kdsGrid');
+      if (kdsOrders.length === 0) {
+        grid.innerHTML = '<div style="padding:1rem;color:#666;">No active orders ✓</div>';
+        return;
+      }
+      
+      grid.innerHTML = kdsOrders.map(order => {
+        const items = order.coffee_orders || [];
+        const timeAgo = Math.floor((Date.now() - new Date(order.created_at)) / 60000);
+        const btnClass = order.status === 'paid' ? 'start' : order.status === 'preparing' ? 'ready' : 'done';
+        const btnText = order.status === 'paid' ? '▶ Start' : order.status === 'preparing' ? '🔔 Ready' : '✓ Done';
+        const nextStatus = order.status === 'paid' ? 'preparing' : order.status === 'preparing' ? 'ready' : 'completed';
+        
+        return `
+          <div class="kds-card ${order.status}">
+            <div class="kds-header">
+              <strong>${order.customer_name || 'Guest'}</strong>
+              <span style="font-size:0.75rem;color:#888;">${timeAgo}m ago</span>
+            </div>
+            <div class="kds-items">
+              ${items.map(i => `<div class="kds-item">☕ ${i.drink_name}</div>`).join('') || '<div class="kds-item" style="color:#666;">No items</div>'}
+            </div>
+            <div class="kds-actions">
+              <button class="kds-btn ${btnClass}" onclick="updateKdsStatus('${order.id}', '${nextStatus}')">${btnText}</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    async function updateKdsStatus(orderId, newStatus) {
+      try {
+        const session = window.brewAuth.session;
+        const res = await fetch('/.netlify/functions/update-order-status', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ orderId, status: newStatus })
+        });
+        
+        if (!res.ok) throw new Error('Update failed');
+        
+        // Refresh KDS
+        loadKdsOrders();
+        loadSalesReport();
+      } catch (err) {
+        console.error('KDS update error:', err);
+        alert('Failed to update order');
+      }
     }
 
     // --- CRITICAL FIX: Auth Headers added here ---
@@ -320,7 +425,9 @@
           console.log('New order received');
           loadSalesReport();
         })
-        .subscribe();
+        .subscribe((status) => {
+          console.log('[REALTIME] Subscription status:', status);
+        });
     }
 
     init();

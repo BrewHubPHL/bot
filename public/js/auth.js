@@ -36,13 +36,19 @@
       const requiredRole = options.requiredRole || 'staff';
       const roleHierarchy = { staff: 1, manager: 2, admin: 3 };
       
+      // Debug: Check localStorage directly
+      const storageKey = 'brewhub-staff-auth';
+      const keys = Object.keys(localStorage).filter(k => k.includes('supabase') || k.includes('sb-') || k.includes('brewhub'));
+      console.log('[AUTH] localStorage keys on manager.html:', keys);
+      
       // Wait a moment for session to restore from storage
       let session = null;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         const { data } = await client.auth.getSession();
         session = data.session;
+        console.log('[AUTH] getSession attempt', i+1, session ? 'FOUND' : 'null');
         if (session) break;
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 200));
       }
       
       if (!session) {

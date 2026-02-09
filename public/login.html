@@ -115,10 +115,10 @@
     
     <form id="loginForm">
       <div class="input-group">
-        <input type="email" id="email" placeholder="Email" required>
+        <input type="email" id="email" placeholder="Email" required autocomplete="email">
       </div>
       <div class="input-group">
-        <input type="password" id="password" placeholder="Password" required>
+        <input type="password" id="password" placeholder="Password" required autocomplete="current-password">
       </div>
       <button type="submit" class="login-btn" id="loginBtn">Sign In</button>
     </form>
@@ -129,7 +129,12 @@
   <script>
     const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: true,
+        storageKey: 'brewhub-staff-auth'
+      }
+    });
 
     // REMOVED: Client-side allowlist - backend staff_directory table is now SSoT
     // Staff validation happens server-side in _auth.js
@@ -171,8 +176,25 @@
         return;
       }
 
+      // Wait for session to be fully persisted before redirect
+      await new Promise(r => setTimeout(r, 200));
+      const { data: { session } } = await sb.auth.getSession();
+      
+      // Debug: Check what's in localStorage
+      console.log('[LOGIN] Session after sign in:', session ? 'FOUND' : 'null');
+      console.log('[LOGIN] localStorage keys:', Object.keys(localStorage).filter(k => k.includes('supabase') || k.includes('sb-') || k.includes('brewhub')));
+      
+      if (!session) {
+        error.textContent = 'Session not persisted. Please try again.';
+        error.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        return;
+      }
+
       // Success - redirect (backend will enforce staff_directory check on protected pages)
       const redirect = new URLSearchParams(window.location.search).get('redirect') || '/manager.html';
+      console.log('[LOGIN] Redirecting to:', redirect);
       window.location.href = redirect;
     });
   </script>

@@ -91,11 +91,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Sales report view (only counts COMPLETED orders for revenue)
+-- Sales report view (counts revenue from paid orders - money collected at checkout)
 DROP VIEW IF EXISTS daily_sales_report;
 CREATE OR REPLACE VIEW daily_sales_report AS
 SELECT 
   COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS total_orders,
-  COALESCE(SUM(total_amount_cents) FILTER (WHERE created_at::date = CURRENT_DATE AND status = 'completed'), 0) AS gross_revenue,
+  COALESCE(SUM(total_amount_cents) FILTER (WHERE created_at::date = CURRENT_DATE AND status IN ('paid', 'preparing', 'ready', 'completed')), 0) AS gross_revenue,
   COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE AND status = 'completed') AS completed_orders
 FROM orders;

@@ -36,14 +36,13 @@
     </div>
 
     <script>
-        // --- SAFE SUPABASE INIT ---
-        var SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
-        var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
-        
-        if (!window.supabaseClient) {
-            window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // --- USE AUTH.JS CLIENT ---
+        // Wait for brewAuth to be ready, then use its client
+        var sbClient = null;
+        async function initSupabase() {
+            while (!window.brewAuth?.client) await new Promise(r => setTimeout(r, 50));
+            sbClient = window.brewAuth.client;
         }
-        var supabase = window.supabaseClient;
 
         // --- STATE ---
         var orders = [];
@@ -52,7 +51,7 @@
         // --- HELPERS ---
         // This was the missing piece causing your ReferenceError!
         async function authHeaders() {
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await sbClient.auth.getSession();
             return {
                 'Content-Type': 'application/json',
                 'Authorization': session ? `Bearer ${session.access_token}` : ''
@@ -80,7 +79,7 @@
         async function fetchOrders() {
             try {
                 console.log("KDS: Fetching active orders...");
-                var { data, error } = await supabase
+                var { data, error } = await sbClient
                     .from('orders')
                     .select('*, coffee_orders (*)')
                     .in('status', ['paid', 'preparing', 'ready'])
@@ -191,14 +190,15 @@
 
         // --- STARTUP ---
         async function init() {
-            // Wait for brewAuth
+            // Wait for brewAuth and init client
             while (!window.brewAuth) await new Promise(r => setTimeout(r, 100));
+            await initSupabase();
             await window.brewAuth.protectPage({ requiredRole: 'staff' });
             
             fetchOrders();
 
             // Subscriptions
-            supabase.channel('kds-realtime')
+            sbClient.channel('kds-realtime')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'coffee_orders' }, () => fetchOrders())
                 .subscribe();

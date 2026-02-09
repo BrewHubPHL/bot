@@ -115,10 +115,12 @@
     </div>
 
     <script>
-        const sb = supabase.createClient(
-            "https://rruionkpgswvncypweiv.supabase.co",
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU"
-        );
+        // Use brewAuth.client for consistent session storage
+        let sb = null;
+        async function initSupabase() {
+            while (!window.brewAuth?.client) await new Promise(r => setTimeout(r, 50));
+            sb = window.brewAuth.client;
+        }
 
         let scanner;
         let scannerActive = false;
@@ -456,6 +458,7 @@
         // Staff auth required
         async function initAuth() {
             while (!window.brewAuth) await new Promise(r => setTimeout(r, 100));
+            await initSupabase();
             await window.brewAuth.protectPage({ requiredRole: 'staff' });
         }
         initAuth();

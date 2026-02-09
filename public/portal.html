@@ -26,8 +26,8 @@
         
         <div id="login-form">
             <p>Already registered? Log in below.</p>
-            <input type="email" id="email" placeholder="Email" />
-            <input type="password" id="password" placeholder="Password" />
+            <input type="email" id="email" placeholder="Email" autocomplete="email" />
+            <input type="password" id="password" placeholder="Password" autocomplete="current-password" />
             <button id="login-btn" onclick="handleLogin()">Log In</button>
             <p id="login-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
             <p style="margin-top:15px; text-align:center;">
@@ -42,9 +42,9 @@
             <p>Register for package tracking & coffee rewards.</p>
             <input type="text" id="reg-name" placeholder="Full Name *" required />
             <input type="text" id="reg-address" placeholder="Unit # or Address *" required />
-            <input type="email" id="reg-email" placeholder="Email *" required />
-            <input type="password" id="reg-password" placeholder="Password (min 6 characters) *" required />
-            <input type="password" id="reg-password-confirm" placeholder="Confirm Password *" required />
+            <input type="email" id="reg-email" placeholder="Email *" required autocomplete="email" />
+            <input type="password" id="reg-password" placeholder="Password (min 6 characters) *" required autocomplete="new-password" />
+            <input type="password" id="reg-password-confirm" placeholder="Confirm Password *" required autocomplete="new-password" />
             <input type="tel" id="reg-phone" placeholder="Phone (optional - for text alerts)" />
             <label style="display:flex; align-items:center; gap:8px; margin-bottom:15px; font-size:0.9rem;">
                 <input type="checkbox" id="reg-sms-opt-in" /> Text me when my packages arrive
@@ -59,8 +59,8 @@
         <div id="set-password-form" class="hidden">
             <h2>🔐 Reset Your Password</h2>
             <p>Create a new password for your account.</p>
-            <input type="password" id="new-password" placeholder="New password (min 6 characters)" />
-            <input type="password" id="confirm-password" placeholder="Confirm password" />
+            <input type="password" id="new-password" placeholder="New password (min 6 characters)" autocomplete="new-password" />
+            <input type="password" id="confirm-password" placeholder="Confirm password" autocomplete="new-password" />
             <button id="set-password-btn" onclick="handleSetPassword()">Update Password</button>
             <p id="set-password-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
         </div>
@@ -274,15 +274,27 @@
             isRegistering = true;
 
             // Create auth user with password
+            console.log('[SIGNUP] Attempting signUp for:', email);
             const { data, error: authError } = await sb.auth.signUp({
                 email,
                 password
             });
+            
+            console.log('[SIGNUP] Result:', { data, authError });
 
             if (authError) {
                 isRegistering = false;
                 btn.disabled = false;
+                console.error('[SIGNUP] Auth error:', authError);
                 msg.innerText = "Error: " + authError.message;
+                return;
+            }
+            
+            // No user created = something went wrong silently
+            if (!data.user) {
+                isRegistering = false;
+                btn.disabled = false;
+                msg.innerText = "Signup failed. Please try again.";
                 return;
             }
 
@@ -485,9 +497,9 @@
                 .from('customers')
                 .select('loyalty_points')
                 .eq('email', email)
-                .single();
+                .maybeSingle();
 
-            if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+            if (error) {
                 console.error('Error loading loyalty:', error);
                 container.innerHTML = '<p style="color:#c00;">Could not load loyalty info.</p>';
                 return;
