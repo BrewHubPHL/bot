@@ -1,2 +1,14 @@
+# Explicit routes for HTML pages (must come before catch-all)
+/login.html        /login.html       200
+/portal.html       /portal.html      200
+/cafe.html         /cafe.html        200
+/kds.html          /kds.html         200
+/parcels.html      /parcels.html     200
+/scan.html         /scan.html        200
+/manager.html      /manager.html     200
+/admin.html        /admin.html       200
+/shop.html         /shop.html        200
 /thank-you.html    /thank-you.html   200
+
+# SPA fallback for client-side routing (React, etc.)
 /*    /index.html   200

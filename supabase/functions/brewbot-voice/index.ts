@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY')
-const VOICE_ID = '21m00Tcm4TlvDq8ikWAM' // Your Rachel voice ID from the HTML
+const VOICE_ID = Deno.env.get('ELEVENLABS_VOICE_ID') || '21m00Tcm4TlvDq8ikWAM'
 
 serve(async (req) => {
   try {

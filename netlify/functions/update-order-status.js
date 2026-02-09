@@ -1,57 +1,68 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 
-// Initializes with Service Role Key to bypass RLS on the server side
+// Initialize with Service Role Key (Bypasses RLS)
 const supabase = createClient(
-  process.env.SUPABASE_URL, 
+  process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const ALLOWED_STATUSES = ['paid', 'preparing', 'ready', 'completed'];
-
 exports.handler = async (event) => {
-  // 1. SECURITY CHECK
-  // This requires the sender to have a valid Supabase JWT session
-  const auth = await authorize(event);
-  if (!auth.ok) {
-    console.error('KDS Auth Failure: No valid session found');
-    return auth.response;
+  // 1. Handle CORS (Allow browser access)
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      },
+      body: '',
+    };
   }
 
-  // 2. METHOD CHECK
   if (event.httpMethod !== 'POST') {
-    return json(405, { error: 'Method Not Allowed' });
+    return { statusCode: 405, body: 'Method Not Allowed' };
   }
 
-  // 3. PARSE BODY
-  let body;
+  // 2. Staff Authentication Required
+  const auth = await authorize(event);
+  if (!auth.ok) return auth.response;
+
   try {
-    body = JSON.parse(event.body || '{}');
+    const { orderId, status } = JSON.parse(event.body);
+
+    if (!orderId) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Missing Order ID' }) };
+    }
+
+    // Validate status is one of allowed values
+    const allowedStatuses = ['preparing', 'ready', 'completed', 'cancelled'];
+    if (!status || !allowedStatuses.includes(status)) {
+      return { statusCode: 400, body: JSON.stringify({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }) };
+    }
+
+    // Update the Order Status
+    const { data, error } = await supabase
+      .from('orders')
+      .update({ status })
+      .eq('id', orderId)
+      .select();
+
+    if (error) throw error;
+
+    return {
+      statusCode: 200,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ success: true, order: data })
+    };
+
   } catch (err) {
-    return json(400, { error: 'Invalid JSON body' });
+    console.error('[COMPLETE-ORDER] Error:', err);
+    return {
+      statusCode: 500,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ error: err.message })
+    };
   }
-
-  const { orderId, status } = body;
-
-  // 4. VALIDATION
-  if (!orderId || !status || !ALLOWED_STATUSES.includes(status)) {
-    console.error(`KDS Validation Failure: ID: ${orderId}, Status: ${status}`);
-    return json(400, { error: 'orderId and valid status are required' });
-  }
-
-  console.log(`KDS: Attempting to update order ${orderId} to ${status}...`);
-
-  // 5. DATABASE UPDATE
-  const { error } = await supabase
-    .from('orders')
-    .update({ status })
-    .eq('id', orderId);
-
-  if (error) {
-    console.error('Supabase Database Error:', error.message);
-    return json(500, { error: 'Update failed in database' });
-  }
-
-  console.log(`KDS: Order ${orderId} successfully updated to ${status}`);
-  return json(200, { success: true, orderId, status });
 };

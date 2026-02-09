@@ -1,3 +1,5 @@
+const { checkQuota } = require('./_usage');
+
 exports.handler = async (event) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
@@ -7,6 +9,16 @@ exports.handler = async (event) => {
 
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };
+    }
+
+    // Rate limit to prevent Denial-of-Wallet attacks
+    const hasQuota = await checkQuota('grok_chat');
+    if (!hasQuota) {
+        return {
+            statusCode: 429,
+            headers,
+            body: JSON.stringify({ reply: 'Elise is resting her voice. Try again later! ☕' })
+        };
     }
 
     try {

@@ -7,6 +7,7 @@
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/auth.js"></script>
     
     <style>
         body { background-color: #0f172a; color: #f8fafc; overflow-x: hidden; font-family: sans-serif; }
@@ -189,15 +190,22 @@
         }
 
         // --- STARTUP ---
-        fetchOrders();
+        async function init() {
+            // Wait for brewAuth
+            while (!window.brewAuth) await new Promise(r => setTimeout(r, 100));
+            await window.brewAuth.protectPage({ requiredRole: 'staff' });
+            
+            fetchOrders();
 
-        // Subscriptions
-        supabase.channel('kds-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'coffee_orders' }, () => fetchOrders())
-            .subscribe();
+            // Subscriptions
+            supabase.channel('kds-realtime')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'coffee_orders' }, () => fetchOrders())
+                .subscribe();
 
-        setInterval(render, 30000);
+            setInterval(render, 30000);
+        }
+        init();
     </script>
 </body>
 </html>

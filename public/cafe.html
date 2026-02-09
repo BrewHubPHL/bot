@@ -3,395 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BrewHub Cafe | Order Coffee & Drinks in Philadelphia</title>
-  <meta name="description" content="Order coffee, espresso drinks, and more at BrewHub PHL. Fresh brews, free WiFi, and a welcoming space in Philadelphia.">
-  <link rel="canonical" href="https://brewhubphl.com/cafe.html">
-  
-  <!-- Open Graph -->
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://brewhubphl.com/cafe.html">
-  <meta property="og:title" content="BrewHub Cafe | Order Coffee & Drinks">
-  <meta property="og:description" content="Order coffee, espresso drinks, and more at BrewHub PHL. Fresh brews, free WiFi, and a welcoming space in Philadelphia.">
+  <title>BrewHub Cafe | Order Coffee & Drinks</title>
   
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="/js/auth.js"></script>
+  
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: 'Inter', -apple-system, sans-serif;
+      font-family: 'Inter', sans-serif;
       background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      min-height: 100vh;
-      color: #fff;
+      min-height: 100vh; color: #fff;
     }
-    h1 {
-      font-family: var(--font-heading);
-      color: var(--brand-primary);
-    }
-    .btn {
-      background-color: var(--brand-accent);
-      color: #fff;
-    }
-    .header {
-      background: rgba(255,255,255,0.05);
-      backdrop-filter: blur(10px);
-      padding: 1rem 2rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-    }
-    .logo {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #f39c12;
-    }
+    .header { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); padding: 1rem 2rem; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .logo { font-size: 1.5rem; font-weight: 700; color: #f39c12; }
     .logo span { color: #fff; }
-    .nav-links a {
-      color: rgba(255,255,255,0.7);
-      text-decoration: none;
-      margin-left: 2rem;
-      font-size: 0.9rem;
-      transition: color 0.2s;
-      opacity: 0.7;
-    }
-    .nav-links a:hover, .nav-links a.active { color: #f39c12; opacity: 1; }
-    
-    .container {
-      display: grid;
-      grid-template-columns: 1fr 350px;
-      gap: 2rem;
-      padding: 2rem;
-      max-width: 1400px;
-      margin: 0 auto;
-    }
-    
-    /* Orders Feed */
-    .orders-section h2 {
-      font-size: 1.25rem;
-      margin-bottom: 1rem;
-      color: rgba(255,255,255,0.9);
-    }
-    .orders-feed {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-    .order-card {
-      background: rgba(255,255,255,0.08);
-      border-radius: 16px;
-      padding: 1.5rem;
-      border: 1px solid rgba(255,255,255,0.1);
-      animation: slideIn 0.4s ease-out;
-    }
-    @keyframes slideIn {
-      from { opacity: 0; transform: translateY(-20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .order-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1rem;
-    }
-    .order-id {
-      font-size: 0.85rem;
-      color: rgba(255,255,255,0.5);
-    }
-    .order-status {
-      padding: 0.35rem 0.75rem;
-      border-radius: 20px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-    .status-pending { background: #f39c12; color: #000; }
-    .status-paid { background: #27ae60; color: #fff; }
-    .status-ready { background: #3498db; color: #fff; }
-    .order-items {
-      color: rgba(255,255,255,0.8);
-      font-size: 0.95rem;
-      margin-bottom: 0.75rem;
-    }
-    .order-total {
-      font-size: 1.25rem;
-      font-weight: 600;
-      color: #f39c12;
-    }
-    .order-total.free {
-      color: #27ae60;
-      animation: pulse 0.5s ease-in-out;
-    }
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.1); }
-    }
-    
-    /* Sidebar */
-    .sidebar {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
-    .card {
-      background: rgba(255,255,255,0.08);
-      border-radius: 16px;
-      padding: 1.5rem;
-      border: 1px solid rgba(255,255,255,0.1);
-    }
-    .card h3 {
-      font-size: 1rem;
-      margin-bottom: 1rem;
-      color: rgba(255,255,255,0.9);
-    }
-    
-    /* Voucher Entry */
-    .voucher-input-group {
-      display: flex;
-      gap: 0.5rem;
-    }
-    .voucher-input {
-      flex: 1;
-      background: rgba(0,0,0,0.3);
-      border: 1px solid rgba(255,255,255,0.2);
-      border-radius: 10px;
-      padding: 0.75rem 1rem;
-      color: #fff;
-      font-size: 1rem;
-      font-family: 'Courier New', monospace;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-    }
-    .voucher-input::placeholder { color: rgba(255,255,255,0.3); }
-    .voucher-input:focus {
-      outline: none;
-      border-color: #f39c12;
-    }
-    .voucher-btn {
-      background: #f39c12;
-      border: none;
-      border-radius: 10px;
-      padding: 0.75rem 1.25rem;
-      color: #000;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.2s, background 0.2s;
-    }
-    .voucher-btn:hover {
-      background: #e67e22;
-      transform: scale(1.02);
-    }
-    .voucher-result {
-      margin-top: 1rem;
-      padding: 0.75rem;
-      border-radius: 8px;
-      text-align: center;
-      font-weight: 600;
-      display: none;
-    }
-    .voucher-result.success {
-      display: block;
-      background: rgba(39, 174, 96, 0.2);
-      color: #27ae60;
-      animation: pulse 0.5s ease-in-out;
-    }
-    .voucher-result.error {
-      display: block;
-      background: rgba(231, 76, 60, 0.2);
-      color: #e74c3c;
-    }
-    
-    /* Loyalty Progress */
-    .loyalty-progress {
-      display: flex;
-      gap: 0.5rem;
-      justify-content: center;
-      margin-bottom: 1rem;
-    }
-    .coffee-bean {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.1);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.25rem;
-      transition: all 0.3s;
-    }
-    .coffee-bean.filled {
-      background: #f39c12;
-      box-shadow: 0 0 15px rgba(243, 156, 18, 0.5);
-    }
-    .loyalty-text {
-      text-align: center;
-      color: rgba(255,255,255,0.6);
-      font-size: 0.85rem;
-    }
-    .loyalty-text strong { color: #f39c12; }
-    
-    /* Customer Info */
-    .customer-name {
-      font-size: 1.1rem;
-      font-weight: 600;
-      margin-bottom: 0.5rem;
-    }
-    .customer-email {
-      color: rgba(255,255,255,0.5);
-      font-size: 0.85rem;
-    }
-    
-    /* Empty State */
-    .empty-state {
-      text-align: center;
-      padding: 3rem;
-      color: rgba(255,255,255,0.4);
-    }
-    .empty-state svg {
-      width: 64px;
-      height: 64px;
-      margin-bottom: 1rem;
-      opacity: 0.5;
-    }
-
-    /* Cart Section */
-    .cart-section {
-      margin-top: 1rem;
-    }
-    .cart-items {
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    .cart-item {
-      display: flex;
-      align-items: center;
-      padding: 0.5rem 0;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-    }
-    .cart-item-name {
-      flex: 1;
-      font-size: 0.9rem;
-    }
-    .cart-item-price {
-      color: #f39c12;
-      font-weight: 600;
-      margin-right: 0.5rem;
-    }
-    .cart-remove {
-      background: rgba(231, 76, 60, 0.3);
-      border: none;
-      color: #e74c3c;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      cursor: pointer;
-      font-size: 1rem;
-      line-height: 1;
-    }
-    .cart-remove:hover { background: rgba(231, 76, 60, 0.5); }
-    .empty-cart {
-      color: rgba(255,255,255,0.4);
-      text-align: center;
-      padding: 1rem;
-      font-size: 0.85rem;
-    }
-    .cart-footer {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-top: 1rem;
-      padding-top: 1rem;
-      border-top: 1px solid rgba(255,255,255,0.2);
-    }
-    .cart-total {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #f39c12;
-    }
-    .checkout-btn {
-      background: #27ae60;
-      border: none;
-      border-radius: 10px;
-      padding: 0.75rem 1.5rem;
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .checkout-btn:hover:not(:disabled) {
-      background: #2ecc71;
-      transform: scale(1.02);
-    }
-    .checkout-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .clear-btn {
-      background: transparent;
-      border: 1px solid rgba(255,255,255,0.2);
-      border-radius: 8px;
-      padding: 0.5rem 1rem;
-      color: rgba(255,255,255,0.6);
-      font-size: 0.8rem;
-      cursor: pointer;
-      margin-right: 0.5rem;
-    }
-    .clear-btn:hover { border-color: rgba(255,255,255,0.4); }
-
-    /* Toast Notifications */
-    .toast {
-      position: fixed;
-      bottom: 2rem;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 1rem 2rem;
-      border-radius: 12px;
-      font-weight: 600;
-      animation: toastIn 0.3s ease-out;
-      z-index: 1000;
-    }
-    .toast-success {
-      background: #27ae60;
-      color: #fff;
-    }
-    .toast-error {
-      background: #e74c3c;
-      color: #fff;
-    }
-    @keyframes toastIn {
-      from { opacity: 0; transform: translateX(-50%) translateY(20px); }
-      to { opacity: 1; transform: translateX(-50%) translateY(0); }
-    }
-
-    /* Scan indicator */
-    .scan-indicator {
-      position: fixed;
-      bottom: 1rem;
-      right: 1rem;
-      padding: 0.5rem 1rem;
-      background: rgba(39, 174, 96, 0.2);
-      border: 1px solid #27ae60;
-      border-radius: 8px;
-      color: #27ae60;
-      font-size: 0.8rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      z-index: 100;
-      pointer-events: none;
-    }
-    .scan-dot {
-      width: 8px;
-      height: 8px;
-      background: #27ae60;
-      border-radius: 50%;
-      animation: blink 1.5s infinite;
-    }
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
+    .nav-links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 2rem; font-size: 0.9rem; transition: color 0.2s; }
+    .nav-links a:hover, .nav-links a.active { color: #f39c12; }
+    .container { display: grid; grid-template-columns: 1fr 350px; gap: 2rem; padding: 2rem; max-width: 1400px; margin: 0 auto; }
+    .order-card { background: rgba(255,255,255,0.08); border-radius: 16px; padding: 1.5rem; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem; }
+    .status-paid { background: #27ae60; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; }
+    .card { background: rgba(255,255,255,0.08); border-radius: 16px; padding: 1.5rem; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem; }
+    .checkout-btn { width: 100%; background: #27ae60; color: #fff; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
+    .checkout-btn:disabled { opacity: 0.3; }
   </style>
 </head>
 <body>
@@ -406,481 +42,112 @@
   </header>
   
   <main class="container">
-    <section class="orders-section">
+    <section>
       <h2>📋 Live Orders</h2>
-      <div class="orders-feed" id="ordersFeed">
-        <!-- Orders will be injected here -->
-        <div class="empty-state" id="emptyState">
-          <svg fill="currentColor" viewBox="0 0 24 24"><path d="M18.5 3H6c-1.1 0-2 .9-2 2v5.71c0 3.83 2.95 7.18 6.78 7.29 3.96.12 7.22-3.06 7.22-7V5c0-1.1-.9-2-2-2zM12 17c-2.76 0-5-2.24-5-5V5h10v7c0 2.76-2.24 5-5 5z"/></svg>
-          <p>Waiting for orders...</p>
-        </div>
+      <div style="margin-bottom: 20px; display: flex; gap: 10px;">
+          <button onclick="addToCart({name: 'Latte', price: 4.50})" style="padding:10px; border-radius:8px; border:none; background:#3498db; color:white; cursor:pointer;">+ Add Latte</button>
+          <button onclick="addToCart({name: 'Croissant', price: 3.50})" style="padding:10px; border-radius:8px; border:none; background:#3498db; color:white; cursor:pointer;">+ Add Croissant</button>
       </div>
+      <div id="ordersFeed"></div>
     </section>
     
-    <aside class="sidebar">
-      <!-- Scanner Status -->
-      <div class="scan-indicator">
-        <div class="scan-dot"></div>
-        Scanner Ready (Genesis XP)
-      </div>
-
-      <!-- Cart -->
-      <div class="card cart-section">
+    <aside>
+      <div class="card">
         <h3>🛒 Current Order</h3>
-        <div class="cart-items" id="cartItems">
-          <div class="empty-cart">Scan items to add to cart</div>
+        <div id="cartItems" style="margin: 15px 0;"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span id="cartTotal" style="font-size: 1.5rem; color: #f39c12; font-weight: bold;">$0.00</span>
+            <button class="checkout-btn" id="checkoutBtn" onclick="checkout()" disabled style="width: auto; padding: 10px 20px;">Pay →</button>
         </div>
-        <div class="cart-footer">
-          <div>
-            <button class="clear-btn" onclick="clearCart()">Clear</button>
-            <span class="cart-total" id="cartTotal">$0.00</span>
-          </div>
-          <button class="checkout-btn" id="checkoutBtn" onclick="checkout()" disabled>Pay →</button>
-        </div>
-      </div>
-
-      <!-- Voucher Entry -->
-      <div class="card">
-        <h3>🎫 Redeem Voucher</h3>
-        <div class="voucher-input-group">
-          <input type="text" class="voucher-input" id="voucherCode" placeholder="BRW-XXXXXX" maxlength="10">
-          <button class="voucher-btn" onclick="redeemVoucher()">Apply</button>
-        </div>
-        <div class="voucher-result" id="voucherResult"></div>
-      </div>
-      
-      <!-- Loyalty Progress -->
-      <div class="card">
-        <h3>☕ Loyalty Progress</h3>
-        <div class="loyalty-progress" id="loyaltyBeans">
-          <!-- 10 coffee beans -->
-        </div>
-        <p class="loyalty-text"><strong id="loyaltyPoints">0</strong> / 10 beans to free coffee</p>
-      </div>
-      
-      <!-- Customer Lookup -->
-      <div class="card">
-        <h3>👤 Find Customer</h3>
-        <input type="text" id="customerSearch" placeholder="Phone or email..." onkeypress="if(event.key==='Enter')searchCustomer()" style="width:100%; padding:10px; border:1px solid #333; border-radius:6px; background:#222; color:#fff; margin-bottom:8px;">
-        <button onclick="searchCustomer()" style="width:100%; padding:10px; background:#f39c12; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Search</button>
-        <div id="customerSearchResult" style="margin-top:10px; font-size:0.9em;"></div>
-      </div>
-      
-      <!-- Current Customer -->
-      <div class="card" id="customerCard" style="display: none;">
-        <h3>✓ Customer Attached</h3>
-        <div class="customer-name" id="customerName">-</div>
-        <div class="customer-email" id="customerEmail">-</div>
-        <button onclick="clearCustomer()" style="margin-top:10px; padding:8px; background:#666; border:none; border-radius:6px; color:#fff; cursor:pointer; width:100%;">Clear Customer</button>
       </div>
     </aside>
   </main>
 
   <script>
-    // ===== SUPABASE CONFIG =====
-    const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-    async function authHeaders() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not signed in');
-      return {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`
-      };
-    }
-
-    // ===== CART STATE =====
+    // 1. GLOBAL STATE (No redeclaring 'supabase')
     let cart = [];
-    let currentCustomer = null;
 
-    // ===== MENU ITEMS (with barcodes) =====
-    // These would ideally come from Supabase menu_items table
-    const menuItems = {
-      // Product barcodes from Genesis XP scanner
-      '4901234567890': { name: 'Latte', price: 450, category: 'coffee' },
-      '4901234567891': { name: 'Cappuccino', price: 400, category: 'coffee' },
-      '4901234567892': { name: 'Americano', price: 350, category: 'coffee' },
-      '4901234567893': { name: 'Espresso', price: 300, category: 'coffee' },
-      '4901234567894': { name: 'Mocha', price: 500, category: 'coffee' },
-      '4901234567895': { name: 'Cold Brew', price: 450, category: 'coffee' },
-      '4901234567900': { name: 'Croissant', price: 350, category: 'food' },
-      '4901234567901': { name: 'Muffin', price: 300, category: 'food' },
-      '4901234567902': { name: 'Bagel', price: 250, category: 'food' },
-      // Add more product barcodes as needed
-    };
-
-    // ===== BARCODE SCANNER CAPTURE (Honeywell Genesis XP 7680g) =====
-    // Scanner operates in keyboard wedge mode - types characters fast then Enter
-    let scanBuffer = '';
-    let scanTimeout = null;
-
-    document.addEventListener('keydown', (e) => {
-      // Don't capture if typing in an input field
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-      if (e.key === 'Enter' && scanBuffer.length > 3) {
-        e.preventDefault();
-        clearTimeout(scanTimeout);
-        const scanned = scanBuffer.trim();
-        scanBuffer = '';
-        processBarcode(scanned);
-      } else if (e.key.length === 1) {
-        scanBuffer += e.key;
-        clearTimeout(scanTimeout);
-        // Scanner types fast (< 50ms between chars), keyboard is slower
-        scanTimeout = setTimeout(() => { scanBuffer = ''; }, 100);
-      }
-    });
-
-    // ===== PROCESS SCANNED BARCODE =====
-    async function processBarcode(code) {
-      console.log('🔫 Scanned:', code);
-
-      // Check if it's a product barcode
-      if (menuItems[code]) {
-        addToCart(menuItems[code]);
-        showToast(`Added ${menuItems[code].name} to cart`);
-        return;
-      }
-
-      // Check if it's a voucher code
-      if (code.startsWith('BRW-') || code.length === 10) {
-        document.getElementById('voucherCode').value = code;
-        await redeemVoucher();
-        return;
-      }
-
-      // Check if it's a customer QR (contains email)
-      // QR codes from portal will contain customer email
-      if (code.includes('@')) {
-        const { data: customer } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('email', code)
-          .single();
-
-        if (customer) {
-          setCurrentCustomer(customer);
-          showToast(`Welcome back, ${customer.name || 'Friend'}!`);
-          return;
-        }
-      }
-
-      // Try as phone number
-      const cleanCode = code.replace(/\D/g, '');
-      if (cleanCode.length >= 10) {
-        const { data: customer } = await supabase
-          .from('customers')
-          .select('*')
-          .ilike('phone', `%${cleanCode.slice(-10)}%`)
-          .single();
-
-        if (customer) {
-          setCurrentCustomer(customer);
-          showToast(`Welcome back, ${customer.name || 'Friend'}!`);
-          return;
-        }
-      }
-
-      showToast('Unknown barcode: ' + code, 'error');
-    }
-
-    // ===== CART FUNCTIONS =====
+    // 2. POS FUNCTIONS (Available immediately)
     function addToCart(item) {
-      const existing = cart.find(c => c.name === item.name);
-      if (existing) {
-        existing.qty++;
-      } else {
-        cart.push({ ...item, qty: 1 });
-      }
-      renderCart();
-    }
-
-    function removeFromCart(index) {
-      cart.splice(index, 1);
+      cart.push(item);
       renderCart();
     }
 
     function renderCart() {
-      const container = document.getElementById('cartItems');
-      const totalEl = document.getElementById('cartTotal');
-      const checkoutBtn = document.getElementById('checkoutBtn');
-
-      if (cart.length === 0) {
-        container.innerHTML = '<div class="empty-cart">Scan items to add to cart</div>';
-        totalEl.textContent = '$0.00';
-        checkoutBtn.disabled = true;
-        return;
-      }
-
-      container.innerHTML = cart.map((item, i) => `
-        <div class="cart-item">
-          <span class="cart-item-name">${item.qty}x ${item.name}</span>
-          <span class="cart-item-price">$${((item.price * item.qty) / 100).toFixed(2)}</span>
-          <button class="cart-remove" onclick="removeFromCart(${i})">×</button>
-        </div>
-      `).join('');
-
-      const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-      totalEl.textContent = '$' + (total / 100).toFixed(2);
-      checkoutBtn.disabled = false;
+      const list = document.getElementById('cartItems');
+      list.innerHTML = cart.map(item => `<div>${item.name} - $${item.price.toFixed(2)}</div>`).join('');
+      const total = cart.reduce((s, i) => s + i.price, 0);
+      document.getElementById('cartTotal').textContent = `$${total.toFixed(2)}`;
+      document.getElementById('checkoutBtn').disabled = cart.length === 0;
     }
 
-    function clearCart() {
-      cart = [];
-      renderCart();
-    }
-
-    // ===== CHECKOUT =====
     async function checkout() {
-      if (cart.length === 0) return;
-
-      const items = cart.map(c => `${c.qty}x ${c.name}`).join(', ');
-
-      try {
-        // Create order via secure server-side function
-        const orderRes = await fetch('/.netlify/functions/create-order', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({
-            cart: cart.map(item => ({
-              name: item.name,
-              qty: item.qty
-            })),
-            user_id: currentCustomer?.id || null
-          })
-        });
-
-        const orderResult = await orderRes.json();
-        if (!orderRes.ok) throw new Error(orderResult.error || 'Order creation failed');
-        const order = orderResult.order;
-
-        // Send to Square for payment
-        const res = await fetch('/.netlify/functions/collect-payment', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({
-            orderId: order.id,
-            note: items
-          })
-        });
-
-        if (!res.ok) throw new Error('Payment failed');
-
-        showToast('Order sent to terminal!');
-        clearCart();
-        currentCustomer = null;
-        updateCustomerCard();
-
-      } catch (err) {
-        console.error('Checkout error:', err);
-        showToast('Checkout failed: ' + err.message, 'error');
-      }
+  const client = window.brewAuth.client;
+  
+  try {
+    // Get the session for Authorization header
+    const { data: { session } } = await client.auth.getSession();
+    if (!session) {
+      alert('Session expired. Please log in again.');
+      window.location.href = '/login.html';
+      return;
     }
 
-    // ===== CUSTOMER FUNCTIONS =====
-    async function searchCustomer() {
-      const input = document.getElementById('customerSearch').value.trim();
-      const resultDiv = document.getElementById('customerSearchResult');
-      
-      if (!input) {
-        resultDiv.innerHTML = '<span style="color:#888;">Enter phone or email</span>';
-        return;
-      }
-      
-      resultDiv.innerHTML = '<span style="color:#888;">Searching...</span>';
-      
-      // Determine if input is phone or email
-      const isEmail = input.includes('@');
-      const column = isEmail ? 'email' : 'phone';
-      
-      // Search customers table
-      let query = supabase.from('customers').select('*');
-      
-      if (isEmail) {
-        query = query.ilike('email', `%${input}%`);
-      } else {
-        // Clean phone input and search
-        const cleanPhone = input.replace(/\D/g, '');
-        query = query.ilike('phone', `%${cleanPhone}%`);
-      }
-      
-      const { data, error } = await query.limit(5);
-      
-      if (error) {
-        resultDiv.innerHTML = '<span style="color:#e74c3c;">Search error</span>';
-        return;
-      }
-      
-      if (!data || data.length === 0) {
-        resultDiv.innerHTML = '<span style="color:#e74c3c;">No customer found</span>';
-        return;
-      }
-      
-      if (data.length === 1) {
-        // Exact match - attach immediately
-        setCurrentCustomer(data[0]);
-        resultDiv.innerHTML = '<span style="color:#27ae60;">✓ Customer attached</span>';
-        document.getElementById('customerSearch').value = '';
-      } else {
-        // Multiple matches - show list
-        resultDiv.innerHTML = data.map(c => `
-          <div onclick="selectCustomer('${c.id}')" style="padding:8px; margin:4px 0; background:#333; border-radius:6px; cursor:pointer;">
-            <strong>${c.name || 'Unknown'}</strong><br>
-            <small style="color:#888;">${c.email || c.phone || ''}</small>
-          </div>
-        `).join('');
-      }
-    }
-    
-    async function selectCustomer(id) {
-      const { data: customer } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('id', id)
-        .single();
-      
-      if (customer) {
-        setCurrentCustomer(customer);
-        document.getElementById('customerSearchResult').innerHTML = '<span style="color:#27ae60;">✓ Customer attached</span>';
-        document.getElementById('customerSearch').value = '';
-      }
-    }
-    
-    function setCurrentCustomer(customer) {
-      currentCustomer = customer;
-      updateCustomerCard();
-      initLoyaltyBeans(customer.loyalty_points || 0);
-    }
-    
-    function clearCustomer() {
-      currentCustomer = null;
-      updateCustomerCard();
-      initLoyaltyBeans(0);
-      document.getElementById('customerSearchResult').innerHTML = '';
+    // Call server-side checkout API (validates prices server-side)
+    const response = await fetch('/.netlify/functions/cafe-checkout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({ cart })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || 'Checkout failed');
     }
 
-    function updateCustomerCard() {
-      const card = document.getElementById('customerCard');
-      if (currentCustomer) {
-        card.style.display = 'block';
-        document.getElementById('customerName').textContent = currentCustomer.name || 'Guest';
-        document.getElementById('customerEmail').textContent = currentCustomer.email || currentCustomer.phone || '';
-      } else {
-        card.style.display = 'none';
-      }
-    }
-
-    // ===== LOYALTY BEANS =====
-    function initLoyaltyBeans(points = 0) {
-      const beansEarned = Math.floor((points % 500) / 50); // 50 pts per purchase, 500 for free coffee
-      const container = document.getElementById('loyaltyBeans');
-      container.innerHTML = '';
-      for (let i = 0; i < 10; i++) {
-        const bean = document.createElement('div');
-        bean.className = 'coffee-bean' + (i < beansEarned ? ' filled' : '');
-        bean.textContent = '☕';
-        container.appendChild(bean);
-      }
-      document.getElementById('loyaltyPoints').textContent = beansEarned;
-    }
-
-    // ===== ORDER FEED =====
-    function addOrderToFeed(order) {
-      document.getElementById('emptyState').style.display = 'none';
-      const feed = document.getElementById('ordersFeed');
-
-      // Remove if already exists (for updates)
-      const existing = document.getElementById('order-' + order.id);
-      if (existing) existing.remove();
-
-      const card = document.createElement('div');
-      card.className = 'order-card';
-      card.id = 'order-' + order.id;
-      card.innerHTML = `
-        <div class="order-header">
-          <span class="order-id">#${order.id.slice(0, 8)}</span>
-          <span class="order-status status-${order.status}">${order.status}</span>
-        </div>
-        <div class="order-items">${order.items || 'Order items'}</div>
-        <div class="order-total ${order.total_amount_cents === 0 ? 'free' : ''}">
-          ${order.total_amount_cents === 0 ? '🎉 FREE!' : '$' + (order.total_amount_cents / 100).toFixed(2)}
-        </div>
-      `;
-      feed.insertBefore(card, feed.firstChild);
-    }
-
-    // ===== REALTIME ORDERS =====
-    async function loadRecentOrders() {
-      const { data: orders, error } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (orders && orders.length > 0) {
-        orders.reverse().forEach(addOrderToFeed);
-      }
-    }
-
-    function subscribeToOrders() {
-      supabase
-        .channel('orders-feed')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            addOrderToFeed(payload.new);
-          }
-        })
-        .subscribe();
-    }
-
-    // ===== VOUCHER REDEMPTION =====
-    async function redeemVoucher() {
-      const code = document.getElementById('voucherCode').value.toUpperCase();
-      const result = document.getElementById('voucherResult');
-
-      if (!code) return;
-
-      try {
-        const res = await fetch('/.netlify/functions/redeem-voucher', {
-          method: 'POST',
-          headers: await authHeaders(),
-          body: JSON.stringify({ code, orderId: 'current-order' })
-        });
-
-        const data = await res.json();
-
-        if (res.ok) {
-          result.className = 'voucher-result success';
-          result.textContent = '✓ Price: $0.00 — Enjoy your free coffee!';
-          document.getElementById('voucherCode').value = '';
-          // Could also clear cart or apply discount here
-        } else {
-          result.className = 'voucher-result error';
-          result.textContent = data.error || 'Invalid voucher';
-        }
-      } catch (err) {
-        result.className = 'voucher-result error';
-        result.textContent = 'Connection error';
-      }
-    }
-
-    // ===== TOAST NOTIFICATIONS =====
-    function showToast(message, type = 'success') {
-      const toast = document.createElement('div');
-      toast.className = `toast toast-${type}`;
-      toast.textContent = message;
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 3000);
-    }
-
-    // ===== INIT =====
-    initLoyaltyBeans(0);
+    alert('Order Success!');
+    cart = [];
     renderCart();
-    loadRecentOrders();
-    subscribeToOrders();
+  } catch (err) {
+    console.error(err);
+    alert('Checkout Failed: ' + err.message);
+  }
+}
+
+    // 3. INITIALIZATION & REALTIME
+    async function init() {
+      // Wait for brewAuth to exist
+      while (!window.brewAuth) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      
+      // Staff auth required
+      await window.brewAuth.protectPage({ requiredRole: 'staff' });
+      
+      const client = window.brewAuth.client;
+      console.log("✅ Cafe POS Connected");
+      
+      // Load recent orders for the feed
+      const { data } = await client.from('orders').select('*').order('created_at', { ascending: false }).limit(5);
+      if (data) data.forEach(addOrderToFeed);
+
+      // Subscribe to new orders
+      client.channel('orders-cafe').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, payload => {
+        addOrderToFeed(payload.new);
+      }).subscribe();
+    }
+
+    function addOrderToFeed(order) {
+      const feed = document.getElementById('ordersFeed');
+      if (!feed) return;
+      feed.innerHTML = `<div class="order-card">Order #${order.id.slice(0,5)} <span class="status-paid">${order.status}</span></div>` + feed.innerHTML;
+    }
+
+    init();
   </script>
 </body>
 </html>

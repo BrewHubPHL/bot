@@ -571,7 +571,12 @@
       .subscribe();
 
     // ===== INITIALIZE =====
-    loadParcels();
+    async function initAuth() {
+        while (!window.brewAuth) await new Promise(r => setTimeout(r, 100));
+        await window.brewAuth.protectPage({ requiredRole: 'staff' });
+        loadParcels();
+    }
+    initAuth();
     
     // Focus trap: keep input ready for scanner
     document.getElementById('trackingInput').addEventListener('blur', () => {

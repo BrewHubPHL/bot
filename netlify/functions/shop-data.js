@@ -4,15 +4,18 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
-    const incomingSecret = event.headers?.['x-brewhub-secret'];
     const headers = {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
     };
 
-    if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
-        return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) };
+    // Handle CORS preflight
+    if (event.httpMethod === 'OPTIONS') {
+        return { statusCode: 200, headers, body: '' };
     }
+
+    // Public endpoint - no auth required for browsing shop products
+    // Uses service role key to read products but only exposes safe fields
 
     try {
         // Check shop status

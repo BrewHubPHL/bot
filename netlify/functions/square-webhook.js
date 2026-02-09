@@ -416,67 +416,7 @@ exports.handler = async (event) => {
     }
   }
 
-  // 5. Decrement inventory - derive quantities from Square line items
-  let cupCount = 0;
-  let beanCount = 0;
-  let lineItems = [];
-
-  if (payment.order_id) {
-    try {
-      const { result } = await square.ordersApi.retrieveOrder(payment.order_id);
-      lineItems = result?.order?.lineItems || [];
-    } catch (err) {
-      console.error('Square order lookup failed:', err);
-    }
-  }
-
-  if (lineItems.length > 0) {
-    for (const item of lineItems) {
-      const name = (item?.name || '').toLowerCase();
-      const quantity = Number(item?.quantity || 0);
-
-      if (name.includes('whole bean') || name.includes('beans')) {
-        beanCount += quantity || 0;
-      } else {
-        cupCount += quantity || 0;
-      }
-    }
-  }
-
-  if (cupCount === 0) {
-    const { count, error: cupsError } = await supabase
-      .from('coffee_orders')
-      .select('id', { count: 'exact', head: true })
-      .eq('order_id', orderId);
-
-    if (cupsError) {
-      console.error("Cup count lookup failed:", cupsError);
-    } else if (typeof count === 'number' && count > 0) {
-      cupCount = count;
-    }
-  }
-
-  if (cupCount > 0) {
-    const { error: inventoryError } = await supabase.rpc('decrement_inventory', { 
-      item: '12oz Cups', 
-      amount: cupCount 
-    });
-
-    if (inventoryError) {
-      console.error("Inventory decrement failed:", inventoryError);
-    } else {
-      console.log(`[INVENTORY] Decremented 12oz Cups by ${cupCount}`);
-    }
-  }
-
-  // 6. If it's a bulk bean sale, decrement beans too
-  if (beanCount > 0) {
-    await supabase.rpc('decrement_inventory', { 
-      item: 'Espresso Beans', 
-      amount: beanCount 
-    });
-    console.log(`[INVENTORY] Decremented Espresso Beans by ${beanCount}`);
-  }
+  // Inventory decrement handled by database trigger on order completion
 
   return { statusCode: 200, body: JSON.stringify({ received: true }) };
 };

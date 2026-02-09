@@ -452,6 +452,13 @@
             }).join('');
         }
         renderHistory();
+
+        // Staff auth required
+        async function initAuth() {
+            while (!window.brewAuth) await new Promise(r => setTimeout(r, 100));
+            await window.brewAuth.protectPage({ requiredRole: 'staff' });
+        }
+        initAuth();
     </script>
 </body>
 </html>

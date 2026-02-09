@@ -1,65 +1,44 @@
-export default async (req, context) => {
-  const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const { createClient } = require('@supabase/supabase-js');
+const { authorize, json } = require('./_auth');
 
-  // Check internal service secret first
-  const incomingSecret = req.headers.get('x-brewhub-secret');
-  if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
-    const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
-    if (!token) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+exports.handler = async (event) => {
+  // Handle CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+      },
+      body: ''
+    };
+  }
 
-    // Validate JWT
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data?.user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
-    }
+  if (event.httpMethod !== 'POST') {
+    return json(405, { error: 'Method Not Allowed' });
+  }
 
-    const email = (data.user.email || '').toLowerCase();
-
-    // ═══════════════════════════════════════════════════════════
-    // LIVE REVOCATION CHECK (prevents 1-hour JWT window exploit)
-    // ═══════════════════════════════════════════════════════════
-    const { data: revoked } = await supabase
-      .from('revoked_users')
-      .select('revoked_at')
-      .eq('user_id', data.user.id)
-      .single();
-
-    if (revoked?.revoked_at) {
-      // Compare revoked_at against JWT issued-at time
-      const payloadPart = token.split('.')[1];
-      const payload = JSON.parse(atob(payloadPart));
-      const iat = payload.iat ? payload.iat * 1000 : 0;
-      const revokedAt = new Date(revoked.revoked_at).getTime();
-      
-      if (revokedAt >= iat) {
-        console.error(`[SMS-EMAIL] Blocked revoked user: ${email}`);
-        return new Response(JSON.stringify({ error: 'Access revoked' }), { status: 403 });
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // SSoT CHECK: Query staff_directory table (replaces env var)
-    // ═══════════════════════════════════════════════════════════
-    const { data: staffRecord, error: staffError } = await supabase
-      .from('staff_directory')
-      .select('role')
-      .eq('email', email)
-      .single();
-
-    if (staffError || !staffRecord) {
-      console.error(`[SMS-EMAIL] Blocked non-staff: ${email}`);
-      return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
-    }
+  // Check internal service secret first (for service-to-service calls)
+  const incomingSecret = event.headers?.['x-brewhub-secret'];
+  if (incomingSecret && incomingSecret === process.env.INTERNAL_SYNC_SECRET) {
+    // Service-to-service call authenticated
+  } else {
+    // Standard auth check for staff
+    const auth = await authorize(event);
+    if (!auth.ok) return auth.response;
   }
 
   try {
-    const { recipient_name, phone, carrier, tracking } = await req.json();
+    const { recipient_name, phone, carrier, tracking } = JSON.parse(event.body || '{}');
 
     if (!phone || !carrier) {
-      return new Response(JSON.stringify({ error: 'Missing phone or carrier' }), { status: 400 });
+      return json(400, { error: 'Missing phone or carrier' });
     }
 
     const gateways = {
@@ -73,7 +52,7 @@ export default async (req, context) => {
 
     const gateway = gateways[carrier.toLowerCase()];
     if (!gateway) {
-      return new Response(JSON.stringify({ error: `Unknown carrier: ${carrier}` }), { status: 400 });
+      return json(400, { error: `Unknown carrier: ${carrier}` });
     }
 
     const smsAddress = `${phone.replace(/\D/g, '')}${gateway}`;
@@ -87,15 +66,20 @@ export default async (req, context) => {
       body: JSON.stringify({
         from: 'BrewHub Alerts <alerts@brewhubphl.com>',
         to: [smsAddress],
-        subject: '', 
+        subject: '',
         text: `Yo ${recipient_name}! Your package (${tracking || 'Parcel'}) is at the Hub. 📦 Grab a coffee when you swing by! Reply STOP to opt out.`,
       }),
     });
 
     const data = await res.json();
-    return new Response(JSON.stringify({ success: res.ok, id: data.id }), { status: res.status });
+    
+    return {
+      statusCode: res.status,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ success: res.ok, id: data.id })
+    };
   } catch (error) {
-    console.error(error);
-    return new Response(JSON.stringify({ error: 'Send failed' }), { status: 500 });
+    console.error('[SEND-SMS-EMAIL] Error:', error);
+    return json(500, { error: 'Send failed' });
   }
 };

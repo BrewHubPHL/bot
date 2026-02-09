@@ -1,11 +1,13 @@
 const { createClient } = require('@supabase/supabase-js');
-const { authorize, json } = require('./_auth');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
+// Initialize with Service Role Key (Bypasses RLS)
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 exports.handler = async (event) => {
-  // 1. Handle CORS Preflight
+  // 1. Handle CORS (Allow browser access)
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
@@ -22,54 +24,73 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
-      headers: { 'Access-Control-Allow-Origin': '*' },
       body: JSON.stringify({ error: 'Method Not Allowed' })
     };
   }
 
-  // 3. Secure Auth (Staff Only)
-  const auth = await authorize(event);
-  if (!auth.ok) {
-    // Add CORS headers to error response
-    const response = auth.response;
-    response.headers = { ...response.headers, 'Access-Control-Allow-Origin': '*' };
-    console.error('[LOG-TIME] Auth failed:', JSON.parse(response.body));
-    return response;
-  }
-
   try {
+    // 3. MANUAL AUTH CHECK (Replaces the broken authorize function)
+    const token = event.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return { statusCode: 401, body: JSON.stringify({ error: 'No token provided' }) };
+    }
+
+    // Verify the user exists using Supabase Auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      console.warn("Auth Token Invalid:", authError);
+      return { statusCode: 401, body: JSON.stringify({ error: 'Invalid Token' }) };
+    }
+
+    // 4. CHECK STAFF DIRECTORY (Using Master Key - Cannot be blocked)
+    const { data: staffMember } = await supabase
+      .from('staff_directory')
+      .select('*')
+      .eq('email', user.email.toLowerCase()) // Force lowercase match
+      .maybeSingle();
+
+    if (!staffMember) {
+      console.error(`[AUTH] User ${user.email} not found in staff_directory`);
+      return { statusCode: 403, body: JSON.stringify({ error: 'Access denied: Not in staff directory.' }) };
+    }
+
+    // 5. PARSE REQUEST
     const { employee_email, action_type } = JSON.parse(event.body);
 
-    if (!employee_email || !action_type) {
-      return json(400, { error: 'Missing email or action' });
+    // Security: Ensure they are clocking in for THEMSELVES
+    if (user.email.toLowerCase() !== employee_email.toLowerCase()) {
+       return { 
+         statusCode: 403, 
+         body: JSON.stringify({ error: "Identity Mismatch: You can only clock in for yourself." }) 
+       };
     }
 
-    // Strict mode: Only allow users to clock THEMSELVES in/out.
-    if (auth.via === 'jwt' && auth.user.email.toLowerCase() !== employee_email.toLowerCase()) {
-       console.warn(`[AUTH MISMATCH] Token: ${auth.user.email} -> Claiming: ${employee_email}`);
-       return json(403, { error: "You can only clock in for yourself." });
-    }
-
-    // Only use columns that exist in your table
+    // 6. LOG THE TIME
     const payload = {
-      employee_email,
+      employee_email: employee_email.toLowerCase(),
       action_type,
       clock_in: action_type === 'in' ? new Date().toISOString() : null,
       clock_out: action_type === 'out' ? new Date().toISOString() : null,
       status: 'Pending'
     };
 
-    const { error } = await supabase.from('time_logs').insert([payload]);
+    const { error: insertError } = await supabase.from('time_logs').insert([payload]);
 
-    if (error) {
-      console.error('[LOG-TIME] DB Error:', error);
-      return json(500, { error: 'Logging failed', details: error.message || error });
-    }
+    if (insertError) throw insertError;
 
-    return json(200, { success: true, message: `Clocked ${action_type} successfully` });
+    return {
+      statusCode: 200,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ success: true, message: `Clocked ${action_type} successfully` })
+    };
 
   } catch (err) {
-    console.error('[LOG-TIME] Error:', err);
-    return json(500, { error: 'Logging failed', details: err.message || err });
+    console.error('[LOG-TIME] Critical Error:', err);
+    return {
+      statusCode: 500,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ error: 'System Error', details: err.message })
+    };
   }
 };

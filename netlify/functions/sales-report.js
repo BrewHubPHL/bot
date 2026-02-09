@@ -7,42 +7,36 @@ const supabase = createClient(
 );
 
 exports.handler = async (event, context) => {
-  // 1. Secure: Managers Only (RBAC enforced)
-  // High-sensitivity: Require token issued within last 15 minutes
-  const auth = await authorize(event, { requireManager: true, maxTokenAgeMinutes: 15 });
-  if (!auth.ok) return auth.response;
+  // 1. Handle Auth (Skip if it's a Netlify Scheduled trigger)
+  const isCron = event.headers && event.headers['x-netlify-event'] === 'cron';
+  if (!isCron) {
+    const auth = await authorize(event, { requireManager: true });
+    if (!auth.ok) return auth.response;
+  }
 
   try {
-    // 2. Pull data from the Daily Sales View
+    // 2. Query the View we just built
     const { data, error } = await supabase
       .from('daily_sales_report')
       .select('*')
-      .single();
+      .maybeSingle();
 
-    if (error) throw error;
+    if (error) {
+      console.error("SQL View Error:", error.message);
+      throw error;
+    }
 
-    const report = `
-      ☕ BrewHubPHL Daily Sales Summary
-      ---------------------------------
-      Orders: ${data?.total_orders || 0}
-      Revenue: $${(data?.gross_revenue || 0).toFixed(2)}
-      Vouchers Used: ${data?.vouchers_redeemed || 0}
-      ---------------------------------
-      Report Generated: ${new Date().toLocaleString()}
-    `;
+    // 3. Return the data exactly as manager.html expects it
+    // Convert cents to dollars for gross_revenue
+    return json(200, {
+      total_orders: data?.total_orders || 0,
+      gross_revenue: (data?.gross_revenue || 0) / 100,
+      completed_orders: data?.completed_orders || 0,
+      timestamp: new Date().toISOString()
+    });
 
-    console.log(report);
-
-    return json(200, { message: "Daily report generated", report, data });
   } catch (err) {
-    console.error("Reporting Error:", err.message);
-    return json(500, { error: "Report Failed" });
+    console.error("Function Crash:", err.message);
+    return json(500, { error: "Failed to fetch report", details: err.message });
   }
-};
-
-// THE MAGIC SAUCE: This tells Netlify to run this function every night at 9PM
-// Cron syntax: "minute hour day-of-month month day-of-week"
-// "0 21 * * *" = 9:00 PM every single day.
-export const config = {
-  schedule: "0 21 * * *"
 };

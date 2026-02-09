@@ -3,18 +3,6 @@ const { createClient } = require('@supabase/supabase-js');
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-/* DEPRECATED: SSoT moved to 'staff_directory' table
-const staffAllowlist = (process.env.STAFF_ALLOWLIST || '')
-  .split(',')
-  .map(e => e.trim().toLowerCase())
-  .filter(Boolean);
-
-const managerAllowlist = (process.env.MANAGER_ALLOWLIST || '')
-  .split(',')
-  .map(e => e.trim().toLowerCase())
-  .filter(Boolean);
-*/
-
 const json = (statusCode, payload) => ({
   statusCode,
   headers: { 'Content-Type': 'application/json' },

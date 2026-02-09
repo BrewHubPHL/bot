@@ -4,286 +4,87 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BrewHub Manager Dashboard</title>
+  
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
   <script src="/js/auth.js"></script>
+  
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    
-    /* Manager Dashboard - Dark Theme (NOT using brand-system.css) */
-    body {
-      font-family: 'Inter', sans-serif;
-      background: #0f0f0f;
-      min-height: 100vh;
-      color: #f5f5f5;
-    }
-    
-    .header {
-      background: #1a1a1a;
-      padding: 1rem 2rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #333;
-    }
-    .logo {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: #f5f5f5;
-    }
+    body { font-family: 'Inter', sans-serif; background: #0f0f0f; min-height: 100vh; color: #f5f5f5; }
+    .header { background: #1a1a1a; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+    .logo { font-size: 1.5rem; font-weight: 700; color: #f5f5f5; cursor: pointer; }
     .logo span { color: #f39c12; }
-    .nav-links a {
-      color: #ccc;
-      text-decoration: none;
-      margin-left: 2rem;
-      font-size: 0.9rem;
-      transition: color 0.2s;
-    }
+    .nav-links a { color: #ccc; text-decoration: none; margin-left: 2rem; font-size: 0.9rem; transition: color 0.2s; }
     .nav-links a:hover, .nav-links a.active { color: #f39c12; }
-    
-    .container {
-      padding: 2rem;
-      max-width: 1400px;
-      margin: 0 auto;
-    }
+    .container { padding: 2rem; max-width: 1400px; margin: 0 auto; }
     
     /* Stats Grid */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1.5rem;
-      margin-bottom: 2rem;
-    }
-    .stat-card {
-      background: #1a1a1a;
-      border-radius: 16px;
-      padding: 1.5rem;
-      border: 1px solid #333;
-    }
-    .stat-label {
-      font-size: 0.85rem;
-      color: #888;
-      margin-bottom: 0.5rem;
-    }
-    .stat-value {
-      font-size: 2rem;
-      font-weight: 700;
-      color: #f5f5f5;
-    }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2rem; }
+    .stat-card { background: #1a1a1a; border-radius: 16px; padding: 1.5rem; border: 1px solid #333; }
+    .stat-label { font-size: 0.85rem; color: #888; margin-bottom: 0.5rem; }
+    .stat-value { font-size: 2rem; font-weight: 700; color: #f5f5f5; }
     .stat-value.revenue { color: #27ae60; }
     .stat-value.orders { color: #3498db; }
-    .stat-value.vouchers { color: #f39c12; }
-    .stat-value.parcels { color: #9b59b6; }
-    .stat-change {
-      font-size: 0.8rem;
-      margin-top: 0.5rem;
-      color: #888;
-    }
-    .stat-change.up { color: #27ae60; }
-    .stat-change.down { color: #e74c3c; }
+    .stat-change { font-size: 0.8rem; color: #666; margin-top: 0.5rem; }
     
     /* Main Grid */
-    .main-grid {
-      display: grid;
-      grid-template-columns: 1fr 400px;
-      gap: 2rem;
-    }
-    
-    /* Section Headers */
-    .section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1rem;
-    }
-    .section-header h2 {
-      font-size: 1.1rem;
-      color: #f5f5f5;
-    }
-    .refresh-btn {
-      background: #333;
-      border: none;
-      border-radius: 8px;
-      padding: 0.5rem 1rem;
-      color: #ccc;
-      cursor: pointer;
-      font-size: 0.85rem;
-    }
-    .refresh-btn:hover { background: #444; }
-    
-    /* Inventory Table */
-    .inventory-table {
-      background: #1a1a1a;
-      border-radius: 16px;
-      overflow: hidden;
-      border: 1px solid #333;
-    }
-    .inventory-header {
-      display: grid;
-      grid-template-columns: 2fr 1fr 1fr 120px;
-      padding: 1rem 1.5rem;
-      background: #222;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #888;
-    }
-    .inventory-row {
-      display: grid;
-      grid-template-columns: 2fr 1fr 1fr 120px;
-      padding: 1rem 1.5rem;
-      border-bottom: 1px solid #222;
-      align-items: center;
-    }
-    .inventory-row:hover { background: #1f1f1f; }
-    .inventory-row.low-stock {
-      background: rgba(243, 156, 18, 0.1);
-      border-left: 3px solid #f39c12;
-    }
-    .inventory-row.critical {
-      background: rgba(231, 76, 60, 0.1);
-      border-left: 3px solid #e74c3c;
-    }
-    .item-name { font-weight: 500; color: #f5f5f5; }
-    .item-category { font-size: 0.8rem; color: #888; }
-    .stock-level { font-weight: 600; color: #f5f5f5; }
-    .stock-level.low { color: #f39c12; }
-    .stock-level.critical { color: #e74c3c; }
-    .threshold { color: #888; font-size: 0.9rem; }
-    .stock-controls { display: flex; gap: 0.5rem; align-items: center; }
-    .stock-btn {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      border: none;
-      background: #333;
-      color: #fff;
-      font-size: 1.1rem;
-      cursor: pointer;
-    }
+    .main-grid { display: grid; grid-template-columns: 1fr 400px; gap: 2rem; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .inventory-table { background: #1a1a1a; border-radius: 16px; overflow: hidden; border: 1px solid #333; }
+    .inventory-header { display: grid; grid-template-columns: 2fr 1fr 1fr 120px; padding: 1rem 1.5rem; background: #222; font-size: 0.75rem; color: #888; }
+    .inventory-row { display: grid; grid-template-columns: 2fr 1fr 1fr 120px; padding: 1rem 1.5rem; border-bottom: 1px solid #222; align-items: center; }
+    .stock-btn { width: 32px; height: 32px; border-radius: 8px; border: none; background: #333; color: #fff; cursor: pointer; }
     .stock-btn:hover { background: #444; }
-    .stock-btn.minus:hover { background: rgba(231, 76, 60, 0.3); }
-    .stock-btn.plus:hover { background: rgba(39, 174, 96, 0.3); }
     
-    /* Sidebar Cards */
     .sidebar { display: flex; flex-direction: column; gap: 1.5rem; }
-    .card {
-      background: #1a1a1a;
-      border-radius: 16px;
-      padding: 1.5rem;
-      border: 1px solid #333;
-    }
-    .card h3 {
-      font-size: 1rem;
-      margin-bottom: 1rem;
-      color: #f5f5f5;
-    }
-    
-    /* Activity List */
+    .card { background: #1a1a1a; border-radius: 16px; padding: 1.5rem; border: 1px solid #333; }
     .activity-list { display: flex; flex-direction: column; gap: 0.75rem; }
-    .activity-item { display: flex; align-items: flex-start; gap: 0.75rem; }
-    .activity-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.9rem;
-      flex-shrink: 0;
-    }
-    .activity-icon.order { background: rgba(52, 152, 219, 0.2); }
-    .activity-icon.voucher { background: rgba(243, 156, 18, 0.2); }
-    .activity-icon.parcel { background: rgba(155, 89, 182, 0.2); }
-    .activity-icon.alert { background: rgba(231, 76, 60, 0.2); }
-    .activity-text { font-size: 0.9rem; line-height: 1.4; color: #ccc; }
-    .activity-time { font-size: 0.75rem; color: #666; margin-top: 0.25rem; }
-    
-    /* Top Items */
-    .top-items-list { display: flex; flex-direction: column; gap: 0.75rem; }
-    .top-item { display: flex; justify-content: space-between; align-items: center; }
-    .top-item-name { font-size: 0.95rem; color: #f5f5f5; }
-    .top-item-count { font-size: 0.85rem; color: #888; }
-    .top-item-bar {
-      height: 4px;
-      background: #333;
-      border-radius: 2px;
-      margin-top: 0.5rem;
-      overflow: hidden;
-    }
-    .top-item-bar-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #9b59b6, #3498db);
-      border-radius: 2px;
-    }
-    
-    /* QR Preview */
-    .qr-preview { text-align: center; }
-    .qr-image {
-      width: 150px;
-      height: 150px;
-      background: #fff;
-      border-radius: 12px;
-      margin: 0 auto 1rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .qr-image img { width: 130px; height: 130px; }
-    .qr-code-text {
-      font-family: 'Courier New', monospace;
-      font-size: 1.1rem;
-      font-weight: 600;
-      letter-spacing: 2px;
-      color: #f5f5f5;
-    }
-    .qr-status { font-size: 0.85rem; color: #888; margin-top: 0.5rem; }
   </style>
 </head>
 <body>
   <header class="header">
-    <div class="logo">Brew<span>Hub</span> Dashboard</div>
+    <div class="logo" onclick="window.location.href='/index.html'">Brew<span>Hub</span> Dashboard</div>
     <nav class="nav-links">
       <a href="cafe.html">Cafe POS</a>
       <a href="parcels.html">Parcel Hub</a>
       <a href="scan.html">Inventory</a>
       <a href="manager.html" class="active">Dashboard</a>
+      <a href="#" onclick="window.brewAuth.signOut()" style="color: #e74c3c;">Logout</a>
     </nav>
   </header>
 
   <main class="container">
-    <!-- Stats Grid -->
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">Today's Revenue</div>
         <div class="stat-value revenue" id="totalRevenue">$0.00</div>
-        <div class="stat-change up" id="revenueChange">↑ Loading...</div>
+        <div class="stat-change" id="revenueChange">Syncing...</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Orders Today</div>
         <div class="stat-value orders" id="totalOrders">0</div>
-        <div class="stat-change" id="ordersChange">Loading...</div>
+        <div class="stat-change" id="ordersChange">Live</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Vouchers Issued</div>
-        <div class="stat-value vouchers" id="totalVouchers">0</div>
-        <div class="stat-change">This month</div>
+        <div class="stat-label">Staff Clocked In</div>
+        <div class="stat-value" id="activeStaff">0</div>
+        <div id="staffList" class="stat-change">No active shifts</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Parcels Today</div>
-        <div class="stat-value parcels" id="totalParcels">0</div>
-        <div class="stat-change">Awaiting pickup: <span id="awaitingPickup">0</span></div>
+        <div class="stat-label">Est. Daily Labor</div>
+        <div class="stat-value" id="dailyLabor">$0.00</div>
+        <div class="stat-change">Total Shift Cost</div>
       </div>
     </div>
 
-    <!-- Main Grid -->
     <div class="main-grid">
-      <!-- Inventory Section -->
       <section>
         <div class="section-header">
           <h2>📦 Inventory Status</h2>
-          <button class="refresh-btn" onclick="loadInventory()">↻ Refresh</button>
+          <button class="refresh-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;" onclick="renderInventory()">↻ Refresh</button>
         </div>
         <div class="inventory-table">
           <div class="inventory-header">
@@ -296,82 +97,58 @@
         </div>
       </section>
 
-      <!-- Sidebar -->
       <aside class="sidebar">
         <div class="card">
           <h3>⚡ Recent Activity</h3>
-          <div class="activity-list" id="activityList"></div>
-        </div>
-        <div class="card">
-          <h3>🏆 Top Sellers Today</h3>
-          <div class="top-items-list" id="topItems"></div>
-        </div>
-        <div class="card">
-          <h3>🎫 Latest Voucher</h3>
-          <div class="qr-preview" id="latestVoucher">
-            <div class="qr-image">
-              <span style="color: #999; font-size: 0.8rem;">No recent vouchers</span>
-            </div>
+          <div class="activity-list" id="activityList">
+              <div style="font-size:0.8rem; color:#666;">Waiting for events...</div>
           </div>
         </div>
       </aside>
     </div>
+
+    <!-- Payroll Section -->
+    <section style="margin-top: 2rem;">
+      <div class="section-header">
+        <h2>💰 Payroll Tally</h2>
+        <span id="grand-total" style="color: #27ae60; font-size: 1.5rem; font-weight: 700;">$0.00</span>
+      </div>
+      <div class="inventory-table">
+        <div class="inventory-header" style="grid-template-columns: 2fr 1fr 1fr 1fr 100px;">
+          <span>Staff</span>
+          <span>Rate</span>
+          <span>Hours</span>
+          <span>Earned</span>
+          <span>Status</span>
+        </div>
+        <div id="payroll-list">
+          <div style="padding: 1rem 1.5rem; color: #666;">Loading payroll...</div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script>
-    // Demo inventory data
+    // Static inventory data (Placeholder for now)
     const inventory = [
       { name: 'Espresso Beans', category: 'Coffee', current: 3, threshold: 10, unit: 'lbs' },
       { name: 'Oat Milk', category: 'Dairy Alt', current: 2, threshold: 8, unit: 'gal' },
-      { name: 'Whole Milk', category: 'Dairy', current: 12, threshold: 6, unit: 'gal' },
-      { name: 'Vanilla Syrup', category: 'Syrups', current: 4, threshold: 4, unit: 'bottles' },
-      { name: 'Caramel Syrup', category: 'Syrups', current: 6, threshold: 4, unit: 'bottles' },
-      { name: 'Cup Lids (L)', category: 'Supplies', current: 150, threshold: 100, unit: 'pcs' },
-      { name: 'Paper Cups (16oz)', category: 'Supplies', current: 45, threshold: 100, unit: 'pcs' },
+      { name: 'Vanilla Syrup', category: 'Syrups', current: 4, threshold: 4, unit: 'bottles' }
     ];
-
-    const activities = [
-      { type: 'order', text: 'New order #a3f2 - 2x Latte', time: '2 min ago' },
-      { type: 'voucher', text: 'Voucher BRW-K8L9P2 redeemed', time: '15 min ago' },
-      { type: 'alert', text: 'Low stock: Espresso Beans', time: '1 hr ago' },
-      { type: 'parcel', text: 'Package picked up by John S.', time: '2 hrs ago' },
-      { type: 'order', text: 'Order #b7c1 marked ready', time: '2 hrs ago' },
-    ];
-
-    const topSellers = [
-      { name: 'Iced Oat Latte', count: 24, percent: 100 },
-      { name: 'Cappuccino', count: 18, percent: 75 },
-      { name: 'Drip Coffee', count: 15, percent: 62 },
-      { name: 'Matcha Latte', count: 12, percent: 50 },
-    ];
-
-    function getStockClass(current, threshold) {
-      if (current <= threshold * 0.3) return 'critical';
-      if (current <= threshold) return 'low';
-      return '';
-    }
 
     function renderInventory() {
-      const sorted = [...inventory].sort((a, b) => (a.current / a.threshold) - (b.current / b.threshold));
       const container = document.getElementById('inventoryList');
-      container.innerHTML = sorted.map((item, i) => {
-        const stockClass = getStockClass(item.current, item.threshold);
-        const rowClass = stockClass ? `inventory-row ${stockClass === 'critical' ? 'critical' : 'low-stock'}` : 'inventory-row';
-        return `
-          <div class="${rowClass}">
-            <div>
-              <div class="item-name">${item.name}</div>
-              <div class="item-category">${item.category}</div>
-            </div>
-            <div class="stock-level ${stockClass}">${item.current} ${item.unit}</div>
-            <div class="threshold">${item.threshold} ${item.unit}</div>
-            <div class="stock-controls">
-              <button class="stock-btn minus" onclick="adjustStock(${i}, -1)">−</button>
-              <button class="stock-btn plus" onclick="adjustStock(${i}, 1)">+</button>
-            </div>
+      container.innerHTML = inventory.map((item, i) => `
+        <div class="inventory-row">
+          <div><div class="item-name">${item.name}</div><div class="item-category">${item.category}</div></div>
+          <div class="stock-level">${item.current} ${item.unit}</div>
+          <div class="threshold">${item.threshold} ${item.unit}</div>
+          <div class="stock-controls">
+            <button class="stock-btn" onclick="adjustStock(${i}, -1)">−</button>
+            <button class="stock-btn" onclick="adjustStock(${i}, 1)">+</button>
           </div>
-        `;
-      }).join('');
+        </div>
+      `).join('');
     }
 
     function adjustStock(index, delta) {
@@ -379,70 +156,174 @@
       renderInventory();
     }
 
-    function renderActivity() {
-      const container = document.getElementById('activityList');
-      container.innerHTML = activities.map(a => `
-        <div class="activity-item">
-          <div class="activity-icon ${a.type}">
-            ${a.type === 'order' ? '☕' : a.type === 'voucher' ? '🎫' : a.type === 'parcel' ? '📦' : '⚠️'}
-          </div>
-          <div>
-            <div class="activity-text">${a.text}</div>
-            <div class="activity-time">${a.time}</div>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    function renderTopSellers() {
-      const container = document.getElementById('topItems');
-      container.innerHTML = topSellers.map(item => `
-        <div class="top-item">
-          <div>
-            <div class="top-item-name">${item.name}</div>
-            <div class="top-item-bar">
-              <div class="top-item-bar-fill" style="width: ${item.percent}%"></div>
-            </div>
-          </div>
-          <div class="top-item-count">${item.count} sold</div>
-        </div>
-      `).join('');
-    }
-
+    // --- CRITICAL FIX: Auth Headers added here ---
     async function loadSalesReport() {
       try {
-        const res = await fetch('/.netlify/functions/sales-report');
+        const session = window.brewAuth.session;
+        if (!session) return; // Wait for login
+
+        const res = await fetch('/.netlify/functions/sales-report', {
+            headers: {
+                'Authorization': `Bearer ${session.access_token}`
+            }
+        });
+
+        if (res.status === 401) {
+            console.error("Token Expired or Invalid");
+            return;
+        }
+
+        if (!res.ok) throw new Error('API Error');
+        
         const data = await res.json();
-        document.getElementById('totalRevenue').textContent = '$' + (data.total_revenue / 100).toFixed(2);
-        document.getElementById('totalOrders').textContent = data.order_count;
-        document.getElementById('totalVouchers').textContent = data.vouchers_issued || 0;
-        document.getElementById('revenueChange').textContent = '↑ vs yesterday';
+        
+        // Matches SQL: COALESCE(SUM(total_amount_cents), 0) / 100.0 as gross_revenue
+        document.getElementById('totalRevenue').textContent = '$' + parseFloat(data.gross_revenue || 0).toFixed(2);
+        document.getElementById('totalOrders').textContent = data.total_orders || 0;
+        document.getElementById('revenueChange').textContent = '↑ Live Sync';
       } catch (err) {
-        console.log('Using demo data');
-        document.getElementById('totalRevenue').textContent = '$847.50';
-        document.getElementById('totalOrders').textContent = '63';
-        document.getElementById('totalVouchers').textContent = '4';
-        document.getElementById('totalParcels').textContent = '12';
-        document.getElementById('awaitingPickup').textContent = '5';
-        document.getElementById('revenueChange').textContent = '↑ 12% vs yesterday';
+        console.warn('Sales report fetch failed:', err);
+        document.getElementById('totalRevenue').textContent = '$0.00';
       }
     }
 
-    // Initialize
-    renderInventory();
-    renderActivity();
-    renderTopSellers();
-    loadSalesReport();
-  </script>
-  
-  <script src="/js/auth.js"></script>
-  <script>
-    // Protect this page - MANAGER ONLY
-    (async () => {
-      const user = await brewAuth.protectPage({ requireManager: true });
+    async function loadStaffStatus() {
+        try {
+            const client = window.brewAuth.client;
+            if (!client) return;
+
+            const { data, error } = await client
+                .from('staff_directory')
+                .select('*');
+
+            if (error) throw error;
+            
+            // Filter locally to avoid complex DB joins for now
+            const workingStaff = data.filter(s => s.is_working === true);
+            
+            document.getElementById('activeStaff').textContent = workingStaff.length;
+            document.getElementById('staffList').textContent = workingStaff.map(s => s.name).join(', ') || 'No one active';
+            
+            // Calculate labor based on 'hourly_rate'
+            const activeLabor = workingStaff.reduce((acc, curr) => acc + (parseFloat(curr.hourly_rate) || 0), 0);
+            document.getElementById('dailyLabor').textContent = '$' + activeLabor.toFixed(2);
+        } catch (e) {
+            console.error("Staff fetch failed", e);
+            document.getElementById('staffList').textContent = "Connection issue";
+        }
+    }
+
+    async function loadPayroll() {
+        try {
+            const client = window.brewAuth.client;
+            if (!client) return;
+
+            const list = document.getElementById('payroll-list');
+            let grandTotal = 0;
+
+            const [pRes, lRes] = await Promise.all([
+                client.from('staff_directory').select('*'),
+                client.from('time_logs').select('*').order('created_at', { ascending: true })
+            ]);
+
+            if (pRes.error) throw pRes.error;
+            if (lRes.error) throw lRes.error;
+
+            const employees = pRes.data || [];
+            const logs = lRes.data || [];
+
+            if (employees.length === 0) {
+                list.innerHTML = '<div style="padding: 1rem 1.5rem; color: #666;">No staff found</div>';
+                return;
+            }
+
+            list.innerHTML = '';
+
+            employees.forEach(emp => {
+                let totalHours = 0;
+                const empLogs = logs.filter(l => l.employee_email === emp.email);
+                
+                // Pair INs with OUTs
+                let startTime = null;
+                empLogs.forEach(log => {
+                    const type = (log.action_type || '').toLowerCase();
+                    if (type === 'in') {
+                        startTime = new Date(log.clock_in || log.created_at);
+                    } else if (type === 'out' && startTime) {
+                        const endTime = new Date(log.clock_out || log.created_at);
+                        totalHours += (endTime - startTime) / 3600000;
+                        startTime = null;
+                    }
+                });
+
+                const rate = parseFloat(emp.hourly_rate) || 0;
+                const earned = totalHours * rate;
+                grandTotal += earned;
+
+                const lastLog = empLogs[empLogs.length - 1];
+                const status = (lastLog?.action_type || 'OFF').toUpperCase();
+                const statusColor = status === 'IN' ? '#27ae60' : '#e74c3c';
+
+                list.innerHTML += `
+                    <div class="inventory-row" style="grid-template-columns: 2fr 1fr 1fr 1fr 100px;">
+                        <div><strong>${emp.name || 'Staff'}</strong><div style="font-size:0.75rem;color:#666;">${emp.email}</div></div>
+                        <div>$${rate.toFixed(2)}/hr</div>
+                        <div>${totalHours.toFixed(2)} hrs</div>
+                        <div style="color: #27ae60; font-weight: 600;">$${earned.toFixed(2)}</div>
+                        <div><span style="background:${statusColor}; padding:4px 10px; border-radius:12px; font-size:11px; font-weight:bold; color:white;">${status}</span></div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('grand-total').textContent = `$${grandTotal.toFixed(2)}`;
+
+        } catch (e) {
+            console.error("Payroll fetch failed", e);
+            document.getElementById('payroll-list').innerHTML = '<div style="padding: 1rem 1.5rem; color: #e74c3c;">Failed to load payroll</div>';
+        }
+    }
+
+    async function init() {
+      // 1. Wait safely for auth system to load
+      let attempts = 0;
+      while (!window.brewAuth && attempts < 50) {
+        await new Promise(r => setTimeout(r, 100));
+        attempts++;
+      }
+
+      if (!window.brewAuth) {
+          console.error("CRITICAL: /js/auth.js failed to load.");
+          return;
+      }
+
+      // 2. Protect Page - Require manager role
+      const user = await window.brewAuth.protectPage({ requiredRole: 'manager' });
       if (!user) return;
-      console.log('Manager authorized:', user.email);
-    })();
+
+      console.log("Manager Logged In:", user.email, "Role:", window.brewAuth.staff?.role);
+
+      // 3. Populate Dashboard
+      renderInventory();
+      loadSalesReport();
+      loadStaffStatus();
+      loadPayroll();
+
+      // 4. Real-time subscription - refresh sales when orders change
+      const client = window.brewAuth.client;
+      client.channel('manager-orders')
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
+          // Refresh sales report when any order status changes (especially to 'completed')
+          console.log('Order updated:', payload.new?.status);
+          loadSalesReport();
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, () => {
+          console.log('New order received');
+          loadSalesReport();
+        })
+        .subscribe();
+    }
+
+    init();
   </script>
 </body>
 </html>

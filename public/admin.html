@@ -25,6 +25,15 @@
 
     <button id="start-bot">Wake up BrewBot</button>
 
+    <script>
+      // Protect page - require admin role
+      (async function() {
+        while (!window.brewAuth) await new Promise(r => setTimeout(r, 100));
+        const user = await window.brewAuth.protectPage({ requiredRole: 'admin' });
+        if (!user) return;
+        console.log('Admin access granted:', user.email);
+      })();
+    </script>
     <script src="admin-logic.js"></script> 
 </body>
 </html>
