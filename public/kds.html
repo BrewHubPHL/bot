@@ -4,75 +4,84 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BrewHub KDS | Kitchen Display</title>
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="icon" type="image/png" href="favicon-96x96.png" sizes="96x96" />
-    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="/js/auth.js"></script>
+    
     <style>
-        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background-color: var(--bg-main); color: var(--brand-primary); }
-        h1 { font-family: var(--font-heading); color: var(--brand-primary); }
-        .btn { background-color: var(--brand-accent); color: white; }
-        .card { background: var(--card-bg); border: 1px solid var(--border-soft); transition: all 0.3s ease; }
-        .card:hover { transform: translateY(-2px); box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .stale-pulse { animation: pulse 2s infinite; color: var(--status-alert); }
+        body { background-color: #0f172a; color: #f8fafc; overflow-x: hidden; font-family: sans-serif; }
+        .stale-pulse { 
+            animation: pulse 2s infinite; 
+            border-color: #ef4444 !important; 
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+        }
+        @keyframes pulse { 
+            0%, 100% { opacity: 1; transform: scale(1); } 
+            50% { opacity: 0.8; transform: scale(0.98); } 
+        }
+        button { min-height: 70px; font-size: 1.5rem !important; transition: all 0.2s ease; cursor: pointer; }
+        button:active { transform: scale(0.95); }
     </style>
 </head>
-<body class="min-h-screen bg-slate-900 text-slate-100">
+<body class="min-h-screen">
 
     <div id="app">
         <div class="flex items-center justify-center min-h-screen">
             <div class="text-center">
-                <div class="text-4xl mb-4">☕</div>
-                <p class="text-slate-400">Booting up the espresso machine...</p>
+                <div class="text-8xl mb-6">☕</div>
+                <p class="text-3xl text-slate-400 animate-pulse">Booting up the espresso machine...</p>
             </div>
         </div>
     </div>
 
     <script>
-        // --- SUPABASE INIT ---
-        const supabase = window.supabase.createClient(
-            'https://rruionkpgswvncypweiv.supabase.co',
-            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU'
-        );
+        // --- SAFE SUPABASE INIT ---
+        var SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
+        var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
+        
+        if (!window.supabaseClient) {
+            window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        }
+        var supabase = window.supabaseClient;
 
+        // --- STATE ---
+        var orders = [];
+        var lastUpdated = new Date();
+
+        // --- HELPERS ---
+        // This was the missing piece causing your ReferenceError!
         async function authHeaders() {
             const { data: { session } } = await supabase.auth.getSession();
-            if (!session) throw new Error('Not signed in');
             return {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`
+                'Authorization': session ? `Bearer ${session.access_token}` : ''
             };
         }
 
-        // --- STATE ---
-        let orders = [];
-        let lastUpdated = new Date();
-
-        // --- HELPERS ---
         function timeAgo(date) {
-            const seconds = Math.floor((new Date() - new Date(date)) / 1000);
-            if (seconds < 60) return `${seconds}s`;
-            const minutes = Math.floor(seconds / 60);
-            if (minutes < 60) return `${minutes}m`;
-            const hours = Math.floor(minutes / 60);
-            return `${hours}h ${minutes % 60}m`;
+            var seconds = Math.floor((new Date() - new Date(date)) / 1000);
+            return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm';
         }
 
         function isStale(createdAt) {
-            return (new Date() - new Date(createdAt)) > 1000 * 60 * 15; // 15 mins
+            return (new Date() - new Date(createdAt)) > 1000 * 60 * 10;
         }
 
-        // --- FETCH ORDERS ---
+        function formatCustomizations(customs) {
+            if (!customs) return "";
+            if (typeof customs === 'string') return customs;
+            try {
+                return Object.entries(customs).map(([k, v]) => k + ": " + v).join(', ');
+            } catch(e) { return ""; }
+        }
+
+        // --- DATA FETCHING ---
         async function fetchOrders() {
             try {
-                const { data, error } = await supabase
+                console.log("KDS: Fetching active orders...");
+                var { data, error } = await supabase
                     .from('orders')
-                    .select(`*, coffee_orders (id, drink_name, customizations, status)`)
+                    .select('*, coffee_orders (*)')
                     .in('status', ['paid', 'preparing', 'ready'])
                     .order('created_at', { ascending: true });
 
@@ -80,147 +89,97 @@
                 orders = data || [];
                 lastUpdated = new Date();
                 render();
+                console.log("KDS: Success! Orders count:", orders.length);
             } catch (err) {
-                console.error("Error fetching orders:", err);
+                console.error("KDS: Fetch Error:", err);
             }
         }
 
-        // --- UPDATE STATUS ---
+        // --- STATUS UPDATE ---
         async function updateStatus(orderId, newStatus) {
             try {
+                console.log(`KDS: Requesting status change to ${newStatus}...`);
+
+                // 1. Optimistic UI update
+                orders = orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o);
+                render();
+
+                // 2. Call Netlify Function with Auth
                 const response = await fetch('/.netlify/functions/update-order-status', {
                     method: 'POST',
                     headers: await authHeaders(),
                     body: JSON.stringify({ orderId, status: newStatus })
                 });
 
-                if (!response.ok) throw new Error('Update failed');
-
-                // Optimistic update
-                orders = orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o);
-                if (newStatus === 'completed') {
-                    orders = orders.filter(o => o.id !== orderId);
+                if (!response.ok) {
+                    const errorMsg = await response.text();
+                    throw new Error(errorMsg || 'Failed to update');
                 }
-                render();
+
+                console.log("KDS: Update verified by server.");
             } catch (err) {
                 console.error("KDS Update Error:", err);
-                alert("Failed to update status. Check connection.");
+                // On error, the card will "flash" back to its real DB state
                 fetchOrders();
             }
         }
 
-        // --- RENDER ---
+        // --- UI RENDERING ---
         function render() {
-            const app = document.getElementById('app');
-            
-            const statusColors = {
-                paid: { border: 'border-emerald-500', badge: 'bg-emerald-500/10 text-emerald-400' },
-                preparing: { border: 'border-amber-500', badge: 'bg-amber-500/10 text-amber-400' },
-                ready: { border: 'border-blue-500', badge: 'bg-blue-500/10 text-blue-400' }
+            var app = document.getElementById('app');
+            var statusStyles = {
+                paid: 'border-emerald-500 bg-emerald-500/10 text-emerald-400',
+                preparing: 'border-amber-500 bg-amber-500/10 text-amber-400',
+                ready: 'border-blue-500 bg-blue-500/10 text-blue-400'
             };
 
             app.innerHTML = `
-                <div class="p-6">
-                    <!-- HEADER -->
-                    <header class="flex justify-between items-center mb-8 border-b border-slate-700 pb-4">
-                        <h1 class="text-3xl font-bold text-amber-500 tracking-tight flex items-center gap-3">
-                            <span class="text-4xl">☕</span>
-                            BrewHub <span class="text-white">KDS</span>
-                        </h1>
-                        <div class="flex items-center gap-4 text-slate-400 text-sm">
-                            <span>Last synced: ${lastUpdated.toLocaleTimeString()}</span>
-                            <button onclick="fetchOrders()" class="p-2 hover:bg-slate-700 rounded-full transition-colors" title="Refresh">
-                                🔄
-                            </button>
+                <div class="p-10">
+                    <header class="flex justify-between items-end mb-12 border-b-2 border-slate-700 pb-8">
+                        <div>
+                            <h1 class="text-6xl font-black text-amber-500 tracking-tighter uppercase">BrewHub <span class="text-white">KDS</span></h1>
+                            <p class="text-2xl text-slate-500 mt-2 font-mono italic">SYSTEM ONLINE</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-2xl text-slate-400 font-mono">${lastUpdated.toLocaleTimeString()}</p>
+                            <button onclick="fetchOrders()" class="mt-4 bg-slate-800 px-6 py-2 rounded-xl text-2xl hover:bg-slate-700">🔄 SYNC</button>
                         </div>
                     </header>
 
-                    <!-- ORDER GRID -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-10">
                         ${orders.length === 0 ? `
-                            <div class="col-span-full text-center py-20 opacity-50">
-                                <h2 class="text-2xl mb-2">All caught up! 🎉</h2>
-                                <p>Time to wipe down the counters.</p>
+                            <div class="col-span-full text-center py-60 opacity-20">
+                                <h2 class="text-6xl font-black italic">NO ORDERS IN QUEUE</h2>
                             </div>
                         ` : orders.map(order => {
-                            const colors = statusColors[order.status] || { border: 'border-slate-600', badge: 'bg-slate-700 text-slate-300' };
-                            const stale = isStale(order.created_at) && order.status !== 'ready';
+                            var style = statusStyles[order.status] || 'border-slate-500';
+                            var stale = isStale(order.created_at) && order.status !== 'ready';
                             
                             return `
-                                <div class="card bg-slate-800 rounded-xl border-l-4 ${colors.border} shadow-xl overflow-hidden ${stale ? 'stale-pulse' : ''}">
-                                    <!-- CARD HEADER -->
-                                    <div class="p-4 bg-slate-800/50 border-b border-slate-700 flex justify-between items-start">
+                                <div class="bg-slate-800 rounded-[2rem] border-t-[12px] shadow-2xl flex flex-col h-full ${style} ${stale ? 'stale-pulse' : ''}">
+                                    <div class="p-8 border-b border-slate-700 flex justify-between items-start">
                                         <div>
-                                            <h3 class="font-bold text-lg text-white">
-                                                ${order.customer_name || 'Guest'}
-                                            </h3>
-                                            <div class="flex items-center gap-2 text-xs font-mono text-slate-400 mt-1">
-                                                <span>#${order.id.slice(0, 4)}</span>
-                                                <span>•</span>
-                                                <span>🕐 ${timeAgo(order.created_at)} ago</span>
-                                            </div>
+                                            <h3 class="text-4xl font-black text-white leading-none">${order.customer_name || 'Guest'}</h3>
+                                            <p class="text-2xl font-mono text-slate-400 mt-3">${timeAgo(order.created_at)} ago</p>
                                         </div>
-                                        <span class="px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${colors.badge}">
-                                            ${order.status}
-                                        </span>
+                                        <span class="text-lg font-bold uppercase px-4 py-1 rounded-lg ${style}">${order.status}</span>
                                     </div>
-
-                                    <!-- DRINK LIST -->
-                                    <div class="p-4 space-y-3">
+                                    <div class="p-8 flex-grow space-y-6">
                                         ${(order.coffee_orders || []).map(item => `
-                                            <div class="flex items-start gap-3">
-                                                <div class="mt-2">
-                                                    <div class="w-2 h-2 rounded-full bg-slate-500"></div>
-                                                </div>
-                                                <div>
-                                                    <p class="text-slate-200 font-medium text-lg leading-tight">
-                                                        ${item.drink_name || 'Drink'}
-                                                    </p>
-                                                    ${item.customizations ? `
-                                                        <p class="text-amber-400/80 text-sm mt-0.5">
-                                                            ${Array.isArray(item.customizations) 
-                                                                ? item.customizations.join(', ') 
-                                                                : (typeof item.customizations === 'object' 
-                                                                    ? Object.entries(item.customizations).map(([k,v]) => k + ': ' + v).join(', ')
-                                                                    : item.customizations)}
-                                                        </p>
-                                                    ` : ''}
-                                                </div>
+                                            <div class="border-l-4 border-amber-500/30 pl-4">
+                                                <p class="text-4xl font-bold text-slate-100">${item.drink_name}</p>
+                                                <p class="text-2xl text-amber-400 font-medium mt-1 leading-tight">${formatCustomizations(item.customizations)}</p>
                                             </div>
                                         `).join('')}
-                                        ${(!order.coffee_orders || order.coffee_orders.length === 0) ? `
-                                            <p class="text-slate-500 italic">No items listed</p>
-                                        ` : ''}
                                     </div>
-
-                                    <!-- FOOTER ACTIONS -->
-                                    <div class="p-3 bg-slate-900/30 border-t border-slate-700">
-                                        ${order.status === 'paid' ? `
-                                            <button onclick="updateStatus('${order.id}', 'preparing')"
-                                                class="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold transition-all">
-                                                ▶️ Start Order
-                                            </button>
-                                        ` : ''}
-                                        ${order.status === 'preparing' ? `
-                                            <button onclick="updateStatus('${order.id}', 'ready')"
-                                                class="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold transition-all shadow-lg shadow-amber-900/20">
-                                                🔔 Order Up!
-                                            </button>
-                                        ` : ''}
-                                        ${order.status === 'ready' ? `
-                                            <button onclick="updateStatus('${order.id}', 'completed')"
-                                                class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold transition-all">
-                                                ✅ Picked Up
-                                            </button>
-                                        ` : ''}
+                                    <div class="p-8 bg-slate-900/40 rounded-b-[2rem]">
+                                        ${order.status === 'paid' ? 
+                                            `<button onclick="updateStatus('${order.id}', 'preparing')" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black shadow-lg">START PREPARING</button>` : 
+                                          order.status === 'preparing' ? 
+                                            `<button onclick="updateStatus('${order.id}', 'ready')" class="w-full bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black shadow-lg">ORDER UP!</button>` : 
+                                            `<button onclick="updateStatus('${order.id}', 'completed')" class="w-full bg-slate-600 hover:bg-slate-500 text-white rounded-2xl font-black">COMPLETED</button>`
+                                        }
                                     </div>
-
-                                    <!-- LATE WARNING -->
-                                    ${stale ? `
-                                        <div class="bg-red-500/20 text-red-200 text-xs py-2 text-center font-bold">
-                                            ⚠️ Running Late (>15m)
-                                        </div>
-                                    ` : ''}
                                 </div>
                             `;
                         }).join('')}
@@ -229,20 +188,16 @@
             `;
         }
 
-        // --- INIT ---
+        // --- STARTUP ---
         fetchOrders();
 
-        // Realtime subscription
-        supabase
-            .channel('kds-live')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-                console.log("Order change detected!");
-                fetchOrders();
-            })
+        // Subscriptions
+        supabase.channel('kds-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'coffee_orders' }, () => fetchOrders())
             .subscribe();
 
-        // Auto-refresh timer display every 30s
-        setInterval(() => render(), 30000);
+        setInterval(render, 30000);
     </script>
 </body>
 </html>
