@@ -47,7 +47,7 @@ exports.handler = async (event) => {
     const { data: staffMember } = await supabase
       .from('staff_directory')
       .select('*')
-      .eq('email', user.email.toLowerCase()) // Force lowercase match
+      .ilike('email', user.email) // Case-insensitive match
       .maybeSingle();
 
     if (!staffMember) {
@@ -78,6 +78,16 @@ exports.handler = async (event) => {
     const { error: insertError } = await supabase.from('time_logs').insert([payload]);
 
     if (insertError) throw insertError;
+
+    // 7. UPDATE is_working STATUS
+    const { error: updateError } = await supabase
+      .from('staff_directory')
+      .update({ is_working: action_type === 'in' })
+      .ilike('email', employee_email);
+
+    if (updateError) {
+      console.error('[LOG-TIME] Failed to update is_working:', updateError);
+    }
 
     return {
       statusCode: 200,
