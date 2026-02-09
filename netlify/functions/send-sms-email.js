@@ -35,51 +35,58 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { recipient_name, phone, carrier, tracking } = JSON.parse(event.body || '{}');
+    const { recipient_name, phone, tracking } = JSON.parse(event.body || '{}');
 
-    if (!phone || !carrier) {
-      return json(400, { error: 'Missing phone or carrier' });
+    if (!phone) {
+      return json(400, { error: 'Missing phone number' });
     }
 
-    const gateways = {
-      'verizon': '@vtext.com',
-      'xfinity': '@vtext.com',
-      'att': '@txt.att.net',
-      'tmobile': '@tmomail.net',
-      'googlefi': '@msg.fi.google.com',
-      'cricket': '@sms.cricketwireless.net'
-    };
+    // Format phone number to E.164 (+1XXXXXXXXXX)
+    const cleanPhone = phone.replace(/\D/g, '');
+    const formattedPhone = cleanPhone.startsWith('1') ? `+${cleanPhone}` : `+1${cleanPhone}`;
 
-    const gateway = gateways[carrier.toLowerCase()];
-    if (!gateway) {
-      return json(400, { error: `Unknown carrier: ${carrier}` });
+    const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking || 'Parcel'}) is at the Hub. 📦 Grab a coffee when you swing by! Reply STOP to opt out.`;
+
+    // Use Twilio API
+    const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+    const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+    const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
+
+    if (!twilioSid || !twilioToken || !twilioPhone) {
+      console.error('[SEND-SMS] Missing Twilio credentials');
+      return json(500, { error: 'SMS not configured' });
     }
 
-    const smsAddress = `${phone.replace(/\D/g, '')}${gateway}`;
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+    const authHeader = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
 
-    const res = await fetch('https://api.resend.com/emails', {
+    const res = await fetch(twilioUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
+        'Authorization': `Basic ${authHeader}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify({
-        from: 'BrewHub Alerts <alerts@brewhubphl.com>',
-        to: [smsAddress],
-        subject: '',
-        text: `Yo ${recipient_name}! Your package (${tracking || 'Parcel'}) is at the Hub. 📦 Grab a coffee when you swing by! Reply STOP to opt out.`,
-      }),
+      body: new URLSearchParams({
+        From: twilioPhone,
+        To: formattedPhone,
+        Body: message
+      }).toString()
     });
 
     const data = await res.json();
+
+    if (!res.ok) {
+      console.error('[SEND-SMS] Twilio error:', data);
+      return json(res.status, { error: data.message || 'SMS failed', code: data.code });
+    }
     
     return {
-      statusCode: res.status,
+      statusCode: 200,
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ success: res.ok, id: data.id })
+      body: JSON.stringify({ success: true, sid: data.sid, status: data.status })
     };
   } catch (error) {
-    console.error('[SEND-SMS-EMAIL] Error:', error);
+    console.error('[SEND-SMS] Error:', error);
     return json(500, { error: 'Send failed' });
   }
 };

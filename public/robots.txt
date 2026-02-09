@@ -8,4 +8,20 @@ Disallow: /thank-you.html
 Disallow: /portal.html
 Disallow: /.netlify/
 
+# AI Crawlers Welcome
+User-agent: GPTBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
 Sitemap: https://brewhubphl.com/sitemap.xml
