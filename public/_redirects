@@ -8,6 +8,7 @@
 /manager.html      /manager.html     200
 /admin.html        /admin.html       200
 /shop.html         /shop.html        200
+/checkout.html     /checkout.html    200
 /thank-you.html    /thank-you.html   200
 
 # Apple Pay domain verification (must be before SPA catch-all)

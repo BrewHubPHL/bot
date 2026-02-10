@@ -1,0 +1,193 @@
+const { SquareClient, SquareEnvironment } = require('square');
+const { createClient } = require('@supabase/supabase-js');
+const { randomUUID } = require('crypto');
+const { checkQuota } = require('./_usage');
+
+const square = new SquareClient({
+  token: process.env.SQUARE_PRODUCTION_TOKEN,
+  environment: SquareEnvironment.Production,
+});
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+exports.handler = async (event) => {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  };
+
+  // CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
+
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+  }
+
+  // Rate limiting
+  const isUnderLimit = await checkQuota('square_checkout');
+  if (!isUnderLimit) {
+    return { 
+      statusCode: 429, 
+      headers, 
+      body: JSON.stringify({ error: 'Too many requests. Please try again in a few minutes.' }) 
+    };
+  }
+
+  try {
+    const { cart, sourceId, customerEmail, customerName, shippingAddress } = JSON.parse(event.body || '{}');
+
+    // Validate required fields
+    if (!cart || !Array.isArray(cart) || cart.length === 0) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Cart is empty' }) };
+    }
+
+    if (!sourceId) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Payment source required' }) };
+    }
+
+    // Server-side price lookup — NEVER trust client prices
+    const productIds = cart.map(item => item.id).filter(Boolean);
+    const productNames = cart.map(item => item.name).filter(Boolean);
+    
+    const { data: dbProducts, error: dbErr } = await supabase
+      .from('merch_products')
+      .select('id, name, price_cents')
+      .eq('is_active', true)
+      .or(`id.in.(${productIds.join(',')}),name.in.(${productNames.map(n => `"${n}"`).join(',')})`);
+
+    if (dbErr) {
+      console.error('DB lookup error:', dbErr);
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to validate products' }) };
+    }
+
+    // Build price lookup maps
+    const priceById = {};
+    const priceByName = {};
+    for (const p of (dbProducts || [])) {
+      if (p.id) priceById[p.id] = p.price_cents;
+      if (p.name) priceByName[p.name] = p.price_cents;
+    }
+
+    // Calculate total with server prices
+    let totalCents = 0;
+    const lineItems = [];
+
+    for (const item of cart) {
+      const serverPrice = priceById[item.id] || priceByName[item.name];
+      
+      if (serverPrice === undefined) {
+        return { 
+          statusCode: 400, 
+          headers, 
+          body: JSON.stringify({ error: `Product not found: ${item.name || item.id}` }) 
+        };
+      }
+
+      const qty = Math.max(1, parseInt(item.quantity) || 1);
+      totalCents += serverPrice * qty;
+
+      lineItems.push({
+        name: item.name,
+        quantity: qty.toString(),
+        basePriceMoney: { amount: BigInt(serverPrice), currency: 'USD' },
+      });
+    }
+
+    if (totalCents <= 0) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid order total' }) };
+    }
+
+    const idempotencyKey = randomUUID();
+    const referenceId = `MERCH-${Date.now()}-${randomUUID().slice(0, 8)}`;
+
+    // Create Square Payment
+    const paymentResponse = await square.payments.create({
+      idempotencyKey,
+      sourceId,
+      amountMoney: {
+        amount: BigInt(totalCents),
+        currency: 'USD',
+      },
+      locationId: process.env.SQUARE_LOCATION_ID,
+      referenceId,
+      note: `BrewHub Merch Order: ${lineItems.map(i => `${i.quantity}x ${i.name}`).join(', ')}`,
+      buyerEmailAddress: customerEmail || undefined,
+    });
+
+    const payment = paymentResponse.result?.payment;
+
+    if (!payment || payment.status === 'FAILED') {
+      console.error('Payment failed:', paymentResponse);
+      return { 
+        statusCode: 400, 
+        headers, 
+        body: JSON.stringify({ error: 'Payment failed. Please try again.' }) 
+      };
+    }
+
+    // Store order in Supabase
+    const orderData = {
+      id: referenceId,
+      type: 'merch',
+      status: payment.status === 'COMPLETED' ? 'paid' : 'pending',
+      total_amount_cents: totalCents,
+      payment_id: payment.id,
+      customer_email: customerEmail || null,
+      customer_name: customerName || null,
+      shipping_address: shippingAddress || null,
+      items: lineItems.map(i => ({ name: i.name, quantity: parseInt(i.quantity), price_cents: Number(i.basePriceMoney.amount) })),
+      created_at: new Date().toISOString(),
+    };
+
+    const { error: insertErr } = await supabase
+      .from('orders')
+      .insert(orderData);
+
+    if (insertErr) {
+      console.error('Order insert error:', insertErr);
+      // Payment succeeded but order insert failed - log for manual reconciliation
+      // Don't fail the response since payment went through
+    }
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        orderId: referenceId,
+        paymentId: payment.id,
+        status: payment.status,
+        receiptUrl: payment.receiptUrl,
+      }),
+    };
+
+  } catch (err) {
+    console.error('Payment processing error:', err);
+    
+    // Handle Square-specific errors
+    if (err.result?.errors) {
+      const squareError = err.result.errors[0];
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ 
+          error: squareError.detail || 'Payment declined',
+          code: squareError.code 
+        }),
+      };
+    }
+
+    return { 
+      statusCode: 500, 
+      headers, 
+      body: JSON.stringify({ error: 'Payment processing failed' }) 
+    };
+  }
+};

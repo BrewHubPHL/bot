@@ -8,11 +8,11 @@ const client = new SquareClient({
 });
 
 const registerDomains = async () => {
-  // 2. Add all variations of your domain
-  // Note: www subdomain removed - Square can't follow redirects
+  // Only register the production domain
+  // www redirects to apex (Square can't follow redirects)
+  // Netlify subdomain not needed for Apple Pay
   const domains = [
-    'brewhubphl.com',
-    'brewhubphl.netlify.app'
+    'brewhubphl.com'
   ];
 
   console.log("🍏 Starting Apple Pay Domain Registration...");
@@ -24,7 +24,9 @@ const registerDomains = async () => {
       });
       
       console.log(`✅ Success: ${domain} is now verified for Apple Pay.`);
-      console.log(`   Status: ${response.result.status}`);
+      if (response?.result?.status) {
+        console.log(`   Status: ${response.result.status}`);
+      }
       
     } catch (error) {
       console.error(`❌ Failed to register ${domain}:`);
