@@ -57,6 +57,27 @@ app.post('/test/square-sync', async (req, res) => {
     }
 });
 
+// Test route for tool-check-waitlist
+app.post('/test/check-waitlist', async (req, res) => {
+    console.log("Testing tool-check-waitlist...");
+    
+    const { handler } = require('./netlify/functions/tool-check-waitlist.js');
+    
+    const event = {
+        httpMethod: 'POST',
+        body: JSON.stringify(req.body)
+    };
+
+    try {
+        const response = await handler(event);
+        console.log("Response:", response);
+        res.status(response.statusCode).json(JSON.parse(response.body));
+    } catch (err) {
+        console.error("Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`\n---------------------------------------------------------`);
     console.log(`🚀 Local Server Running!`);

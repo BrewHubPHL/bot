@@ -35,18 +35,16 @@ async function executeTool(toolName, toolInput, supabase) {
         try {
             const { data, error } = await supabase
                 .from('waitlist')
-                .select('name, created_at')
+                .select('email, created_at')
                 .eq('email', email.toLowerCase().trim())
                 .maybeSingle();
 
             if (error) throw error;
 
             if (data) {
-                const name = data.name || 'friend';
                 return { 
                     found: true, 
-                    name,
-                    result: `Found on waitlist: ${name} (${email})` 
+                    result: `Found on waitlist: ${email}` 
                 };
             } else {
                 return { 

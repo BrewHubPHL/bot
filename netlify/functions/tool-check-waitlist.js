@@ -33,10 +33,9 @@ exports.handler = async (event) => {
     }
 
     // 3. Query Supabase
-    // We assume the table is named 'waitlist' and has an 'email' column
     const { data, error } = await supabase
       .from('waitlist')
-      .select('name, created_at')
+      .select('email, created_at')
       .eq('email', email.toLowerCase().trim())
       .maybeSingle(); // Returns null if not found, instead of throwing an error
 
@@ -45,11 +44,10 @@ exports.handler = async (event) => {
     // 4. Formulate the response for Elise
     if (data) {
       // User IS on the list
-      const name = data.name || "friend";
       return {
         statusCode: 200,
         body: JSON.stringify({ 
-          result: `Yes! I found you on the list, ${name}. You are all set for updates.` 
+          result: `Yes! I found you on the list. You're all set for updates.` 
         })
       };
     } else {
