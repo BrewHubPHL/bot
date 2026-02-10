@@ -1,12 +1,6 @@
 const { checkQuota } = require('./_usage');
 const { createClient } = require('@supabase/supabase-js');
 
-// Initialize Supabase for tool calls
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
 // Tool definitions for Claude
 const TOOLS = [
     {
@@ -26,12 +20,16 @@ const TOOLS = [
 ];
 
 // Execute tool calls
-async function executeTool(toolName, toolInput) {
+async function executeTool(toolName, toolInput, supabase) {
     if (toolName === 'check_waitlist') {
         const { email } = toolInput;
         
         if (!email) {
             return { result: 'I need an email address to check the waitlist.' };
+        }
+
+        if (!supabase) {
+            return { result: 'Unable to check the waitlist right now.' };
         }
 
         try {
@@ -104,6 +102,15 @@ exports.handler = async (event) => {
     }
 
     try {
+        // Initialize Supabase for tool calls (inside handler to ensure env vars are ready)
+        let supabase = null;
+        if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+            supabase = createClient(
+                process.env.SUPABASE_URL,
+                process.env.SUPABASE_SERVICE_ROLE_KEY
+            );
+        }
+
         let userText = "Hello";
         let conversationHistory = [];
         if (event.body) {
@@ -155,12 +162,12 @@ exports.handler = async (event) => {
                         console.log(`Tool call: ${toolUseBlock.name}`, toolUseBlock.input);
                         
                         // Execute the tool
-                        const toolResult = await executeTool(toolUseBlock.name, toolUseBlock.input);
+                        const toolResult = await executeTool(toolUseBlock.name, toolUseBlock.input, supabase);
                         
                         // Add assistant's tool_use response and our tool_result to messages
                         messages.push({ role: 'assistant', content: claudeData.content });
                         messages.push({ 
-                            role: 'user', 
+                            role: 'user',
                             content: [{ 
                                 type: 'tool_result', 
                                 tool_use_id: toolUseBlock.id, 

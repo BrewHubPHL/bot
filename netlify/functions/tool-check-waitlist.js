@@ -1,16 +1,25 @@
 const { createClient } = require('@supabase/supabase-js');
 
-// Initialize Supabase
-const supabase = createClient(
-  process.env.SUPABASE_URL, 
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
 exports.handler = async (event) => {
   // 1. Only allow POST requests (standard for ElevenLabs tools)
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
+
+  // Check env vars
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+    return { 
+      statusCode: 200, 
+      body: JSON.stringify({ result: "I'm having trouble accessing the list right now. Please try again later." }) 
+    };
+  }
+
+  // Initialize Supabase inside handler
+  const supabase = createClient(
+    process.env.SUPABASE_URL, 
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
 
   try {
     // 2. Parse the email from the agent
@@ -54,7 +63,7 @@ exports.handler = async (event) => {
     }
 
   } catch (err) {
-    console.error("Check Waitlist Error:", err);
+    console.error("Check Waitlist Error:", err.message, err.code, err.details);
     return { 
       statusCode: 200, 
       body: JSON.stringify({ result: "I'm having trouble accessing the list right now. Please try again later." }) 
