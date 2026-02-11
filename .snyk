@@ -7,6 +7,7 @@ exclude:
     - snyk-results.json
     - node_modules/**
     - .scannerwork/**
+    - local-server.js
 
 # Ignore false positives for Supabase Anon Keys (public by design)
 ignore:
@@ -22,4 +23,8 @@ ignore:
         expires: 2027-02-10T00:00:00.000Z
     - 'rewards/index.html':
         reason: 'Supabase Anon Key is public by design - not a secret'
+        expires: 2027-02-10T00:00:00.000Z
+  'javascript/DOMXSS':
+    - 'public/shop.html':
+        reason: 'All user input is sanitized via escapeHtml() before innerHTML'
         expires: 2027-02-10T00:00:00.000Z

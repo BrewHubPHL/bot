@@ -36,20 +36,17 @@
             statusEl.textContent = 'Active';
             statusEl.className = 'active';
             micEl.textContent = 'Listening...';
-            console.log('[ADMIN] BrewBot activated');
         } else {
             startBtn.textContent = 'Wake up BrewBot';
             startBtn.style.background = '';
             statusEl.textContent = 'Sleeping';
             statusEl.className = '';
             micEl.textContent = 'Ready';
-            console.log('[ADMIN] BrewBot deactivated');
         }
     });
 
     // Initial state
     if (await checkManagerAccess()) {
         statusEl.textContent = 'Sleeping';
-        console.log('[ADMIN] Dashboard loaded');
     }
 })();

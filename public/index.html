@@ -122,11 +122,12 @@
     </style>
 </head>
 <body>
+    <a href="#main-content" class="skip-link" style="position:absolute;top:-40px;left:0;background:#000;color:#fff;padding:8px;z-index:100;transition:top 0.3s;" onfocus="this.style.top='0'" onblur="this.style.top='-40px'">Skip to main content</a>
 
-    <div id="splash-overlay"><img src="logo.png" style="width:120px;"></div>
+    <div id="splash-overlay"><img src="logo.png" alt="BrewHub PHL logo" style="width:120px;"></div>
 
     <header>
-        <img src="logo.png" id="logo">
+        <img src="logo.png" id="logo" alt="BrewHub PHL">
         <button id="staff-tab">STAFF</button>
     </header>
 
@@ -309,7 +310,12 @@
                     onDisconnect: () => { activeSession = null; btn.innerText = "🎤 VOICE CHAT"; },
                     onMessage: (m) => {
                         if (m.message) {
-                            box.innerHTML += `<div><b>${m.source === 'user' ? 'You' : 'Elise'}:</b> ${m.message}</div>`;
+                            const msgDiv = document.createElement('div');
+                            const bTag = document.createElement('b');
+                            bTag.textContent = m.source === 'user' ? 'You:' : 'Elise:';
+                            msgDiv.appendChild(bTag);
+                            msgDiv.appendChild(document.createTextNode(' ' + m.message));
+                            box.appendChild(msgDiv);
                             box.scrollTop = box.scrollHeight;
                         }
                     }
@@ -321,7 +327,12 @@
             const input = document.getElementById('user-text'), box = document.getElementById('chat-box');
             if (!input.value.trim()) return;
             const text = input.value;
-            box.innerHTML += `<div><b>You:</b> ${text}</div>`;
+            const userDiv = document.createElement('div');
+            const userB = document.createElement('b');
+            userB.textContent = 'You:';
+            userDiv.appendChild(userB);
+            userDiv.appendChild(document.createTextNode(' ' + text));
+            box.appendChild(userDiv);
             input.value = '';
             try {
                 const resp = await fetch('/.netlify/functions/claude-chat', {
@@ -334,7 +345,12 @@
                     })
                 });
                 const data = await resp.json();
-                box.innerHTML += `<div><b>Elise:</b> ${data.reply}</div>`;
+                const replyDiv = document.createElement('div');
+                const replyB = document.createElement('b');
+                replyB.textContent = 'Elise:';
+                replyDiv.appendChild(replyB);
+                replyDiv.appendChild(document.createTextNode(' ' + data.reply));
+                box.appendChild(replyDiv);
                 box.scrollTop = box.scrollHeight;
                 // Update history for next message
                 chatHistory.push({ role: 'user', content: text });

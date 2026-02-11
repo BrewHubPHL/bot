@@ -1,5 +1,6 @@
 const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
+const { authorize } = require('./_auth');
 
 // 1. Initialize Square for Production using your Netlify variables
 const client = new SquareClient({
@@ -18,6 +19,10 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
+
+  // Require staff authentication for terminal checkout
+  const auth = await authorize(event);
+  if (!auth.ok) return auth.response;
 
   const { orderId, deviceId } = JSON.parse(event.body || '{}');
 
