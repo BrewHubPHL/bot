@@ -38,31 +38,7 @@
                 <button type="button" onclick="handleForgotPassword()" style="color:#666; font-size:0.85rem; background:none; border:none; cursor:pointer; text-decoration:underline;">Forgot password?</button>
             </p>
             <p style="margin-top:10px; text-align:center;">
-                <button type="button" onclick="showRegister(event)" style="color:var(--dark); background:none; border:none; cursor:pointer;">New resident? <strong>Register here</strong></button>
-            </p>
-        </div>
-
-        <div id="register-form" class="hidden" role="form" aria-labelledby="register-heading">
-            <p id="register-heading">Register for package tracking & coffee rewards.</p>
-            <label for="reg-name" class="visually-hidden">Full Name (required)</label>
-            <input type="text" id="reg-name" placeholder="Full Name *" required aria-required="true" />
-            <label for="reg-address" class="visually-hidden">Unit number or Address (required)</label>
-            <input type="text" id="reg-address" placeholder="Unit # or Address *" required aria-required="true" />
-            <label for="reg-email" class="visually-hidden">Email address (required)</label>
-            <input type="email" id="reg-email" placeholder="Email *" required autocomplete="email" aria-required="true" />
-            <label for="reg-password" class="visually-hidden">Password, minimum 6 characters (required)</label>
-            <input type="password" id="reg-password" placeholder="Password (min 6 characters) *" required autocomplete="new-password" aria-required="true" />
-            <label for="reg-password-confirm" class="visually-hidden">Confirm Password (required)</label>
-            <input type="password" id="reg-password-confirm" placeholder="Confirm Password *" required autocomplete="new-password" aria-required="true" />
-            <label for="reg-phone" class="visually-hidden">Phone number for text alerts (optional)</label>
-            <input type="tel" id="reg-phone" placeholder="Phone (optional - for text alerts)" />
-            <label style="display:flex; align-items:center; gap:8px; margin-bottom:15px; font-size:0.9rem;">
-                <input type="checkbox" id="reg-sms-opt-in" /> Text me when my packages arrive
-            </label>
-            <button id="register-btn" onclick="handleRegister()">Register</button>
-            <p id="register-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;" role="status" aria-live="polite"></p>
-            <p style="margin-top:20px; text-align:center;">
-                <button type="button" onclick="showLogin(event)" style="color:var(--dark); background:none; border:none; cursor:pointer;">Already registered? <strong>Log in</strong></button>
+                <a href="/resident.html" style="color:var(--dark); text-decoration:none;">New resident? <strong>Register here</strong></a>
             </p>
         </div>
 
@@ -120,9 +96,6 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
         const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // Flag to prevent onAuthStateChange from firing during registration
-        let isRegistering = false;
-
         // 2. CHECK SESSION ON LOAD
         async function init() {
             // Listen for auth state changes
@@ -137,10 +110,6 @@
                 }
                 
                 if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
-                    // Skip if we're in the middle of registration (handleRegister will call showDashboard)
-                    if (isRegistering) return;
-                    
-                    // Otherwise show dashboard
                     showDashboard(session.user);
                 }
             });
@@ -149,23 +118,8 @@
 
         function showPasswordSetup(user) {
             document.getElementById('login-form').classList.add('hidden');
-            document.getElementById('register-form').classList.add('hidden');
             document.getElementById('dashboard-view').classList.add('hidden');
             document.getElementById('set-password-form').classList.remove('hidden');
-        }
-
-        // 3. LOGIN/REGISTER TOGGLE
-        function showRegister(e) {
-            if (e) e.preventDefault();
-            document.getElementById('login-form').classList.add('hidden');
-            document.getElementById('register-form').classList.remove('hidden');
-            return false;
-        }
-        function showLogin(e) {
-            if (e) e.preventDefault();
-            document.getElementById('register-form').classList.add('hidden');
-            document.getElementById('login-form').classList.remove('hidden');
-            return false;
         }
 
         // 4. LOGIN LOGIC (Password)
@@ -256,132 +210,6 @@
             showDashboard(data.user);
         }
 
-        // 6. REGISTER LOGIC (email + password)
-        async function handleRegister() {
-            const name = document.getElementById('reg-name').value.trim();
-            const address = document.getElementById('reg-address').value.trim();
-            const email = document.getElementById('reg-email').value.trim();
-            const password = document.getElementById('reg-password').value;
-            const confirmPassword = document.getElementById('reg-password-confirm').value;
-            const phone = document.getElementById('reg-phone').value.trim() || null;
-            const smsOptIn = document.getElementById('reg-sms-opt-in').checked;
-            const msg = document.getElementById('register-msg');
-            const btn = document.getElementById('register-btn');
-
-            if (!name || !address || !email || !password) {
-                msg.innerText = "Please fill in all required fields.";
-                return;
-            }
-
-            if (password.length < 6) {
-                msg.innerText = "Password must be at least 6 characters.";
-                return;
-            }
-
-            if (password !== confirmPassword) {
-                msg.innerText = "Passwords don't match.";
-                return;
-            }
-
-            msg.innerText = "Registering...";
-            btn.disabled = true;
-            isRegistering = true;
-
-            // Create auth user with password
-            console.log('[SIGNUP] Attempting signUp for:', email);
-            const { data, error: authError } = await sb.auth.signUp({
-                email,
-                password
-            });
-            
-            console.log('[SIGNUP] Result:', { data, authError });
-
-            if (authError) {
-                isRegistering = false;
-                btn.disabled = false;
-                console.error('[SIGNUP] Auth error:', authError);
-                msg.innerText = "Error: " + authError.message;
-                return;
-            }
-            
-            // No user created = something went wrong silently
-            if (!data.user) {
-                isRegistering = false;
-                btn.disabled = false;
-                msg.innerText = "Signup failed. Please try again.";
-                return;
-            }
-
-            // Check if email confirmation is required (no session returned)
-            const needsEmailConfirmation = !data.session;
-
-            // If we have a session, create customer record now
-            if (data.session?.access_token) {
-                const createRes = await fetch('/.netlify/functions/create-customer', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${data.session.access_token}`
-                    },
-                    body: JSON.stringify({
-                        email,
-                        name,
-                        address,
-                        phone,
-                        sms_opt_in: smsOptIn
-                    })
-                });
-
-                const createResult = await createRes.json();
-
-                if (!createRes.ok) {
-                    isRegistering = false;
-                    btn.disabled = false;
-                    console.error("DB error:", createResult);
-                    // Don't scare user - account is created, just profile issue
-                    if (needsEmailConfirmation) {
-                        msg.innerHTML = `
-                            <div style="background:#d4edda; padding:15px; border-radius:8px; text-align:center;">
-                                <strong>📧 Check your email!</strong><br><br>
-                                We sent a confirmation link to <strong>${email}</strong><br><br>
-                                Click the link, then come back here to log in.
-                            </div>
-                        `;
-                    } else {
-                        msg.innerText = "Account created! Please log in.";
-                    }
-                    return;
-                }
-            } else {
-                // Store pending profile until the user confirms email and logs in
-                localStorage.setItem('pending_customer_profile', JSON.stringify({
-                    email,
-                    name,
-                    address,
-                    phone,
-                    sms_opt_in: smsOptIn
-                }));
-            }
-
-            // If email confirmation required, show clear instructions
-            if (needsEmailConfirmation) {
-                isRegistering = false;
-                btn.disabled = false;
-                msg.innerHTML = `
-                    <div style="background:#d4edda; padding:15px; border-radius:8px; text-align:center;">
-                        <strong>📧 Check your email!</strong><br><br>
-                        We sent a confirmation link to <strong>${email}</strong><br><br>
-                        Click the link, then come back here to log in.
-                    </div>
-                `;
-                return;
-            }
-
-            // Show dashboard after customer record is created
-            isRegistering = false;
-            btn.disabled = false;
-            showDashboard(data.user);
-        }
 
         async function handleLogout() {
             await sb.auth.signOut();
