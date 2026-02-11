@@ -10,3 +10,7 @@ netlify-debug.log
 
 # Temp files
 supabase/.temp/
+
+# Scanner artifacts
+.scannerwork/
+snyk-results.json
