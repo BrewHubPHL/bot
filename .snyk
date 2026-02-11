@@ -1,0 +1,25 @@
+# Snyk policy file
+# https://docs.snyk.io/snyk-cli/commands/policy
+version: v1.25.0
+
+exclude:
+  global:
+    - snyk-results.json
+    - node_modules/**
+    - .scannerwork/**
+
+# Ignore false positives for Supabase Anon Keys (public by design)
+ignore:
+  'javascript/HardcodedNonCryptoSecret':
+    - 'public/js/auth.js':
+        reason: 'Supabase Anon Key is public by design - not a secret'
+        expires: 2027-02-10T00:00:00.000Z
+    - 'public/login.html':
+        reason: 'Supabase Anon Key is public by design - not a secret'
+        expires: 2027-02-10T00:00:00.000Z
+    - 'public/portal.html':
+        reason: 'Supabase Anon Key is public by design - not a secret'
+        expires: 2027-02-10T00:00:00.000Z
+    - 'rewards/index.html':
+        reason: 'Supabase Anon Key is public by design - not a secret'
+        expires: 2027-02-10T00:00:00.000Z
