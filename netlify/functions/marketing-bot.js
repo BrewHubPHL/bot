@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { checkQuota } = require('./_usage');
+const { verifyServiceSecret } = require('./_auth');
 
 // Initialize Supabase
 const supabase = createClient(
@@ -19,11 +20,9 @@ exports.handler = async (event) => {
     return { statusCode: 429, body: "Quota exceeded" };
   }
 
-  // 2. Auth Guard
-  const incomingSecret = event.headers?.['x-brewhub-secret'];
-  if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
-    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
-  }
+  // 2. Auth Guard (timing-safe comparison with null guard)
+  const serviceAuth = verifyServiceSecret(event);
+  if (!serviceAuth.valid) return serviceAuth.response;
 
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const today = days[new Date().getDay()];

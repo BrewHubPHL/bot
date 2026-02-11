@@ -1,10 +1,22 @@
 const { createClient } = require('@supabase/supabase-js');
+const crypto = require('node:crypto');
 const { validateWebhookSource, getClientIP } = require('./_ip-guard');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ */
+function safeCompare(a, b) {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 exports.handler = async (event) => {
   // 1. Security Layer 1: IP Allowlist (Defense in Depth)
@@ -15,10 +27,11 @@ exports.handler = async (event) => {
   }
 
   // 2. Security Layer 2: Shared Secret (Primary Auth)
+  // Uses timing-safe comparison with null guard
   const incomingSecret = event.headers['x-brewhub-secret'];
   const localSecret = process.env.SUPABASE_WEBHOOK_SECRET || process.env.INTERNAL_SYNC_SECRET;
 
-  if (!incomingSecret || incomingSecret !== localSecret) {
+  if (!incomingSecret || !localSecret || !safeCompare(incomingSecret, localSecret)) {
     console.error(`[WEBHOOK BLOCKED] Invalid secret from IP: ${getClientIP(event)}`);
     return { 
       statusCode: 401, 

@@ -1,14 +1,14 @@
 const { createClient } = require('@supabase/supabase-js');
+const { verifyServiceSecret } = require('./_auth');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
   // Internal-only: called by supabase-webhook.js
-  const incomingSecret = event.headers?.['x-brewhub-secret'];
-  if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
-    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
-  }
+  // Uses timing-safe comparison with null guard
+  const serviceAuth = verifyServiceSecret(event);
+  if (!serviceAuth.valid) return serviceAuth.response;
 
   const { record } = JSON.parse(event.body || '{}');
 

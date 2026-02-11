@@ -1,13 +1,13 @@
 const { createClient } = require('@supabase/supabase-js');
+const { verifyServiceSecret } = require('./_auth');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
   // Auth: Apify webhook must include our sync secret
-  const secret = event.headers?.['x-brewhub-secret'];
-  if (!secret || secret !== process.env.INTERNAL_SYNC_SECRET) {
-    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
-  }
+  // Uses timing-safe comparison with null guard
+  const serviceAuth = verifyServiceSecret(event);
+  if (!serviceAuth.valid) return serviceAuth.response;
 
   // 1. Apify sends a POST when the run succeeds
   const { resource } = JSON.parse(event.body || '{}');

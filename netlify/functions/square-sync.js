@@ -1,5 +1,6 @@
 const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
+const { verifyServiceSecret } = require('./_auth');
 
 const squareEnvironment = process.env.NODE_ENV === 'production'
   ? SquareEnvironment.Production
@@ -21,10 +22,9 @@ const supabase = createClient(
 
 exports.handler = async (event) => {
   // Auth: Only callable from internal Supabase webhook chain
-  const secret = event.headers?.['x-brewhub-secret'];
-  if (!secret || secret !== process.env.INTERNAL_SYNC_SECRET) {
-    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
-  }
+  // Uses timing-safe comparison with null guard
+  const serviceAuth = verifyServiceSecret(event);
+  if (!serviceAuth.valid) return serviceAuth.response;
 
   const { record } = JSON.parse(event.body || '{}');
 

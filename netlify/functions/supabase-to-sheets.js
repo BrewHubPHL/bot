@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { verifyServiceSecret } = require('./_auth');
 
 // 1. Initialize the Master Client (Kills the 403 error)
 const supabase = createClient(
@@ -12,14 +13,14 @@ exports.handler = async (event) => {
     }
 
     // Internal-only: called by Supabase webhooks
-    const incomingSecret = event.headers?.['x-brewhub-secret'];
-    if (!incomingSecret || incomingSecret !== process.env.INTERNAL_SYNC_SECRET) {
-        return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
-    }
+    // Uses timing-safe comparison with null guard
+    const serviceAuth = verifyServiceSecret(event);
+    if (!serviceAuth.valid) return serviceAuth.response;
 
     try {
         const payload = JSON.parse(event.body);
-        let { record, old_record, type, table, auth_key } = payload;
+        const { record: rawRecord, old_record, type, table } = payload;
+        let record = rawRecord;
         
         // SSoT Fix: Handle Deletions
         if (type === 'DELETE' && old_record) {

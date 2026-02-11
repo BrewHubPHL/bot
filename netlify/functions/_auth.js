@@ -1,7 +1,36 @@
 const { createClient } = require('@supabase/supabase-js');
+const crypto = require('crypto');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ * Returns false if either value is falsy or lengths differ.
+ */
+function safeCompare(a, b) {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Verify internal service secret from request headers.
+ * Use this for internal service-to-service authentication.
+ * @param {object} event - Netlify function event
+ * @returns {{ valid: boolean, response?: object }}
+ */
+function verifyServiceSecret(event) {
+  const secret = event.headers?.['x-brewhub-secret'];
+  const envSecret = process.env.INTERNAL_SYNC_SECRET;
+  
+  if (!secret || !envSecret || !safeCompare(secret, envSecret)) {
+    return { valid: false, response: json(401, { error: 'Unauthorized' }) };
+  }
+  return { valid: true };
+}
 
 const json = (statusCode, payload) => ({
   statusCode,
@@ -32,8 +61,13 @@ async function authorize(event, options = {}) {
   // Internal service-to-service calls - ONLY allowed if explicitly enabled
   // This prevents INTERNAL_SYNC_SECRET from being a "god mode" bypass
   if (allowServiceSecret) {
-    const secret = event.headers?.['x-brewhub-secret'];
-    if (secret && secret === process.env.INTERNAL_SYNC_SECRET) {
+    const serviceAuth = verifyServiceSecret(event);
+    if (serviceAuth.valid) {
+      // Service tokens cannot perform manager-only operations
+      if (requireManager) {
+        console.error('[AUTH BLOCKED] Service token attempted manager action');
+        return { ok: false, response: json(403, { error: 'Service tokens cannot perform manager actions' }) };
+      }
       return { ok: true, via: 'secret', role: 'service' };
     }
   }
@@ -177,4 +211,4 @@ function sanitizedError(error, context = 'Operation') {
   });
 }
 
-module.exports = { authorize, json, sanitizedError };
+module.exports = { authorize, json, sanitizedError, verifyServiceSecret };

@@ -1,5 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
-const { authorize, json } = require('./_auth');
+const { authorize, json, verifyServiceSecret } = require('./_auth');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -25,8 +25,9 @@ exports.handler = async (event) => {
   }
 
   // Check internal service secret first (for service-to-service calls)
-  const incomingSecret = event.headers?.['x-brewhub-secret'];
-  if (incomingSecret && incomingSecret === process.env.INTERNAL_SYNC_SECRET) {
+  // Uses timing-safe comparison with null guard
+  const serviceAuth = verifyServiceSecret(event);
+  if (serviceAuth.valid) {
     // Service-to-service call authenticated
   } else {
     // Standard auth check for staff
@@ -48,7 +49,7 @@ exports.handler = async (event) => {
 
     // Try SMS first if phone provided
     if (phone) {
-      const cleanPhone = phone.replace(/\D/g, '');
+      const cleanPhone = phone.replaceAll(/\D/g, '');
       const formattedPhone = cleanPhone.startsWith('1') ? `+${cleanPhone}` : `+1${cleanPhone}`;
 
       const twilioSid = process.env.TWILIO_ACCOUNT_SID;

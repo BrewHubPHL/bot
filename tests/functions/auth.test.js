@@ -125,5 +125,50 @@ describe('_auth.js', () => {
       expect(result.ok).toBe(false);
       expect(result.response.statusCode).toBe(401);
     });
+
+    it('should reject service token when requireManager is true', async () => {
+      const event = {
+        headers: {
+          'x-brewhub-secret': 'test-sync-secret'
+        }
+      };
+      
+      const result = await authorize(event, { allowServiceSecret: true, requireManager: true });
+      
+      expect(result.ok).toBe(false);
+      expect(result.response.statusCode).toBe(403);
+    });
+
+    it('should reject when INTERNAL_SYNC_SECRET is undefined', async () => {
+      const originalSecret = process.env.INTERNAL_SYNC_SECRET;
+      delete process.env.INTERNAL_SYNC_SECRET;
+      
+      const event = {
+        headers: {
+          'x-brewhub-secret': 'any-value'
+        }
+      };
+      
+      const result = await authorize(event, { allowServiceSecret: true });
+      
+      // Should fail because env secret is undefined
+      expect(result.ok).toBe(false);
+      expect(result.response.statusCode).toBe(401);
+      
+      process.env.INTERNAL_SYNC_SECRET = originalSecret;
+    });
+
+    it('should reject empty x-brewhub-secret header', async () => {
+      const event = {
+        headers: {
+          'x-brewhub-secret': ''
+        }
+      };
+      
+      const result = await authorize(event, { allowServiceSecret: true });
+      
+      expect(result.ok).toBe(false);
+      expect(result.response.statusCode).toBe(401);
+    });
   });
 });
