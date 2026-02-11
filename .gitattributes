@@ -1,0 +1,9 @@
+# Enforce LF (Linux) line endings for all text files
+* text=auto eol=lf
+
+# Keep images binary (prevents corruption)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary

@@ -1,0 +1,2 @@
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://js.squareup.com https://*.elevenlabs.io; img-src 'self' https://*.supabase.co;

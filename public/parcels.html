@@ -457,17 +457,37 @@
         const res = await fetch(`/.netlify/functions/search-residents?prefix=${encodeURIComponent(prefix)}`);
         const data = await res.json();
 
-        document.getElementById('residentResults').innerHTML = data.results.map(r => {
-          const safeId = Number.parseInt(r.id, 10) || 0;
-          const safeName = escapeHtml(r.name).replaceAll("'", '&#39;');
-          const displayUnit = escapeHtml(r.unit_number) || 'N/A';
-          return `
-          <div class="resident-option" onclick="selectResident(${safeId}, '${safeName}')">
-            <strong>${escapeHtml(r.name)}</strong>
-            <span style="color: rgba(255,255,255,0.5);">Unit ${displayUnit}</span>
-          </div>
-        `;
-        }).join('') || '<div style="padding: 10px; color: rgba(255,255,255,0.5);">No matches</div>';
+        const container = document.getElementById('residentResults');
+        container.innerHTML = ''; // Clear
+
+        if (data.results && data.results.length > 0) {
+          for (const r of data.results) {
+            const safeId = Number.parseInt(r.id, 10) || 0;
+            const safeName = escapeHtml(r.name).replaceAll("'", '&#39;');
+            const displayUnit = escapeHtml(r.unit_number) || 'N/A';
+            
+            const optionDiv = document.createElement('div');
+            optionDiv.className = 'resident-option';
+            optionDiv.onclick = () => selectResident(safeId, safeName);
+            
+            const strong = document.createElement('strong');
+            strong.textContent = r.name;
+            
+            const span = document.createElement('span');
+            span.style.color = 'rgba(255,255,255,0.5)';
+            span.textContent = `Unit ${displayUnit}`;
+            
+            optionDiv.appendChild(strong);
+            optionDiv.appendChild(span);
+            container.appendChild(optionDiv);
+          }
+        } else {
+          const noMatchDiv = document.createElement('div');
+          noMatchDiv.style.padding = '10px';
+          noMatchDiv.style.color = 'rgba(255,255,255,0.5)';
+          noMatchDiv.textContent = 'No matches';
+          container.appendChild(noMatchDiv);
+        }
       } catch (err) {
         console.error('[SEARCH ERROR]', err);
       }

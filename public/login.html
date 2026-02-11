@@ -147,21 +147,13 @@
 
     // Validate redirect URL to prevent open redirect attacks
     function getSafeRedirect(url) {
-      if (!url) return '/manager.html';
-      // Only allow relative paths starting with /
-      // Block absolute URLs, protocol-relative URLs, and javascript:
-      if (url.startsWith('/') && !url.startsWith('//') && !url.toLowerCase().startsWith('/\\')) {
-        // Additional check: no protocol in the path
-        try {
-          const parsed = new URL(url, window.location.origin);
-          if (parsed.origin === window.location.origin) {
-            return url;
-          }
-        } catch (e) {
-          // Invalid URL, use default
-        }
+      const allowedPaths = ['/', '/shop', '/account', '/manager.html'];
+      if (!url) return '/';
+      // Strict whitelist: only allow specific safe paths
+      if (allowedPaths.includes(url)) {
+        return url;
       }
-      return '/manager.html';
+      return '/';
     }
 
     // Check if already logged in

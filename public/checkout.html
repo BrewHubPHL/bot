@@ -324,43 +324,60 @@
         // Render cart summary
         function renderCart() {
             const container = document.getElementById('cart-summary');
+            container.innerHTML = ''; // Clear existing
             
             if (cart.length === 0) {
-                document.getElementById('checkout-container').innerHTML = `
-                    <div class="empty-cart" style="grid-column: 1 / -1;">
-                        <h1 style="font-family: 'Playfair Display', serif;">Your cart is empty</h1>
-                        <p>Add some BrewHub merch to get started.</p>
-                        <a href="/shop.html">Shop Now</a>
-                    </div>
+                const checkoutContainer = document.getElementById('checkout-container');
+                checkoutContainer.innerHTML = '';
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'empty-cart';
+                emptyDiv.style.gridColumn = '1 / -1';
+                emptyDiv.innerHTML = `
+                    <h1 style="font-family: 'Playfair Display', serif;">Your cart is empty</h1>
+                    <p>Add some BrewHub merch to get started.</p>
+                    <a href="/shop.html">Shop Now</a>
                 `;
+                checkoutContainer.appendChild(emptyDiv);
                 return false;
             }
 
             totalCents = 0;
-            let html = '';
 
             for (const item of cart) {
                 const itemTotal = item.price_cents * item.quantity;
                 totalCents += itemTotal;
-                html += `
-                    <div class="cart-item">
-                        <div>
-                            <div class="cart-item-name">${escapeHtml(item.name)}</div>
-                            <div class="cart-item-qty">Qty: ${item.quantity}</div>
-                        </div>
-                        <div class="cart-item-price">$${(itemTotal / 100).toFixed(2)}</div>
-                    </div>
-                `;
+                
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'cart-item';
+                
+                const leftDiv = document.createElement('div');
+                const nameDiv = document.createElement('div');
+                nameDiv.className = 'cart-item-name';
+                nameDiv.textContent = item.name;
+                const qtyDiv = document.createElement('div');
+                qtyDiv.className = 'cart-item-qty';
+                qtyDiv.textContent = `Qty: ${item.quantity}`;
+                leftDiv.appendChild(nameDiv);
+                leftDiv.appendChild(qtyDiv);
+                
+                const priceDiv = document.createElement('div');
+                priceDiv.className = 'cart-item-price';
+                priceDiv.textContent = `$${(itemTotal / 100).toFixed(2)}`;
+                
+                itemDiv.appendChild(leftDiv);
+                itemDiv.appendChild(priceDiv);
+                container.appendChild(itemDiv);
             }
 
-            html += `
-                <div class="cart-total">
-                    <span>Total</span>
-                    <span>$${(totalCents / 100).toFixed(2)}</span>
-                </div>
-            `;
-
-            container.innerHTML = html;
+            const totalDiv = document.createElement('div');
+            totalDiv.className = 'cart-total';
+            const totalSpan1 = document.createElement('span');
+            totalSpan1.textContent = 'Total';
+            const totalSpan2 = document.createElement('span');
+            totalSpan2.textContent = `$${(totalCents / 100).toFixed(2)}`;
+            totalDiv.appendChild(totalSpan1);
+            totalDiv.appendChild(totalSpan2);
+            container.appendChild(totalDiv);
             
             // Update pay button text
             document.getElementById('pay-button').textContent = `Pay $${(totalCents / 100).toFixed(2)}`;
@@ -394,13 +411,13 @@
                 try {
                     const url = new URL(receiptUrl);
                     if (url.hostname.endsWith('squareup.com') || url.hostname.endsWith('square.com')) {
-                        text += ` <a href="${escapeHtml(receiptUrl)}" target="_blank" rel="noopener">View Receipt</a>`;
+                        text += ` Receipt: ${receiptUrl}`;
                     }
                 } catch (e) {
                     // Invalid URL, skip the link
                 }
             }
-            document.getElementById('success-text').innerHTML = text;
+            document.getElementById('success-text').textContent = text;
             
             // Clear cart
             localStorage.removeItem('brewhub_cart');

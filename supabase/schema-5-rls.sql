@@ -19,6 +19,7 @@ ALTER TABLE residents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE api_usage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE marketing_posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE local_mentions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE marketing_leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE processed_webhooks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE refund_locks ENABLE ROW LEVEL SECURITY;
@@ -92,3 +93,22 @@ CREATE POLICY "Deny public access to deletion_tombstones" ON deletion_tombstones
 
 DROP POLICY IF EXISTS "Deny public access to gdpr_secrets" ON gdpr_secrets;
 CREATE POLICY "Deny public access to gdpr_secrets" ON gdpr_secrets FOR ALL USING (false);
+
+-- Explicit deny policies for remaining tables (implicit deny exists, but explicit is clearer)
+DROP POLICY IF EXISTS "Deny public access to profiles" ON profiles;
+CREATE POLICY "Deny public access to profiles" ON profiles FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to orders" ON orders;
+CREATE POLICY "Deny public access to orders" ON orders FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to coffee_orders" ON coffee_orders;
+CREATE POLICY "Deny public access to coffee_orders" ON coffee_orders FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to vouchers" ON vouchers;
+CREATE POLICY "Deny public access to vouchers" ON vouchers FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to expected_parcels" ON expected_parcels;
+CREATE POLICY "Deny public access to expected_parcels" ON expected_parcels FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to marketing_leads" ON marketing_leads;
+CREATE POLICY "Deny public access to marketing_leads" ON marketing_leads FOR ALL USING (false);

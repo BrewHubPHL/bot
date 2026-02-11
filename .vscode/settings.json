@@ -5,5 +5,11 @@
   "deno.unstable": true,
   "[typescript]": {
     "editor.defaultFormatter": "denoland.vscode-deno"
+  },
+  "snyk.advanced.organization": "03d7190b-dfcb-444f-83c3-1b95e7d24b07",
+  "snyk.advanced.autoSelectOrganization": true,
+  "sonarlint.connectedMode.project": {
+    "connectionId": "brewhubphl",
+    "projectKey": "BrewHubPHL_bot"
   }
 }

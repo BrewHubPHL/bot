@@ -14,3 +14,22 @@ supabase/.temp/
 # Scanner artifacts
 .scannerwork/
 snyk-results.json
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Coverage and build outputs
+coverage/
+.nyc_output/
+dist/
+build/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# OS
+Thumbs.db

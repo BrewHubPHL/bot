@@ -377,20 +377,64 @@
                 itemsEl.innerHTML = '<div class="cart-empty">Your cart is empty</div>';
                 footerEl.style.display = 'none';
             } else {
-                itemsEl.innerHTML = cart.map((item, idx) => `
-                    <div class="cart-item" role="listitem">
-                        <div class="cart-item-info">
-                            <div class="cart-item-name">${escapeHtml(item.name)}</div>
-                            <div class="cart-item-price">$${(item.price_cents / 100).toFixed(2)} each</div>
-                            <button class="cart-item-remove" onclick="removeFromCart(${idx})" aria-label="Remove ${escapeHtml(item.name)} from cart" style="background:none; border:none; cursor:pointer; color:#999; font-size:0.8rem;">Remove</button>
-                        </div>
-                        <div class="cart-item-qty">
-                            <button onclick="updateQty(${idx}, -1)" aria-label="Decrease quantity of ${escapeHtml(item.name)}">&#8722;</button>
-                            <span aria-label="Quantity">${item.quantity}</span>
-                            <button onclick="updateQty(${idx}, 1)" aria-label="Increase quantity of ${escapeHtml(item.name)}">+</button>
-                        </div>
-                    </div>
-                `).join('');
+                itemsEl.innerHTML = ''; // Clear
+                for (let idx = 0; idx < cart.length; idx++) {
+                    const item = cart[idx];
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'cart-item';
+                    itemDiv.setAttribute('role', 'listitem');
+                    
+                    const infoDiv = document.createElement('div');
+                    infoDiv.className = 'cart-item-info';
+                    
+                    const nameDiv = document.createElement('div');
+                    nameDiv.className = 'cart-item-name';
+                    nameDiv.textContent = item.name;
+                    
+                    const priceDiv = document.createElement('div');
+                    priceDiv.className = 'cart-item-price';
+                    priceDiv.textContent = `$${(item.price_cents / 100).toFixed(2)} each`;
+                    
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'cart-item-remove';
+                    removeBtn.onclick = () => removeFromCart(idx);
+                    removeBtn.setAttribute('aria-label', `Remove ${item.name} from cart`);
+                    removeBtn.style.background = 'none';
+                    removeBtn.style.border = 'none';
+                    removeBtn.style.cursor = 'pointer';
+                    removeBtn.style.color = '#999';
+                    removeBtn.style.fontSize = '0.8rem';
+                    removeBtn.textContent = 'Remove';
+                    
+                    infoDiv.appendChild(nameDiv);
+                    infoDiv.appendChild(priceDiv);
+                    infoDiv.appendChild(removeBtn);
+                    
+                    const qtyDiv = document.createElement('div');
+                    qtyDiv.className = 'cart-item-qty';
+                    
+                    const minusBtn = document.createElement('button');
+                    minusBtn.onclick = () => updateQty(idx, -1);
+                    minusBtn.setAttribute('aria-label', `Decrease quantity of ${item.name}`);
+                    minusBtn.textContent = '−';
+                    
+                    const qtySpan = document.createElement('span');
+                    qtySpan.setAttribute('aria-label', 'Quantity');
+                    qtySpan.textContent = item.quantity;
+                    
+                    const plusBtn = document.createElement('button');
+                    plusBtn.onclick = () => updateQty(idx, 1);
+                    plusBtn.setAttribute('aria-label', `Increase quantity of ${item.name}`);
+                    plusBtn.textContent = '+';
+                    
+                    qtyDiv.appendChild(minusBtn);
+                    qtyDiv.appendChild(qtySpan);
+                    qtyDiv.appendChild(plusBtn);
+                    
+                    itemDiv.appendChild(infoDiv);
+                    itemDiv.appendChild(qtyDiv);
+                    itemsEl.appendChild(itemDiv);
+                }
                 footerEl.style.display = 'block';
                 totalEl.textContent = `$${(totalCents / 100).toFixed(2)}`;
             }

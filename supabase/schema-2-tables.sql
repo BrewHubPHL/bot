@@ -79,6 +79,16 @@ CREATE TABLE IF NOT EXISTS local_mentions (
   created_at timestamptz DEFAULT now()
 );
 
+-- 18b. MARKETING_LEADS (Apify scrape results)
+CREATE TABLE IF NOT EXISTS marketing_leads (
+  id text PRIMARY KEY,
+  username text,
+  likes int,
+  caption text,
+  status text,
+  created_at timestamptz DEFAULT now()
+);
+
 -- 19. WEBHOOK_EVENTS
 CREATE TABLE IF NOT EXISTS webhook_events (
   event_id text PRIMARY KEY,

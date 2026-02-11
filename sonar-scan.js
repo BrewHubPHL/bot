@@ -1,9 +1,16 @@
-const scanner = require('sonarqube-scanner').default;
+const scanner = require('sonarqube-scanner');
+
+const token = process.env.SONAR_TOKEN;
+
+if (!token) {
+  console.error('Missing SONAR_TOKEN environment variable.');
+  process.exit(1);
+}
 
 scanner(
   {
     serverUrl: 'https://sonarcloud.io',
-    token: '533031695f8f6acb758d165e1a24148d05da94db',
+    token,
     options: {
       'sonar.projectKey': 'BrewHubPHL_bot',
       'sonar.organization': 'brewhubphl',

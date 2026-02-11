@@ -401,11 +401,20 @@
           return;
       }
 
-      // 2. Protect Page - Require manager role
-      const user = await window.brewAuth.protectPage({ requiredRole: 'manager' });
+      // 2. Protect Page - Require staff role (for clock in/out)
+      const user = await window.brewAuth.protectPage({ requiredRole: 'staff' });
       if (!user) return;
 
       console.log("Manager Logged In:", user.email, "Role:", window.brewAuth.staff?.role);
+
+      // Conditionally show manager features
+      if (user.role !== 'manager' && user.role !== 'admin') {
+        // Staff: Hide inventory section and link
+        const inventorySection = document.querySelector('.main-grid section');
+        if (inventorySection) inventorySection.style.display = 'none';
+        const inventoryLink = document.querySelector('a[href="scan.html"]');
+        if (inventoryLink) inventoryLink.style.display = 'none';
+      }
 
       // 3. Populate Dashboard
       renderInventory();

@@ -42,6 +42,6 @@
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "sonarqube-scanner": "^4.3.4"
+    "sonarqube-scanner": "^3.5.0"
   }
 }

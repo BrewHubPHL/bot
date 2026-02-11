@@ -151,9 +151,18 @@ exports.handler = async (event) => {
       .insert(orderData);
 
     if (insertErr) {
-      console.error('Order insert error:', insertErr);
-      // Payment succeeded but order insert failed - log for manual reconciliation
-      // Don't fail the response since payment went through
+      // CRITICAL: Log the Square Payment ID with the error so we can find it later
+      console.error(`[CRITICAL] Payment ${payment.id} succeeded but DB failed:`, insertErr.message);
+      
+      // Do NOT return 200. Return 500 so the frontend doesn't show a success message.
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          error: "Payment processed but order recording failed. Please contact info@brewhubphl.com with your receipt.",
+          paymentId: payment.id 
+        })
+      };
     }
 
     return {
