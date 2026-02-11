@@ -216,11 +216,11 @@
       font-weight: 700;
       font-size: 0.7rem;
     }
-    .carrier-ups { background: #351c15; color: #FFB500; }
-    .carrier-fedex { background: #4d148c; color: #FF6600; }
-    .carrier-dhl { background: #FFCC00; color: #D40511; }
+    .carrier-ups { background: #351c15; color: #FFD54F; }
+    .carrier-fedex { background: #4d148c; color: #FFB74D; }
+    .carrier-dhl { background: #FFCC00; color: #1a0a00; }
     .carrier-usps { background: #004B87; color: #fff; }
-    .carrier-amazon { background: #232F3E; color: #FF9900; }
+    .carrier-amazon { background: #232F3E; color: #FFB74D; }
     
     .parcel-info { flex: 1; }
     .parcel-recipient {
@@ -243,9 +243,9 @@
       font-weight: 600;
       text-transform: uppercase;
     }
-    .status-received { background: rgba(52, 152, 219, 0.2); color: #3498db; }
-    .status-picked-up { background: rgba(39, 174, 96, 0.2); color: #27ae60; }
-    .status-waiting { background: rgba(243, 156, 18, 0.2); color: #f39c12; }
+    .status-received { background: rgba(52, 152, 219, 0.25); color: #5dade2; }
+    .status-picked-up { background: rgba(39, 174, 96, 0.25); color: #58d68d; }
+    .status-waiting { background: rgba(243, 156, 18, 0.25); color: #f5b041; }
     .resident-option {
       padding: 12px 15px;
       border-bottom: 1px solid rgba(255,255,255,0.1);
@@ -263,52 +263,63 @@
   </style>
 </head>
 <body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
   <header class="header">
     <div class="logo">Parcel<span>Hub</span></div>
-    <nav class="nav-links">
+    <nav class="nav-links" aria-label="Staff navigation">
       <a href="cafe.html">Cafe POS</a>
-      <a href="parcels.html" class="active">Parcel Hub</a>
+      <a href="parcels.html" class="active" aria-current="page">Parcel Hub</a>
       <a href="scan.html">Inventory</a>
       <a href="manager.html">Dashboard</a>
     </nav>
   </header>
   
-  <main class="container">
-    <section class="scan-section">
-      <div class="scan-box" id="scanBox">
-        <div class="scan-icon" id="scanIcon">📦</div>
+  <main class="container" id="main-content">
+    <section class="scan-section" aria-label="Package scanning">
+      <div class="scan-box" id="scanBox" role="status" aria-live="polite">
+        <div class="scan-icon" id="scanIcon" aria-hidden="true">📦</div>
         <div class="scan-text" id="scanText">Ready to Scan</div>
         <div class="scan-subtext" id="scanSubtext">Point scanner at package barcode</div>
       </div>
       
       <div class="manual-entry">
+        <label for="trackingInput" class="visually-hidden">Enter tracking number</label>
         <input type="text" class="tracking-input" id="trackingInput" placeholder="Enter tracking number..." autocomplete="off">
         <button class="scan-btn" onclick="logParcel()">Log Package</button>
       </div>
 
       <!-- PHILLY WAY: Resident search (shown when no pre-registration match) -->
-      <div id="residentSearchBox" style="display: none; margin-top: 1rem; width: 100%; max-width: 500px;">
+      <div id="residentSearchBox" style="display: none; margin-top: 1rem; width: 100%; max-width: 500px;" role="search" aria-label="Resident search">
+        <label for="residentSearch" class="visually-hidden">Type recipient name to search</label>
         <input type="text" class="tracking-input" id="residentSearch" placeholder="Type recipient name..." oninput="searchResidents()" autocomplete="off" style="width: 100%; margin-bottom: 0.5rem;">
-        <div id="residentResults" style="background: rgba(255,255,255,0.05); border-radius: 12px; max-height: 200px; overflow-y: auto;"></div>
-        <button onclick="manualEntry()" style="margin-top: 0.5rem; background: rgba(255,255,255,0.1); border: none; color: rgba(255,255,255,0.7); padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">+ Add new recipient</button>
+        <div id="residentResults" style="background: rgba(255,255,255,0.05); border-radius: 12px; max-height: 200px; overflow-y: auto;" role="listbox" aria-label="Search results"></div>
+        <button onclick="manualEntry()" style="margin-top: 0.5rem; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: rgba(255,255,255,0.9); padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">+ Add new recipient</button>
       </div>
     </section>
     
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="Recent packages">
       <h2>📬 Recent Packages</h2>
       
       <div class="search-box">
-        <span class="search-icon">🔍</span>
+        <span class="search-icon" aria-hidden="true">🔍</span>
+        <label for="searchInput" class="visually-hidden">Search packages by name</label>
         <input type="text" placeholder="Search by name..." id="searchInput" oninput="filterParcels()">
       </div>
       
-      <div class="parcels-list" id="parcelsList">
+      <div class="parcels-list" id="parcelsList" role="list" aria-label="Package list">
         <!-- Parcels will be injected here -->
       </div>
     </aside>
   </main>
 
   <script>
+    // HTML escape function to prevent XSS
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    }
+
     // Use brewAuth.client for consistent session storage
     let sbClient = null;
     async function initSupabase() {
@@ -446,12 +457,17 @@
         const res = await fetch(`/.netlify/functions/search-residents?prefix=${encodeURIComponent(prefix)}`);
         const data = await res.json();
 
-        document.getElementById('residentResults').innerHTML = data.results.map(r => `
-          <div class="resident-option" onclick="selectResident(${r.id}, '${r.name.replace(/'/g, "\\'")}')">
-            <strong>${r.name}</strong>
-            <span style="color: rgba(255,255,255,0.5);">Unit ${r.unit_number || 'N/A'}</span>
+        document.getElementById('residentResults').innerHTML = data.results.map(r => {
+          const safeId = Number.parseInt(r.id, 10) || 0;
+          const safeName = escapeHtml(r.name).replaceAll("'", '&#39;');
+          const displayUnit = escapeHtml(r.unit_number) || 'N/A';
+          return `
+          <div class="resident-option" onclick="selectResident(${safeId}, '${safeName}')">
+            <strong>${escapeHtml(r.name)}</strong>
+            <span style="color: rgba(255,255,255,0.5);">Unit ${displayUnit}</span>
           </div>
-        `).join('') || '<div style="padding: 10px; color: rgba(255,255,255,0.5);">No matches</div>';
+        `;
+        }).join('') || '<div style="padding: 10px; color: rgba(255,255,255,0.5);">No matches</div>';
       } catch (err) {
         console.error('[SEARCH ERROR]', err);
       }
@@ -472,13 +488,19 @@
     }
 
     // ===== UI HELPERS =====
+    function getScanBoxClass(state) {
+      if (state === 'success') return 'scan-box success';
+      if (state === 'error') return 'scan-box error';
+      return 'scan-box';
+    }
+
     function updateScanUI(state, icon, text, subtext) {
       const scanBox = document.getElementById('scanBox');
       const scanIcon = document.getElementById('scanIcon');
       const scanText = document.getElementById('scanText');
       const scanSubtext = document.getElementById('scanSubtext');
 
-      scanBox.className = 'scan-box ' + (state === 'success' ? 'success' : state === 'error' ? 'error' : '');
+      scanBox.className = getScanBoxClass(state);
       scanIcon.textContent = icon;
       scanText.textContent = text;
       scanSubtext.textContent = subtext;
@@ -537,17 +559,27 @@
       return `${Math.floor(hrs / 24)} days ago`;
     }
     
+    function getStatusClass(status) {
+      if (status === 'picked_up') return 'picked-up';
+      if (status === 'arrived') return 'received';
+      return 'waiting';
+    }
+
+    function formatStatus(status) {
+      return status ? status.replaceAll('_', ' ') : 'waiting';
+    }
+    
     function renderParcels(list) {
       const container = document.getElementById('parcelsList');
       container.innerHTML = list.map(p => `
         <div class="parcel-card">
           <div class="carrier-logo ${getCarrierClass(p.carrier)}">${getCarrierName(p.carrier)}</div>
           <div class="parcel-info">
-            <div class="parcel-recipient">${p.recipient_name || 'Unknown'}</div>
-            <div class="parcel-tracking">${(p.tracking_number || '').slice(0, 16)}${p.tracking_number?.length > 16 ? '...' : ''}</div>
+            <div class="parcel-recipient">${escapeHtml(p.recipient_name) || 'Unknown'}</div>
+            <div class="parcel-tracking">${escapeHtml((p.tracking_number || '').slice(0, 16))}${p.tracking_number?.length > 16 ? '...' : ''}</div>
           </div>
           <div>
-            <div class="parcel-status status-${p.status === 'picked_up' ? 'picked-up' : p.status === 'arrived' ? 'received' : 'waiting'}">${p.status?.replace('_', ' ') || 'waiting'}</div>
+            <div class="parcel-status status-${getStatusClass(p.status)}">${formatStatus(p.status)}</div>
             <div class="parcel-time">${timeAgo(p.received_at)}</div>
           </div>
         </div>

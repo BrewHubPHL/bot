@@ -22,3 +22,39 @@
     --font-heading: 'Playfair Display', serif;
     --font-body: 'Work Sans', sans-serif;
 }
+
+/* ============================================
+   ACCESSIBILITY UTILITIES
+   ============================================ */
+
+/* Visually hidden but accessible to screen readers */
+.visually-hidden,
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Skip link - visible on focus for keyboard users */
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--brand-primary, #3c2f2f);
+    color: #fff;
+    padding: 8px 16px;
+    z-index: 10000;
+    text-decoration: none;
+    font-weight: 600;
+    border-radius: 0 0 4px 0;
+}
+
+.skip-link:focus {
+    top: 0;
+}

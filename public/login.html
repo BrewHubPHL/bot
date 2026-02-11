@@ -107,17 +107,22 @@
   </style>
 </head>
 <body>
+  <a href="#login-form" class="skip-link">Skip to login form</a>
+
+  <main id="main-content">
   <div class="login-card">
-    <div class="logo">Brew<span>Hub</span></div>
+    <div class="logo" role="img" aria-label="BrewHub">Brew<span>Hub</span></div>
     <p class="subtitle">Staff Portal</p>
     
-    <div class="error" id="error"></div>
+    <div class="error" id="error" role="alert" aria-live="assertive"></div>
     
-    <form id="loginForm">
+    <form id="login-form" aria-label="Staff login">
       <div class="input-group">
+        <label for="email" class="visually-hidden">Email address</label>
         <input type="email" id="email" placeholder="Email" required autocomplete="email">
       </div>
       <div class="input-group">
+        <label for="password" class="visually-hidden">Password</label>
         <input type="password" id="password" placeholder="Password" required autocomplete="current-password">
       </div>
       <button type="submit" class="login-btn" id="loginBtn">Sign In</button>
@@ -125,6 +130,7 @@
     
     <a href="/" class="back-link">← Back to BrewHub</a>
   </div>
+  </main>
 
   <script>
     const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
@@ -139,17 +145,36 @@
     // REMOVED: Client-side allowlist - backend staff_directory table is now SSoT
     // Staff validation happens server-side in _auth.js
 
+    // Validate redirect URL to prevent open redirect attacks
+    function getSafeRedirect(url) {
+      if (!url) return '/manager.html';
+      // Only allow relative paths starting with /
+      // Block absolute URLs, protocol-relative URLs, and javascript:
+      if (url.startsWith('/') && !url.startsWith('//') && !url.toLowerCase().startsWith('/\\')) {
+        // Additional check: no protocol in the path
+        try {
+          const parsed = new URL(url, window.location.origin);
+          if (parsed.origin === window.location.origin) {
+            return url;
+          }
+        } catch (e) {
+          // Invalid URL, use default
+        }
+      }
+      return '/manager.html';
+    }
+
     // Check if already logged in
     (async () => {
       const { data: { session } } = await sb.auth.getSession();
       if (session) {
-        // Redirect to intended page or dashboard
-        const redirect = new URLSearchParams(window.location.search).get('redirect') || '/manager.html';
-        window.location.href = redirect;
+        // Redirect to intended page or dashboard (validated)
+        const rawRedirect = new URLSearchParams(window.location.search).get('redirect');
+        window.location.href = getSafeRedirect(rawRedirect);
       }
     })();
 
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = document.getElementById('email').value;
       const password = document.getElementById('password').value;
@@ -193,7 +218,8 @@
       }
 
       // Success - redirect (backend will enforce staff_directory check on protected pages)
-      const redirect = new URLSearchParams(window.location.search).get('redirect') || '/manager.html';
+      const rawRedirect = new URLSearchParams(window.location.search).get('redirect');
+      const redirect = getSafeRedirect(rawRedirect);
       console.log('[LOGIN] Redirecting to:', redirect);
       window.location.href = redirect;
     });

@@ -274,30 +274,32 @@
     </style>
 </head>
 <body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
     <header>
         <div class="brand">
             <img src="logo.png" alt="BrewHub">
             <span>BrewHub PHL</span>
         </div>
-        <nav>
+        <nav aria-label="Main navigation">
             <a href="/">Home</a>
-            <div class="cart-icon" onclick="toggleCart()">
+            <button type="button" class="cart-icon" onclick="toggleCart()" onkeydown="if(event.key==='Enter')toggleCart()" aria-label="Shopping cart" style="background:none; border:none; cursor:pointer; font-size:inherit;">
                 🛒
                 <span class="cart-count" id="cart-count" style="display: none;">0</span>
-            </div>
+            </button>
         </nav>
     </header>
 
     <!-- Cart Overlay -->
-    <div class="cart-overlay" id="cart-overlay" onclick="toggleCart()"></div>
+    <div class="cart-overlay" id="cart-overlay" onclick="toggleCart()" onkeydown="if(event.key==='Escape')toggleCart()" role="presentation" aria-hidden="true"></div>
 
     <!-- Cart Drawer -->
-    <div class="cart-drawer" id="cart-drawer">
+    <div class="cart-drawer" id="cart-drawer" role="dialog" aria-labelledby="cart-title" aria-modal="true">
         <div class="cart-header">
-            <h2>Your Cart</h2>
-            <button class="cart-close" onclick="toggleCart()">&times;</button>
+            <h2 id="cart-title">Your Cart</h2>
+            <button class="cart-close" onclick="toggleCart()" aria-label="Close cart">&times;</button>
         </div>
-        <div class="cart-items" id="cart-items">
+        <div class="cart-items" id="cart-items" role="list" aria-label="Cart items">
             <div class="cart-empty">Your cart is empty</div>
         </div>
         <div class="cart-footer" id="cart-footer" style="display: none;">
@@ -309,8 +311,9 @@
         </div>
     </div>
 
+    <main id="main-content">
     <div id="shop-container">
-        <section class="hero">
+        <section class="hero" aria-label="Welcome">
             <div>
                 <h1 id="shop-title">Loading the BrewHub lineup...</h1>
                 <p>Fresh roasted coffee + local Philly merch. Pickup in Point Breeze or ship nationwide.</p>
@@ -320,10 +323,11 @@
             </div>
         </section>
 
-        <section class="section">
-            <div class="grid" id="product-grid"></div>
+        <section class="section" aria-label="Products">
+            <div class="grid" id="product-grid" role="list" aria-label="Product list"></div>
         </section>
     </div>
+    </main>
 
     <footer>
         BrewHub PHL • Point Breeze • Philly
@@ -374,16 +378,16 @@
                 footerEl.style.display = 'none';
             } else {
                 itemsEl.innerHTML = cart.map((item, idx) => `
-                    <div class="cart-item">
+                    <div class="cart-item" role="listitem">
                         <div class="cart-item-info">
                             <div class="cart-item-name">${escapeHtml(item.name)}</div>
                             <div class="cart-item-price">$${(item.price_cents / 100).toFixed(2)} each</div>
-                            <span class="cart-item-remove" onclick="removeFromCart(${idx})">Remove</span>
+                            <button class="cart-item-remove" onclick="removeFromCart(${idx})" aria-label="Remove ${escapeHtml(item.name)} from cart" style="background:none; border:none; cursor:pointer; color:#999; font-size:0.8rem;">Remove</button>
                         </div>
                         <div class="cart-item-qty">
-                            <button onclick="updateQty(${idx}, -1)">−</button>
-                            <span>${item.quantity}</span>
-                            <button onclick="updateQty(${idx}, 1)">+</button>
+                            <button onclick="updateQty(${idx}, -1)" aria-label="Decrease quantity of ${escapeHtml(item.name)}">&#8722;</button>
+                            <span aria-label="Quantity">${item.quantity}</span>
+                            <button onclick="updateQty(${idx}, 1)" aria-label="Increase quantity of ${escapeHtml(item.name)}">+</button>
                         </div>
                     </div>
                 `).join('');

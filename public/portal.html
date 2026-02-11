@@ -20,49 +20,61 @@
     </style>
 </head>
 <body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
 
+    <main id="main-content">
     <div id="login-view">
         <h1>☕️ Resident Portal</h1>
         
-        <div id="login-form">
-            <p>Already registered? Log in below.</p>
+        <div id="login-form" role="form" aria-labelledby="login-heading">
+            <p id="login-heading">Already registered? Log in below.</p>
+            <label for="email" class="visually-hidden">Email address</label>
             <input type="email" id="email" placeholder="Email" autocomplete="email" />
+            <label for="password" class="visually-hidden">Password</label>
             <input type="password" id="password" placeholder="Password" autocomplete="current-password" />
             <button id="login-btn" onclick="handleLogin()">Log In</button>
-            <p id="login-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
+            <p id="login-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;" role="status" aria-live="polite"></p>
             <p style="margin-top:15px; text-align:center;">
-                <a href="javascript:void(0)" onclick="handleForgotPassword()" style="color:#666; font-size:0.85rem;">Forgot password?</a>
+                <button type="button" onclick="handleForgotPassword()" style="color:#666; font-size:0.85rem; background:none; border:none; cursor:pointer; text-decoration:underline;">Forgot password?</button>
             </p>
             <p style="margin-top:10px; text-align:center;">
-                <a href="#" onclick="showRegister(event); return false;" style="color:var(--dark);">New resident? <strong>Register here</strong></a>
+                <button type="button" onclick="showRegister(event)" style="color:var(--dark); background:none; border:none; cursor:pointer;">New resident? <strong>Register here</strong></button>
             </p>
         </div>
 
-        <div id="register-form" class="hidden">
-            <p>Register for package tracking & coffee rewards.</p>
-            <input type="text" id="reg-name" placeholder="Full Name *" required />
-            <input type="text" id="reg-address" placeholder="Unit # or Address *" required />
-            <input type="email" id="reg-email" placeholder="Email *" required autocomplete="email" />
-            <input type="password" id="reg-password" placeholder="Password (min 6 characters) *" required autocomplete="new-password" />
-            <input type="password" id="reg-password-confirm" placeholder="Confirm Password *" required autocomplete="new-password" />
+        <div id="register-form" class="hidden" role="form" aria-labelledby="register-heading">
+            <p id="register-heading">Register for package tracking & coffee rewards.</p>
+            <label for="reg-name" class="visually-hidden">Full Name (required)</label>
+            <input type="text" id="reg-name" placeholder="Full Name *" required aria-required="true" />
+            <label for="reg-address" class="visually-hidden">Unit number or Address (required)</label>
+            <input type="text" id="reg-address" placeholder="Unit # or Address *" required aria-required="true" />
+            <label for="reg-email" class="visually-hidden">Email address (required)</label>
+            <input type="email" id="reg-email" placeholder="Email *" required autocomplete="email" aria-required="true" />
+            <label for="reg-password" class="visually-hidden">Password, minimum 6 characters (required)</label>
+            <input type="password" id="reg-password" placeholder="Password (min 6 characters) *" required autocomplete="new-password" aria-required="true" />
+            <label for="reg-password-confirm" class="visually-hidden">Confirm Password (required)</label>
+            <input type="password" id="reg-password-confirm" placeholder="Confirm Password *" required autocomplete="new-password" aria-required="true" />
+            <label for="reg-phone" class="visually-hidden">Phone number for text alerts (optional)</label>
             <input type="tel" id="reg-phone" placeholder="Phone (optional - for text alerts)" />
             <label style="display:flex; align-items:center; gap:8px; margin-bottom:15px; font-size:0.9rem;">
                 <input type="checkbox" id="reg-sms-opt-in" /> Text me when my packages arrive
             </label>
             <button id="register-btn" onclick="handleRegister()">Register</button>
-            <p id="register-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
+            <p id="register-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;" role="status" aria-live="polite"></p>
             <p style="margin-top:20px; text-align:center;">
-                <a href="#" onclick="showLogin(event); return false;" style="color:var(--dark);">Already registered? <strong>Log in</strong></a>
+                <button type="button" onclick="showLogin(event)" style="color:var(--dark); background:none; border:none; cursor:pointer;">Already registered? <strong>Log in</strong></button>
             </p>
         </div>
 
-        <div id="set-password-form" class="hidden">
-            <h2>🔐 Reset Your Password</h2>
+        <div id="set-password-form" class="hidden" role="form" aria-labelledby="reset-heading">
+            <h2 id="reset-heading">🔐 Reset Your Password</h2>
             <p>Create a new password for your account.</p>
+            <label for="new-password" class="visually-hidden">New password, minimum 6 characters</label>
             <input type="password" id="new-password" placeholder="New password (min 6 characters)" autocomplete="new-password" />
+            <label for="confirm-password" class="visually-hidden">Confirm new password</label>
             <input type="password" id="confirm-password" placeholder="Confirm password" autocomplete="new-password" />
             <button id="set-password-btn" onclick="handleSetPassword()">Update Password</button>
-            <p id="set-password-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;"></p>
+            <p id="set-password-msg" style="margin-top: 10px; font-size: 0.9rem; color: #666;" role="status" aria-live="polite"></p>
         </div>
     </div>
 
@@ -76,17 +88,18 @@
             <h2>📦 Package Lookup</h2>
             <p style="font-size:0.9rem; color:#666; margin-bottom:10px;">Check if your package has arrived at BrewHub</p>
             <div style="display:flex; gap:8px;">
+                <label for="tracking-search" class="visually-hidden">Tracking number or email</label>
                 <input type="text" id="tracking-search" placeholder="Tracking # or email" style="flex:1; margin-bottom:0;" />
                 <button onclick="searchPackage()" style="width:auto; padding:12px 20px;">Check</button>
             </div>
-            <div id="package-result" style="margin-top:15px;"></div>
-            <div id="parcel-list" style="margin-top:15px;"></div>
+            <div id="package-result" style="margin-top:15px;" role="status" aria-live="polite"></div>
+            <div id="parcel-list" style="margin-top:15px;" aria-label="Your tracked packages"></div>
         </div>
 
         <div class="card">
             <h2>☕️ Coffee Loyalty</h2>
-            <div id="loyalty-progress">Checking points...</div>
-            <div id="voucher-list" style="margin-top:15px;"></div>
+            <div id="loyalty-progress" role="status" aria-live="polite">Checking points...</div>
+            <div id="voucher-list" style="margin-top:15px;" aria-label="Available vouchers"></div>
         </div>
         
         <div class="card" style="text-align:center;">
@@ -95,10 +108,11 @@
             <div id="qr-code" style="margin:15px auto;"></div>
             <p style="font-size:0.75rem; color:#999; margin-top:15px; font-style:italic;">
                 Want a keychain loyalty card like you're at ShopRite in 1996?<br>
-                <a href="javascript:void(0)" onclick="printKeychainCard()" style="color:var(--brand);">Print one here 📇</a>
+                <button type="button" onclick="printKeychainCard()" style="color:var(--brand); background:none; border:none; cursor:pointer; text-decoration:underline; font-size:inherit; font-style:inherit;">Print one here 📇</button>
             </p>
         </div>
     </div>
+    </main>
 
     <script>
         // 1. SETUP SUPABASE

@@ -223,6 +223,8 @@
     </style>
 </head>
 <body>
+    <a href="#main-content" class="skip-link">Skip to checkout</a>
+
     <header>
         <a href="/shop.html" class="brand">
             <img src="logo.png" alt="BrewHub">
@@ -230,6 +232,7 @@
         </a>
     </header>
 
+    <main id="main-content">
     <div class="container" id="checkout-container">
         <!-- Left: Cart Summary -->
         <div>
@@ -243,10 +246,10 @@
         </div>
 
         <!-- Right: Payment -->
-        <div class="payment-section">
-            <h1>Payment</h1>
+        <div class="payment-section" role="form" aria-labelledby="payment-heading">
+            <h1 id="payment-heading">Payment</h1>
             
-            <div id="error-message" class="error-message"></div>
+            <div id="error-message" class="error-message" role="alert" aria-live="assertive"></div>
 
             <!-- Customer Info -->
             <div class="form-group">
@@ -281,7 +284,7 @@
         </div>
     </div>
 
-    <div id="success-container" style="display: none; max-width: 600px; margin: 60px auto; padding: 24px;">
+    <div id="success-container" style="display: none; max-width: 600px; margin: 60px auto; padding: 24px;" role="status" aria-live="polite">
         <div class="success-message">
             <h2>🎉 Order Confirmed!</h2>
             <p id="success-text">Thank you for your order.</p>
@@ -290,6 +293,7 @@
             </p>
         </div>
     </div>
+    </main>
 
     <footer>
         BrewHub PHL • Point Breeze • Philly
@@ -366,7 +370,7 @@
 
         function escapeHtml(str) {
             if (!str) return '';
-            return str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
+            return String(str).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
         }
 
         function showError(message) {
@@ -383,9 +387,18 @@
             document.getElementById('checkout-container').style.display = 'none';
             document.getElementById('success-container').style.display = 'block';
             
-            let text = `Order #${orderId} confirmed. Check your email for receipt.`;
+            const safeOrderId = escapeHtml(String(orderId));
+            let text = `Order #${safeOrderId} confirmed. Check your email for receipt.`;
             if (receiptUrl) {
-                text += ` <a href="${receiptUrl}" target="_blank">View Receipt</a>`;
+                // Validate URL is from Square domain before displaying
+                try {
+                    const url = new URL(receiptUrl);
+                    if (url.hostname.endsWith('squareup.com') || url.hostname.endsWith('square.com')) {
+                        text += ` <a href="${escapeHtml(receiptUrl)}" target="_blank" rel="noopener">View Receipt</a>`;
+                    }
+                } catch (e) {
+                    // Invalid URL, skip the link
+                }
             }
             document.getElementById('success-text').innerHTML = text;
             
