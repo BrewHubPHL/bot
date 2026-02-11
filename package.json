@@ -6,7 +6,9 @@
   "scripts": {
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "dev": "node local-server.js",
+    "dev:hybrid": "echo Set NETLIFY_PREVIEW_URL first && node local-server.js"
   },
   "repository": {
     "type": "git",
@@ -23,8 +25,6 @@
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.34.0",
     "@google/generative-ai": "^0.24.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "@netlify/functions": "^5.1.2",
     "@supabase/supabase-js": "^2.95.3",
     "axios": "^1.13.4",
@@ -35,10 +35,13 @@
     "lucide-react": "^0.563.0",
     "node-fetch": "^2.7.0",
     "qrcode": "^1.5.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "square": "^44.0.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {
-    "jest": "^29.7.0"
+    "jest": "^29.7.0",
+    "sonarqube-scanner": "^4.3.4"
   }
 }
