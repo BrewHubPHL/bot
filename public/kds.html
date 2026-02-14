@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="robots" content="noindex, nofollow">
+    <title>BrewHub KDS | Kitchen Display</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/js/auth.js"></script>
+    
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; overflow-x: hidden; font-family: sans-serif; }
+        .stale-pulse { 
+            animation: pulse 2s infinite; 
+            border-color: #ef4444 !important; 
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+        }
+        @keyframes pulse { 
+            0%, 100% { opacity: 1; transform: scale(1); } 
+            50% { opacity: 0.8; transform: scale(0.98); } 
+        }
+        button { min-height: 70px; font-size: 1.5rem !important; transition: all 0.2s ease; cursor: pointer; }
+        button:active { transform: scale(0.95); }
+    </style>
+</head>
+<body class="min-h-screen">
+    <a href="#app" class="skip-link" style="position:absolute;top:-40px;left:0;background:#000;color:#fff;padding:8px;z-index:100;transition:top 0.3s;" onfocus="this.style.top='0'" onblur="this.style.top='-40px'">Skip to main content</a>
+
+    <div id="app">
+        <div class="flex items-center justify-center min-h-screen">
+            <div class="text-center">
+                <div class="text-8xl mb-6">☕</div>
+                <p class="text-3xl text-slate-400 animate-pulse">Booting up the espresso machine...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- USE AUTH.JS CLIENT ---
+        // Wait for brewAuth to be ready, then use its client
+        var sbClient = null;
+        async function initSupabase() {
+            while (!window.brewAuth?.client) await new Promise(r => setTimeout(r, 50));
+            sbClient = window.brewAuth.client;
+        }
+
+        // --- STATE ---
+        var orders = [];
+        var lastUpdated = new Date();
+
+        // --- HELPERS ---
+        // This was the missing piece causing your ReferenceError!
+        async function authHeaders() {
+            const { data: { session } } = await sbClient.auth.getSession();
+            return {
+                'Content-Type': 'application/json',
+                'Authorization': session ? `Bearer ${session.access_token}` : ''
+            };
+        }
+
+        function timeAgo(date) {
+            var seconds = Math.floor((new Date() - new Date(date)) / 1000);
+            return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm';
+        }
+
+        function isStale(createdAt) {
+            return (new Date() - new Date(createdAt)) > 1000 * 60 * 10;
+        }
+
+        function formatCustomizations(customs) {
+            if (!customs) return "";
+            if (typeof customs === 'string') return customs;
+            try {
+                return Object.entries(customs).map(([k, v]) => k + ": " + v).join(', ');
+            } catch(e) { return ""; }
+        }
+
+        // --- DATA FETCHING ---
+        async function fetchOrders() {
+            try {
+                console.log("KDS: Fetching active orders...");
+                var { data, error } = await sbClient
+                    .from('orders')
+                    .select('*, coffee_orders (*)')
+                    .in('status', ['paid', 'preparing', 'ready'])
+                    .order('created_at', { ascending: true });
+
+                if (error) throw error;
+                orders = data || [];
+                lastUpdated = new Date();
+                render();
+                console.log("KDS: Success! Orders count:", orders.length);
+            } catch (err) {
+                console.error("KDS: Fetch Error:", err);
+            }
+        }
+
+        // --- STATUS UPDATE ---
+        async function updateStatus(orderId, newStatus) {
+            try {
+                console.log(`KDS: Requesting status change to ${newStatus}...`);
+
+                // 1. Optimistic UI update
+                orders = orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o);
+                render();
+
+                // 2. Call Netlify Function with Auth
+                const response = await fetch('/.netlify/functions/update-order-status', {
+                    method: 'POST',
+                    headers: await authHeaders(),
+                    body: JSON.stringify({ orderId, status: newStatus })
+                });
+
+                if (!response.ok) {
+                    const errorMsg = await response.text();
+                    throw new Error(errorMsg || 'Failed to update');
+                }
+
+                console.log("KDS: Update verified by server.");
+            } catch (err) {
+                console.error("KDS Update Error:", err);
+                // On error, the card will "flash" back to its real DB state
+                fetchOrders();
+            }
+        }
+
+        // --- UI RENDERING ---
+        function render() {
+            var app = document.getElementById('app');
+            var statusStyles = {
+                paid: 'border-emerald-500 bg-emerald-500/10 text-emerald-400',
+                preparing: 'border-amber-500 bg-amber-500/10 text-amber-400',
+                ready: 'border-blue-500 bg-blue-500/10 text-blue-400'
+            };
+
+            app.innerHTML = `
+                <div class="p-10">
+                    <header class="flex justify-between items-end mb-12 border-b-2 border-slate-700 pb-8">
+                        <div>
+                            <h1 class="text-6xl font-black text-amber-500 tracking-tighter uppercase">BrewHub <span class="text-white">KDS</span></h1>
+                            <p class="text-2xl text-slate-500 mt-2 font-mono italic">SYSTEM ONLINE</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-2xl text-slate-400 font-mono">${lastUpdated.toLocaleTimeString()}</p>
+                            <button onclick="fetchOrders()" class="mt-4 bg-slate-800 px-6 py-2 rounded-xl text-2xl hover:bg-slate-700">🔄 SYNC</button>
+                        </div>
+                    </header>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-10">
+                        ${orders.length === 0 ? `
+                            <div class="col-span-full text-center py-60 opacity-20">
+                                <h2 class="text-6xl font-black italic">NO ORDERS IN QUEUE</h2>
+                            </div>
+                        ` : orders.map(order => {
+                            var style = statusStyles[order.status] || 'border-slate-500';
+                            var stale = isStale(order.created_at) && order.status !== 'ready';
+                            
+                            return `
+                                <div class="bg-slate-800 rounded-[2rem] border-t-[12px] shadow-2xl flex flex-col h-full ${style} ${stale ? 'stale-pulse' : ''}">
+                                    <div class="p-8 border-b border-slate-700 flex justify-between items-start">
+                                        <div>
+                                            <h3 class="text-4xl font-black text-white leading-none">${order.customer_name || 'Guest'}</h3>
+                                            <p class="text-2xl font-mono text-slate-400 mt-3">${timeAgo(order.created_at)} ago</p>
+                                        </div>
+                                        <span class="text-lg font-bold uppercase px-4 py-1 rounded-lg ${style}">${order.status}</span>
+                                    </div>
+                                    <div class="p-8 flex-grow space-y-6">
+                                        ${(order.coffee_orders || []).map(item => `
+                                            <div class="border-l-4 border-amber-500/30 pl-4">
+                                                <p class="text-4xl font-bold text-slate-100">${item.drink_name}</p>
+                                                <p class="text-2xl text-amber-400 font-medium mt-1 leading-tight">${formatCustomizations(item.customizations)}</p>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                    <div class="p-8 bg-slate-900/40 rounded-b-[2rem]">
+                                        ${order.status === 'paid' ? 
+                                            `<button onclick="updateStatus('${order.id}', 'preparing')" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black shadow-lg">START PREPARING</button>` : 
+                                          order.status === 'preparing' ? 
+                                            `<button onclick="updateStatus('${order.id}', 'ready')" class="w-full bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black shadow-lg">ORDER UP!</button>` : 
+                                            `<button onclick="updateStatus('${order.id}', 'completed')" class="w-full bg-slate-600 hover:bg-slate-500 text-white rounded-2xl font-black">COMPLETED</button>`
+                                        }
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- STARTUP ---
+        async function init() {
+            // Wait for brewAuth and init client
+            while (!window.brewAuth) await new Promise(r => setTimeout(r, 100));
+            await initSupabase();
+            await window.brewAuth.protectPage({ requiredRole: 'staff' });
+            
+            fetchOrders();
+
+            // Subscriptions
+            sbClient.channel('kds-realtime')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'coffee_orders' }, () => fetchOrders())
+                .subscribe();
+
+            setInterval(render, 30000);
+        }
+        init();
+    </script>
+</body>
+</html>

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { createClient } from '@supabase/supabase-js';
 import confetti from 'canvas-confetti';
+import { Conversation } from '@elevenlabs/client';
 
 // 1. ENGINE CONFIGURATION
 const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
@@ -12,21 +13,33 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export default function BrewHubLanding() {
   // State Management
+  const [isLoading, setIsLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [isJoined, setIsJoined] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [messages, setMessages] = useState([{ role: 'assistant', content: "Welcome! I'm Elise, the BrewHub concierge. Feel free to ask about our opening or your waitlist status!" }]);
+  const [messages, setMessages] = useState([{ role: 'assistant', content: "Hey! I'm Elise, your BrewHub helper. Ask me about our opening, your waitlist spot, or the menu!" }]);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState("");
+  const [initialRender, setInitialRender] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const conversationRef = useRef<Conversation | null>(null);
+  const chatBoxRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll chat (only scroll within chatbox, not the whole page)
+  // Splash screen timer and scroll to top
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    window.scrollTo(0, 0);
+    const timer = setTimeout(() => setIsLoading(false), 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Auto-scroll chat container (scroll within chatbox, not page - skip initial render)
+  useEffect(() => {
+    if (initialRender) {
+      setInitialRender(false);
+      return;
+    }
+    if (chatBoxRef.current) {
+      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
   }, [messages]);
 
@@ -37,7 +50,7 @@ export default function BrewHubLanding() {
     };
   }, []);
 
-  // 4. VOICE CHAT LOGIC (ElevenLabs)
+  // 4. VOICE CHAT LOGIC (ElevenLabs Conversational AI)
   const startVoiceSession = async () => {
     try {
       setVoiceStatus("Connecting...");
@@ -50,95 +63,55 @@ export default function BrewHubLanding() {
         throw new Error(data.error || 'Failed to get voice session');
       }
 
-      // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
+      // Request microphone access first
+      await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Create audio context
-      audioContextRef.current = new AudioContext({ sampleRate: 16000 });
-      
-      // Connect WebSocket to ElevenLabs
-      const ws = new WebSocket(data.signedUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setIsVoiceActive(true);
-        setVoiceStatus("Listening...");
-        
-        // Start sending audio
-        const audioContext = audioContextRef.current!;
-        const source = audioContext.createMediaStreamSource(stream);
-        const processor = audioContext.createScriptProcessor(4096, 1, 1);
-        
-        processor.onaudioprocess = (e) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            const inputData = e.inputBuffer.getChannelData(0);
-            const pcm16 = new Int16Array(inputData.length);
-            for (let i = 0; i < inputData.length; i++) {
-              pcm16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-            }
-            ws.send(JSON.stringify({
-              type: 'audio',
-              audio: btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)))
-            }));
+      // Start ElevenLabs Conversation (handles VAD automatically)
+      const conversation = await Conversation.startSession({
+        signedUrl: data.signedUrl,
+        onConnect: () => {
+          setIsVoiceActive(true);
+          setVoiceStatus("Listening... speak now!");
+        },
+        onDisconnect: () => {
+          setIsVoiceActive(false);
+          setVoiceStatus("");
+        },
+        onMessage: (message: { source: string; message: string }) => {
+          if (message.source === 'user') {
+            setMessages(prev => [...prev, { role: 'user', content: message.message }]);
+          } else if (message.source === 'ai') {
+            setMessages(prev => [...prev, { role: 'assistant', content: message.message }]);
           }
-        };
-        
-        source.connect(processor);
-        processor.connect(audioContext.destination);
-      };
-
-      ws.onmessage = async (event) => {
-        const msg = JSON.parse(event.data);
-        
-        if (msg.type === 'audio' && msg.audio) {
-          // Play received audio
-          const audioData = Uint8Array.from(atob(msg.audio), c => c.charCodeAt(0));
-          const audioContext = new AudioContext();
-          const audioBuffer = await audioContext.decodeAudioData(audioData.buffer);
-          const source = audioContext.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(audioContext.destination);
-          source.start();
-        } else if (msg.type === 'transcript') {
-          if (msg.role === 'user') {
-            setMessages(prev => [...prev, { role: 'user', content: msg.text }]);
-          } else if (msg.role === 'assistant') {
-            setMessages(prev => [...prev, { role: 'assistant', content: msg.text }]);
+        },
+        onError: (message: string) => {
+          console.error('Voice error:', message);
+          setVoiceStatus("Connection error");
+          setTimeout(() => setVoiceStatus(""), 3000);
+        },
+        onModeChange: (mode: { mode: string }) => {
+          if (mode.mode === 'listening') {
+            setVoiceStatus("Listening...");
+          } else if (mode.mode === 'speaking') {
+            setVoiceStatus("Elise is speaking...");
           }
         }
-      };
+      });
 
-      ws.onerror = () => {
-        setVoiceStatus("Connection error");
-        stopVoiceSession();
-      };
-
-      ws.onclose = () => {
-        setIsVoiceActive(false);
-        setVoiceStatus("");
-      };
+      conversationRef.current = conversation;
 
     } catch (err) {
       console.error('Voice error:', err);
-      setVoiceStatus("Failed to start voice");
+      setVoiceStatus("Failed to start - check mic permissions");
       setIsVoiceActive(false);
       setTimeout(() => setVoiceStatus(""), 3000);
     }
   };
 
-  const stopVoiceSession = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+  const stopVoiceSession = async () => {
+    if (conversationRef.current) {
+      await conversationRef.current.endSession();
+      conversationRef.current = null;
     }
     setIsVoiceActive(false);
     setVoiceStatus("");
@@ -189,7 +162,19 @@ export default function BrewHubLanding() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen w-full">
+    <>
+      {/* Splash Screen */}
+      {isLoading && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gradient-to-br from-[#f8f4f0] via-[#fdfcfb] to-[#e9ded6]">
+          <div className="flex flex-col items-center animate-pulse">
+            <Image src="/logo.png" alt="BrewHub" width={140} height={140} className="rounded-full shadow-2xl border-4 border-[var(--hub-tan)]" priority />
+            <h1 className="mt-6 text-3xl font-playfair font-bold text-[var(--hub-espresso)]">BrewHub</h1>
+            <p className="text-[var(--hub-brown)] text-sm mt-2">Point Breeze • Philadelphia</p>
+          </div>
+        </div>
+      )}
+      
+    <div className="flex flex-col w-full">
       {/* HERO SECTION - Full Width, Centered, Dramatic */}
       <section className="hero-section">
         <div className="hero-bg" />
@@ -223,7 +208,7 @@ export default function BrewHubLanding() {
         <div className="concierge-card">
           <h3 className="concierge-title">Meet Elise.</h3>
           <p className="concierge-desc">Our digital barista is here to help you track your resident packages, check waitlist status, or preview our upcoming menu.</p>
-          <div className="concierge-chatbox">
+          <div className="concierge-chatbox" ref={chatBoxRef}>
             {messages.map((m, i) => (
               <div key={i} className={m.role === 'user' ? 'chat-bubble chat-bubble-user' : 'chat-bubble chat-bubble-bot'}>
                 <span className="chat-bubble-label">{m.role === 'user' ? 'Guest' : 'Elise'}</span>
@@ -246,11 +231,12 @@ export default function BrewHubLanding() {
             className={isVoiceActive ? 'voice-btn voice-btn-active' : 'voice-btn'}
             onClick={toggleVoice}
           >
-            {isVoiceActive ? '🛑 Stop Voice Session' : '🎤 Start Voice Concierge'}
+            {isVoiceActive ? '🛑 Stop Voice Chat' : '🎤 Start Voice Chat'}
           </button>
           {voiceStatus && <div className="voice-status">{voiceStatus}</div>}
         </div>
       </section>
     </div>
+    </>
   );
 }

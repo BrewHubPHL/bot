@@ -8,23 +8,38 @@ exclude:
     - node_modules/**
     - .scannerwork/**
     - local-server.js
+    - .next/**
+    - legacy/**
 
 # Ignore false positives for Supabase Anon Keys (public by design)
+# Supabase anon keys are INTENTIONALLY public - security is enforced via Row Level Security
 ignore:
   'javascript/HardcodedNonCryptoSecret':
     - 'public/js/auth.js':
-        reason: 'Supabase Anon Key is public by design - not a secret'
+        reason: 'Supabase Anon Key is public by design - security is via RLS'
         expires: 2027-02-10T00:00:00.000Z
     - 'public/login.html':
-        reason: 'Supabase Anon Key is public by design - not a secret'
+        reason: 'Supabase Anon Key is public by design - security is via RLS'
         expires: 2027-02-10T00:00:00.000Z
     - 'public/portal.html':
-        reason: 'Supabase Anon Key is public by design - not a secret'
+        reason: 'Supabase Anon Key is public by design - security is via RLS'
+        expires: 2027-02-10T00:00:00.000Z
+    - 'public/resident.html':
+        reason: 'Supabase Anon Key is public by design - security is via RLS'
         expires: 2027-02-10T00:00:00.000Z
     - 'rewards/index.html':
-        reason: 'Supabase Anon Key is public by design - not a secret'
+        reason: 'Supabase Anon Key is public by design - security is via RLS'
+        expires: 2027-02-10T00:00:00.000Z
+    - 'src/app/page.tsx':
+        reason: 'Supabase Anon Key is public by design - security is via RLS'
+        expires: 2027-02-10T00:00:00.000Z
+    - 'src/lib/supabase.ts':
+        reason: 'Supabase Anon Key is public by design - security is via RLS'
         expires: 2027-02-10T00:00:00.000Z
   'javascript/DOMXSS':
     - 'public/shop.html':
         reason: 'All user input is sanitized via escapeHtml() before innerHTML'
+        expires: 2027-02-10T00:00:00.000Z
+    - 'src/app/portal/page.tsx':
+        reason: 'Email is escaped before document.write() - sanitized'
         expires: 2027-02-10T00:00:00.000Z

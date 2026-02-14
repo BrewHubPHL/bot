@@ -1,4 +1,4 @@
-# Explicit routes for HTML pages (must come before catch-all)
+# Explicit routes for legacy HTML pages
 /login.html        /login.html       200
 /portal.html       /portal.html      200
 /cafe.html         /cafe.html        200
@@ -10,9 +10,10 @@
 /shop.html         /shop.html        200
 /checkout.html     /checkout.html    200
 /thank-you.html    /thank-you.html   200
+/resident.html     /resident.html    200
+/privacy.html      /privacy.html     200
 
-# Apple Pay domain verification (must be before SPA catch-all)
+# Apple Pay domain verification
 /.well-known/*     /.well-known/:splat  200
 
-# SPA fallback for client-side routing (React, etc.)
-/*    /index.html   200
+# Next.js handles all other routing

@@ -8,12 +8,17 @@ node_modules/
 .netlify/
 netlify-debug.log
 
+# Next.js
+.next/
+out/
+
 # Temp files
 supabase/.temp/
 
 # Scanner artifacts
 .scannerwork/
 snyk-results.json
+snyk-audit-results.json
 
 # Logs
 *.log
@@ -27,9 +32,31 @@ coverage/
 dist/
 build/
 
+# Legacy HTML replaced by Next.js (keeping locally as backup)
+legacy/index.html
+legacy/shop.html
+legacy/checkout.html
+legacy/portal.html
+legacy/resident.html
+public/index.html
+public/shop.html
+public/checkout.html
+public/portal.html
+public/resident.html
+
 # IDE
 .vscode/settings.json
 .idea/
 
 # OS
 Thumbs.db
+*.swp
+*~
+
+# Testing
+*.lcov
+.jest/
+
+# Package manager locks (optional - remove if you want to track)
+# package-lock.json
+# yarn.lock

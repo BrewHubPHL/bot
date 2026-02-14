@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BrewHub Cafe | Order Coffee & Drinks | Point Breeze PHL</title>
+  <meta name="description" content="Order coffee, espresso, and drinks at BrewHub Cafe in Point Breeze, Philadelphia. Fast pickup for locals in 19146.">
+  <link rel="canonical" href="https://brewhubphl.com/cafe.html">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://brewhubphl.com/cafe.html">
+  <meta property="og:title" content="BrewHub Cafe | Order Coffee & Drinks">
+  <meta property="og:description" content="Order coffee, espresso, and drinks at BrewHub Cafe in Point Breeze, Philadelphia.">
+  <meta property="og:image" content="https://brewhubphl.com/logo.png">
+  
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/js/auth.js"></script>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh; color: #fff;
+    }
+    .header { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); padding: 1rem 2rem; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .logo { font-size: 1.5rem; font-weight: 700; color: #f39c12; }
+    .logo span { color: #fff; }
+    .nav-links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 2rem; font-size: 0.9rem; transition: color 0.2s; }
+    .nav-links a:hover, .nav-links a.active { color: #f39c12; }
+    .container { display: grid; grid-template-columns: 1fr 350px; gap: 2rem; padding: 2rem; max-width: 1400px; margin: 0 auto; }
+    .order-card { background: rgba(255,255,255,0.08); border-radius: 16px; padding: 1.5rem; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem; }
+    .status-paid { background: #27ae60; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; }
+    .card { background: rgba(255,255,255,0.08); border-radius: 16px; padding: 1.5rem; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1rem; }
+    .checkout-btn { width: 100%; background: #27ae60; color: #fff; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
+    .checkout-btn:disabled { opacity: 0.3; }
+  </style>
+</head>
+<body>
+  <a href="#main-content" class="skip-link" style="position:absolute;top:-40px;left:0;background:#000;color:#fff;padding:8px;z-index:100;transition:top 0.3s;" onfocus="this.style.top='0'" onblur="this.style.top='-40px'">Skip to main content</a>
+  <header class="header">
+    <div class="logo">Brew<span>Hub</span></div>
+    <nav class="nav-links">
+      <a href="cafe.html" class="active">Cafe POS</a>
+      <a href="parcels.html">Parcel Hub</a>
+      <a href="scan.html">Inventory</a>
+      <a href="manager.html">Dashboard</a>
+    </nav>
+  </header>
+  
+  <main class="container">
+    <section>
+      <h2>📋 Live Orders</h2>
+      <div style="margin-bottom: 20px; display: flex; gap: 10px;">
+          <button onclick="addToCart({name: 'Latte', price: 4.50})" style="padding:10px; border-radius:8px; border:none; background:#3498db; color:white; cursor:pointer;">+ Add Latte</button>
+          <button onclick="addToCart({name: 'Croissant', price: 3.50})" style="padding:10px; border-radius:8px; border:none; background:#3498db; color:white; cursor:pointer;">+ Add Croissant</button>
+      </div>
+      <div id="ordersFeed"></div>
+    </section>
+    
+    <aside>
+      <div class="card">
+        <h3>🛒 Current Order</h3>
+        <div id="cartItems" style="margin: 15px 0;"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span id="cartTotal" style="font-size: 1.5rem; color: #f39c12; font-weight: bold;">$0.00</span>
+            <button class="checkout-btn" id="checkoutBtn" onclick="checkout()" disabled style="width: auto; padding: 10px 20px;">Pay →</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    // 1. GLOBAL STATE (No redeclaring 'supabase')
+    let cart = [];
+
+    // 2. POS FUNCTIONS (Available immediately)
+    function addToCart(item) {
+      cart.push(item);
+      renderCart();
+    }
+
+    function renderCart() {
+      const list = document.getElementById('cartItems');
+      list.innerHTML = cart.map(item => `<div>${item.name} - $${item.price.toFixed(2)}</div>`).join('');
+      const total = cart.reduce((s, i) => s + i.price, 0);
+      document.getElementById('cartTotal').textContent = `$${total.toFixed(2)}`;
+      document.getElementById('checkoutBtn').disabled = cart.length === 0;
+    }
+
+    async function checkout() {
+  const client = window.brewAuth.client;
+  
+  try {
+    // Get the session for Authorization header
+    const { data: { session } } = await client.auth.getSession();
+    if (!session) {
+      alert('Session expired. Please log in again.');
+      window.location.href = '/login.html';
+      return;
+    }
+
+    // Call server-side checkout API (validates prices server-side)
+    const response = await fetch('/.netlify/functions/cafe-checkout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({ cart })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || 'Checkout failed');
+    }
+
+    alert('Order Success!');
+    cart = [];
+    renderCart();
+  } catch (err) {
+    console.error(err);
+    alert('Checkout Failed: ' + err.message);
+  }
+}
+
+    // 3. INITIALIZATION & REALTIME
+    async function init() {
+      // Wait for brewAuth to exist
+      while (!window.brewAuth) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      
+      // Staff auth required
+      await window.brewAuth.protectPage({ requiredRole: 'staff' });
+      
+      const client = window.brewAuth.client;
+      console.log("✅ Cafe POS Connected");
+      
+      // Load recent orders for the feed
+      const { data } = await client.from('orders').select('*').order('created_at', { ascending: false }).limit(5);
+      if (data) data.forEach(addOrderToFeed);
+
+      // Subscribe to new orders
+      client.channel('orders-cafe').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, payload => {
+        addOrderToFeed(payload.new);
+      }).subscribe();
+    }
+
+    function addOrderToFeed(order) {
+      const feed = document.getElementById('ordersFeed');
+      if (!feed) return;
+      feed.innerHTML = `<div class="order-card">Order #${order.id.slice(0,5)} <span class="status-paid">${order.status}</span></div>` + feed.innerHTML;
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BrewHub Inventory Scanner</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="/js/auth.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, sans-serif; background: #121212; color: white; margin: 0; padding: 0; min-height: 100vh; }
+        h1 { font-family: var(--font-heading); color: var(--brand-primary); }
+        .btn { background-color: var(--brand-accent); color: #fff; }
+
+        .header { background: rgba(255,255,255,0.03); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .logo { font-size: 1.3rem; font-weight: 700; color: #f39c12; }
+        .logo span { color: #fff; }
+        .nav-links a { color: rgba(255,255,255,0.7); text-decoration: none; margin-left: 1.5rem; font-size: 0.9rem; }
+        .nav-links a:hover, .nav-links a.active { color: #f39c12; }
+        
+        .container { max-width: 500px; margin: 0 auto; padding: 20px; }
+        h2 { color: #f39c12; margin-bottom: 5px; text-align: center; }
+        #status { color: #888; font-size: 0.9em; text-align: center; margin-bottom: 15px; }
+        
+        #reader { width: 100%; border: 2px solid #333; border-radius: 16px; overflow: hidden; background: #000; display: none; margin-bottom: 15px; }
+        
+        .btn { padding: 12px 20px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; width: 100%; font-size: 16px; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: #f39c12; color: #121212; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-danger { background: #c0392b; color: white; }
+        .btn-secondary { background: #333; color: white; }
+        
+        .item-card { background: #1e1e1e; border-radius: 12px; padding: 20px; margin-top: 15px; border: 1px solid #333; display: none; }
+        .item-card.visible { display: block; }
+        .item-name { font-size: 1.4em; font-weight: 700; color: #f39c12; margin-bottom: 5px; }
+        .item-barcode { font-size: 0.8em; color: #666; margin-bottom: 15px; }
+        
+        .stock-display { display: flex; align-items: center; justify-content: center; gap: 20px; margin: 20px 0; }
+        .stock-btn { width: 50px; height: 50px; border-radius: 50%; font-size: 24px; font-weight: bold; }
+        .stock-count { font-size: 3em; font-weight: 700; min-width: 80px; text-align: center; }
+        .stock-count.low { color: #e74c3c; }
+        .stock-count.ok { color: #27ae60; }
+        
+        .stock-info { display: flex; justify-content: space-between; font-size: 0.9em; color: #888; margin-bottom: 20px; }
+        
+        .actions { display: flex; gap: 10px; margin-top: 15px; }
+        .actions .btn { flex: 1; }
+        
+        .manual-entry { margin-top: 20px; padding-top: 20px; border-top: 1px solid #333; }
+        .manual-entry input { width: 100%; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #222; color: white; font-size: 16px; margin-bottom: 10px; }
+        
+        .history { margin-top: 20px; }
+        .history-title { font-size: 0.9em; color: #888; margin-bottom: 10px; }
+        .history-item { background: #1a1a1a; padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .history-item .name { font-weight: 600; }
+        .history-item .change { font-weight: 700; }
+        .history-item .change.plus { color: #27ae60; }
+        .history-item .change.minus { color: #e74c3c; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">Inventory<span>Scanner</span></div>
+        <nav class="nav-links">
+            <a href="cafe.html">Cafe POS</a>
+            <a href="parcels.html">Parcel Hub</a>
+            <a href="scan.html" class="active">Inventory</a>
+            <a href="manager.html">Dashboard</a>
+        </nav>
+    </header>
+    
+    <div class="container">
+        <h2>📦 Inventory Scanner</h2>
+        <p id="status">Scan with S740 or tap Start for camera</p>
+        
+        <div id="reader"></div>
+        
+        <button id="toggle-button" class="btn btn-primary" onclick="toggleScanner()">Start Scanner</button>
+        
+        <!-- Item Card (shows after scan) -->
+        <div class="item-card" id="item-card">
+            <div class="item-name" id="item-name">-</div>
+            <div class="item-barcode" id="item-barcode">-</div>
+            
+            <div class="stock-display">
+                <button class="btn stock-btn btn-danger" onclick="adjustStock(-1)">−</button>
+                <div class="stock-count" id="stock-count">0</div>
+                <button class="btn stock-btn btn-success" onclick="adjustStock(1)">+</button>
+            </div>
+            
+            <div class="stock-info">
+                <span>Unit: <strong id="item-unit">-</strong></span>
+                <span>Min: <strong id="item-threshold">-</strong></span>
+            </div>
+            
+            <div class="actions">
+                <button class="btn btn-success" onclick="saveStock()">💾 Save</button>
+                <button class="btn btn-secondary" onclick="clearItem()">✕ Clear</button>
+            </div>
+        </div>
+        
+        <!-- Manual barcode entry -->
+        <div class="manual-entry">
+            <input type="text" id="manual-barcode" placeholder="Or type barcode manually..." onkeypress="if(event.key==='Enter')lookupBarcode(this.value)">
+            <button class="btn btn-secondary" onclick="lookupBarcode(document.getElementById('manual-barcode').value)">Look Up</button>
+        </div>
+        
+        <!-- Recent scans -->
+        <div class="history" id="history">
+            <div class="history-title">Recent Updates</div>
+            <div id="history-list"></div>
+        </div>
+    </div>
+
+    <script>
+        // Use brewAuth.client for consistent session storage
+        let sb = null;
+        async function initSupabase() {
+            while (!window.brewAuth?.client) await new Promise(r => setTimeout(r, 50));
+            sb = window.brewAuth.client;
+        }
+
+        let scanner;
+        let scannerActive = false;
+        let currentItem = null;
+        let pendingStock = 0;
+        let recentUpdates = [];
+
+        // ===== AUTH HEADERS =====
+        async function authHeaders() {
+            const { data: { session } } = await sb.auth.getSession();
+            if (!session) throw new Error('Not signed in');
+            return {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`
+            };
+        }
+
+        // ===== HARDWARE SCANNER SUPPORT (Socket Mobile S740) =====
+        // Bluetooth scanners type fast (<50ms between chars) and end with Enter
+        let scanBuffer = '';
+        let lastKeyTime = 0;
+        const SCAN_TIMEOUT = 100; // Max ms between keystrokes for scanner input
+
+        document.addEventListener('keydown', (e) => {
+            // Skip if typing in an input field
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            const now = Date.now();
+            
+            // Reset buffer if too much time passed
+            if (now - lastKeyTime > SCAN_TIMEOUT && scanBuffer.length > 0) {
+                scanBuffer = '';
+            }
+            lastKeyTime = now;
+            
+            if (e.key === 'Enter' && scanBuffer.length >= 4) {
+                // Scanner finished - process the barcode
+                e.preventDefault();
+                const barcode = scanBuffer.trim();
+                scanBuffer = '';
+                lookupBarcode(barcode);
+            } else if (e.key.length === 1) {
+                // Single character - add to buffer
+                scanBuffer += e.key;
+            }
+        });
+
+        // Initialize camera scanner
+        function initScanner() {
+            scanner = new Html5Qrcode("reader");
+        }
+        initScanner();
+
+        const scannerConfig = {
+            fps: 10,
+            qrbox: { width: 280, height: 150 },
+            disableFlip: true,
+            formatsToSupport: [
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.EAN_8,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.QR_CODE
+            ],
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+        };
+
+        async function toggleScanner() {
+            const scannerDiv = document.getElementById('reader');
+            const statusEl = document.getElementById('status');
+            const button = document.getElementById('toggle-button');
+
+            if (!scannerActive) {
+                scannerDiv.style.display = 'block';
+                button.disabled = true;
+                statusEl.innerText = 'Initializing camera...';
+
+                try {
+                    await scanner.start(
+                        { facingMode: 'environment' },
+                        scannerConfig,
+                        onScanSuccess
+                    );
+                    scannerActive = true;
+                    statusEl.innerText = 'Point at product barcode';
+                    button.innerText = 'Stop Scanner';
+                    button.classList.remove('btn-primary');
+                    button.classList.add('btn-danger');
+                } catch (err) {
+                    statusEl.innerText = 'Camera error: ' + err.message;
+                    scannerDiv.style.display = 'none';
+                } finally {
+                    button.disabled = false;
+                }
+            } else {
+                await stopScanner();
+            }
+        }
+
+        async function stopScanner() {
+            const button = document.getElementById('toggle-button');
+            button.disabled = true;
+            try {
+                await scanner.stop();
+            } catch (e) {}
+            document.getElementById('reader').style.display = 'none';
+            scannerActive = false;
+            button.disabled = false;
+            button.innerText = 'Start Scanner';
+            button.classList.remove('btn-danger');
+            button.classList.add('btn-primary');
+            document.getElementById('status').innerText = 'Scanner stopped';
+        }
+
+        async function onScanSuccess(barcode) {
+            if (currentItem) return; // Already showing an item
+            
+            if (navigator.vibrate) navigator.vibrate(100);
+            await lookupBarcode(barcode);
+        }
+
+        // ============================================================
+        // SCHEMA-STRICT BARCODE VALIDATION (mirrors server-side)
+        // ============================================================
+        // Supported formats:
+        //   UPC-A:    12 digits
+        //   EAN-13:   13 digits  
+        //   EAN-8:    8 digits
+        //   CODE-128: 6-20 alphanumeric
+        //   Internal: BRW-XXXXXX (BrewHub format)
+        
+        const BARCODE_FORMATS = {
+            UPC_A:    /^[0-9]{12}$/,
+            EAN_13:   /^[0-9]{13}$/,
+            EAN_8:    /^[0-9]{8}$/,
+            CODE_128: /^[A-Z0-9]{6,20}$/,
+            INTERNAL: /^BRW-[A-Z0-9]{6}$/
+        };
+
+        function validateBarcode(input) {
+            // Type check
+            if (!input || typeof input !== 'string') {
+                return { valid: false, sanitized: null, error: 'Input must be a string' };
+            }
+
+            // Length guard
+            if (input.length > 50) {
+                return { valid: false, sanitized: null, error: 'Input too long' };
+            }
+
+            // ASCII-only filter (rejects emojis, non-printable chars)
+            const ASCII_SAFE = /^[\x20-\x7E]+$/;
+            if (!ASCII_SAFE.test(input)) {
+                return { valid: false, sanitized: null, error: 'Invalid characters' };
+            }
+
+            // Normalize
+            const normalized = input.trim().toUpperCase();
+
+            // Min length
+            if (normalized.length < 6) {
+                return { valid: false, sanitized: null, error: 'Too short' };
+            }
+
+            // Match against known formats
+            for (const [format, regex] of Object.entries(BARCODE_FORMATS)) {
+                if (regex.test(normalized)) {
+                    return { valid: true, sanitized: normalized, format, error: null };
+                }
+            }
+
+            return { valid: false, sanitized: null, error: 'Unknown format' };
+        }
+
+        async function lookupBarcode(barcode) {
+            const validation = validateBarcode(barcode);
+            if (!validation.valid) {
+                document.getElementById('status').innerText = `⚠️ ${validation.error}`;
+                return;
+            }
+            barcode = validation.sanitized;
+            
+            document.getElementById('status').innerText = 'Looking up: ' + barcode;
+            document.getElementById('manual-barcode').value = '';
+
+            try {
+                const response = await fetch(`/.netlify/functions/inventory-lookup?barcode=${encodeURIComponent(barcode)}`, {
+                    headers: await authHeaders()
+                });
+
+                const result = await response.json();
+
+                if (!response.ok || !result.found) {
+                    // Not found - offer to create
+                    if (confirm(`Barcode "${barcode}" not found.\n\nAdd as new item?`)) {
+                        const name = prompt('Enter item name:');
+                        if (name) {
+                            await createItem(barcode, name);
+                        }
+                    } else {
+                        document.getElementById('status').innerText = 'Ready - scan with S740 or camera';
+                    }
+                    return;
+                }
+
+                showItem(result.item);
+            } catch (err) {
+                console.error('Lookup error:', err);
+                document.getElementById('status').innerText = 'Lookup failed - try again';
+            }
+        }
+
+        async function createItem(barcode, name) {
+            try {
+                const response = await fetch('/.netlify/functions/create-inventory-item', {
+                    method: 'POST',
+                    headers: await authHeaders(),
+                    body: JSON.stringify({ barcode, name })
+                });
+
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || 'Failed to create item');
+
+                showItem(result.item);
+            } catch (err) {
+                alert('Error creating item: ' + err.message);
+            }
+        }
+
+        function showItem(item) {
+            currentItem = item;
+            pendingStock = item.current_stock || 0;
+            
+            document.getElementById('item-name').innerText = item.item_name;
+            document.getElementById('item-barcode').innerText = item.barcode || 'No barcode';
+            document.getElementById('item-unit').innerText = item.unit || 'units';
+            document.getElementById('item-threshold').innerText = item.min_threshold || 10;
+            updateStockDisplay();
+            
+            document.getElementById('item-card').classList.add('visible');
+            document.getElementById('status').innerText = 'Adjust stock and save';
+        }
+
+        function adjustStock(delta) {
+            pendingStock = Math.max(0, pendingStock + delta);
+            updateStockDisplay();
+            if (navigator.vibrate) navigator.vibrate(50);
+        }
+
+        function updateStockDisplay() {
+            const el = document.getElementById('stock-count');
+            el.innerText = pendingStock;
+            const threshold = currentItem?.min_threshold || 10;
+            el.classList.remove('low', 'ok');
+            el.classList.add(pendingStock <= threshold ? 'low' : 'ok');
+        }
+
+        async function saveStock() {
+            if (!currentItem) return;
+            
+            const originalStock = currentItem.current_stock || 0;
+            const delta = pendingStock - originalStock;
+            
+            if (delta === 0) {
+                 clearItem();
+                 return;
+            }
+
+            try {
+                // Secure atomic update via Netlify Function
+                const response = await fetch('/.netlify/functions/adjust-inventory', {
+                    method: 'POST',
+                    headers: await authHeaders(),
+                    body: JSON.stringify({ 
+                        itemId: currentItem.id,
+                        itemName: currentItem.item_name,
+                        barcode: currentItem.barcode,
+                        delta: delta 
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Update failed');
+                }
+
+                // Add to history
+                recentUpdates.unshift({
+                    name: currentItem.item_name,
+                    change: delta,
+                    newStock: pendingStock
+                });
+                if (recentUpdates.length > 5) recentUpdates.pop();
+                renderHistory();
+
+                if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                document.getElementById('status').innerText = '✅ Saved: ' + currentItem.item_name;
+                
+                clearItem();
+
+            } catch (err) {
+                console.error("Stock Update Error:", err);
+                alert('Error saving: ' + err.message);
+            }
+        }
+
+        function clearItem() {
+            currentItem = null;
+            pendingStock = 0;
+            document.getElementById('item-card').classList.remove('visible');
+            document.getElementById('status').innerText = 'Ready - scan with S740 or camera';
+        }
+
+        function renderHistory() {
+            const container = document.getElementById('history-list');
+            if (recentUpdates.length === 0) {
+                container.innerHTML = '<div style="color:#555; font-size:0.85em;">No updates yet</div>';
+                return;
+            }
+            container.innerHTML = recentUpdates.map(u => {
+                const sign = u.change >= 0 ? '+' : '';
+                const cls = u.change >= 0 ? 'plus' : 'minus';
+                return `
+                    <div class="history-item">
+                        <span class="name">${u.name}</span>
+                        <span class="change ${cls}">${sign}${u.change} → ${u.newStock}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        renderHistory();
+
+        // Staff auth required
+        async function initAuth() {
+            while (!window.brewAuth) await new Promise(r => setTimeout(r, 100));
+            await initSupabase();
+            await window.brewAuth.protectPage({ requiredRole: 'staff' });
+        }
+        initAuth();
+    </script>
+</body>
+</html>

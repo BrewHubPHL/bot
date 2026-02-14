@@ -1,5 +1,4 @@
 [build]
-  base = "brewhub-web"
   publish = ".next"
   command = "npm run build"
 
@@ -8,10 +7,57 @@
   node_bundle = {} 
 
 [dev]
-  command = "npx next dev"
+  command = "npm run dev"
   port = 8888
   targetPort = 3000
   framework = "next"
+
+# Legacy HTML pages
+[[redirects]]
+  from = "/staff"
+  to = "/login.html"
+  status = 302
+  force = true
+
+[[redirects]]
+  from = "/login.html"
+  to = "/login.html"
+  status = 200
+
+[[redirects]]
+  from = "/staff-hub.html"
+  to = "/staff-hub.html"
+  status = 200
+
+[[redirects]]
+  from = "/cafe.html"
+  to = "/cafe.html"
+  status = 200
+
+[[redirects]]
+  from = "/kds.html"
+  to = "/kds.html"
+  status = 200
+
+[[redirects]]
+  from = "/manager.html"
+  to = "/manager.html"
+  status = 200
+
+[[redirects]]
+  from = "/admin.html"
+  to = "/admin.html"
+  status = 200
+
+[[redirects]]
+  from = "/parcels.html"
+  to = "/parcels.html"
+  status = 200
+
+[[redirects]]
+  from = "/scan.html"
+  to = "/scan.html"
+  status = 200
 
 [[edge_functions]]
   path = "/marketing-bot"
