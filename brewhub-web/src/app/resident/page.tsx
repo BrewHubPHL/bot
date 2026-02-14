@@ -1,0 +1,104 @@
+
+"use client";
+import Link from "next/link";
+import { useState } from "react";
+import { supabase } from "@/lib/supabase";
+
+export const metadata = {
+  title: "BrewHub Resident Registration",
+  description: "Register for BrewHub PHL package tracking and coffee rewards.",
+};
+
+export default function ResidentRegisterPage() {
+  const [form, setForm] = useState({
+    name: "",
+    unit: "",
+    email: "",
+    password: "",
+    confirm: "",
+    phone: "",
+    sms: false,
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  async function handleRegister(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setSuccess(false);
+    if (!form.name || !form.unit || !form.email || !form.password || !form.confirm) {
+      setError("Please fill in all required fields.");
+      return;
+    }
+    if (form.password !== form.confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setLoading(true);
+    // 1. Register user with Supabase Auth
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+      options: {
+        data: { full_name: form.name, unit_number: form.unit, phone: form.phone }
+      }
+    });
+    if (signUpError) {
+      setError(signUpError.message);
+      setLoading(false);
+      return;
+    }
+    // 2. Add to residents table
+    const { error: residentError } = await supabase.from("residents").insert({
+      name: form.name,
+      unit_number: form.unit,
+      email: form.email,
+      phone: form.phone
+    });
+    if (residentError) {
+      setError(residentError.message);
+      setLoading(false);
+      return;
+    }
+    setSuccess(true);
+    setLoading(false);
+  }
+
+  return (
+    <main className="max-w-lg mx-auto px-4 py-10 text-stone-900 bg-white rounded-md shadow-md">
+      <Link href="/" className="inline-block mb-6 text-stone-500 hover:text-stone-900">← Back to BrewHub</Link>
+      <div className="bg-white p-6 rounded shadow-md">
+        <h1 className="font-playfair text-2xl mb-4">Register for package tracking & coffee rewards.</h1>
+        {success ? (
+          <div className="bg-green-100 text-green-800 p-4 rounded mb-4">Registration successful! Please check your email to verify your account.</div>
+        ) : null}
+        {error ? (
+          <div className="bg-red-100 text-red-800 p-4 rounded mb-4">{error}</div>
+        ) : null}
+        <form onSubmit={handleRegister}>
+          <input type="text" placeholder="Full Name *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          <input type="text" placeholder="Unit # or Address *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
+          <input type="email" placeholder="Email *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+          <input type="password" placeholder="Password (min 6 characters) *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
+          <input type="password" placeholder="Confirm Password *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.confirm} onChange={e => setForm(f => ({ ...f, confirm: e.target.value }))} />
+          <input type="tel" placeholder="Phone (optional - for text alerts)" className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+          <div className="flex items-start gap-2 mb-2">
+            <input type="checkbox" id="sms-consent" required className="mt-1" checked={form.sms} onChange={e => setForm(f => ({ ...f, sms: e.target.checked }))} />
+            <label htmlFor="sms-consent" className="text-xs text-stone-700">
+              I agree to receive SMS notifications about my packages from BrewHub PHL. Message frequency varies. Msg & data rates may apply. Reply STOP to unsubscribe.
+            </label>
+          </div>
+          <p className="text-xs text-stone-400 mb-4">
+            By registering, you agree to our
+            <Link href="/terms" target="_blank" className="underline ml-1">Terms & Conditions</Link>
+            and
+            <Link href="/privacy" target="_blank" className="underline ml-1">Privacy Policy</Link>.
+          </p>
+          <button type="submit" className="w-full bg-stone-900 text-white py-3 rounded font-bold mb-2" disabled={loading}>{loading ? "Registering..." : "Register"}</button>
+        </form>
+        <div className="text-xs text-stone-500 mt-2">Already have an account? <Link href="/portal" className="underline">Log in</Link></div>
+      </div>
+    </main>
+  );
+}

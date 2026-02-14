@@ -20,9 +20,13 @@
         "npm:dotenv@^17.2.3",
         "npm:express@^5.2.1",
         "npm:facebook-nodejs-business-sdk@^24.0.1",
+        "npm:jest@^29.7.0",
         "npm:lucide-react@0.563",
         "npm:node-fetch@^2.7.0",
         "npm:qrcode@^1.5.4",
+        "npm:react-dom@^18.2.0",
+        "npm:react@^18.2.0",
+        "npm:sonarqube-scanner@^3.5.0",
         "npm:square@44",
         "npm:ws@^8.19.0"
       ]

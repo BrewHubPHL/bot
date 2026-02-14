@@ -1,6 +1,18 @@
 [build]
-  functions = "netlify/functions"
-  publish = "public"
+  base = "brewhub-web"
+  publish = ".next"
+  command = "npm run build"
 
-[functions."marketing-bot"]
-  schedule = "0 13 * * *"  # 8:00 AM EST (13:00 UTC)
+[functions]
+  directory = "netlify/functions"
+  node_bundle = {} 
+
+[dev]
+  command = "npx next dev"
+  port = 8888
+  targetPort = 3000
+  framework = "next"
+
+[[edge_functions]]
+  path = "/marketing-bot"
+  function = "marketing-bot"

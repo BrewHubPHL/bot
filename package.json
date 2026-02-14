@@ -7,7 +7,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "dev": "node local-server.js",
+    "dev": "cd brewhub-web && npx next dev",
+    "dev:legacy": "node local-server.js",
     "dev:hybrid": "echo Set NETLIFY_PREVIEW_URL first && node local-server.js"
   },
   "repository": {
