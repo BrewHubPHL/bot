@@ -41,7 +41,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { tracking_number, carrier, recipient_name, resident_id, scan_only } = JSON.parse(event.body);
+    const { tracking_number, carrier, recipient_name, resident_id, scan_only, skip_notification } = JSON.parse(event.body);
 
     if (!tracking_number) {
       return { 
@@ -71,6 +71,41 @@ exports.handler = async (event) => {
         .from('expected_parcels')
         .update({ status: 'arrived', arrived_at: new Date().toISOString() })
         .eq('id', expected.id);
+
+      // Skip notification for shop packages
+      if (skip_notification) {
+        const { data: parcel, error } = await supabase
+          .from('parcels')
+          .insert({
+            tracking_number,
+            carrier: detectedCarrier,
+            recipient_name: expected.customer_name,
+            recipient_phone: expected.customer_phone,
+            unit_number: expected.unit_number,
+            status: 'arrived',
+            received_at: new Date().toISOString(),
+            match_type: 'pre-registered'
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        return {
+          statusCode: 200,
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          body: JSON.stringify({
+            success: true,
+            match_type: 'pre-registered',
+            tracking: tracking_number,
+            carrier: detectedCarrier,
+            recipient: expected.customer_name,
+            unit: expected.unit_number,
+            notified: false,
+            message: `✅ Shop package checked in (no notification)`
+          })
+        };
+      }
 
       // ═══════════════════════════════════════════════════════════
       // ATOMIC CHECK-IN: Parcel + Notification Queue in ONE transaction
@@ -156,6 +191,39 @@ exports.handler = async (event) => {
         recipientPhone = resident.phone;
         recipientEmail = resident.email;
       }
+    }
+
+    // Skip notification for shop packages
+    if (skip_notification) {
+      const { data: parcel, error } = await supabase
+        .from('parcels')
+        .insert({
+          tracking_number,
+          carrier: detectedCarrier,
+          recipient_name: finalRecipient,
+          unit_number: unitNumber,
+          status: 'arrived',
+          received_at: new Date().toISOString(),
+          match_type: 'manual'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        statusCode: 200,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify({
+          success: true,
+          match_type: 'manual',
+          tracking: tracking_number,
+          carrier: detectedCarrier,
+          recipient: finalRecipient,
+          notified: false,
+          message: `📦 Shop package checked in (no notification)`
+        })
+      };
     }
 
     // ═══════════════════════════════════════════════════════════

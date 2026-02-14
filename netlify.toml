@@ -59,6 +59,31 @@
   to = "/scan.html"
   status = 200
 
+# AI Agent API endpoints (clean URLs)
+[[redirects]]
+  from = "/api/menu"
+  to = "/.netlify/functions/get-menu"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/order"
+  to = "/.netlify/functions/ai-order"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/loyalty"
+  to = "/.netlify/functions/get-loyalty"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/navigate"
+  to = "/.netlify/functions/navigate-site"
+  status = 200
+  force = true
+
 [[edge_functions]]
   path = "/marketing-bot"
   function = "marketing-bot"

@@ -11,7 +11,7 @@ export default function MobileNav() {
         <span className="font-playfair text-xl tracking-tight font-semibold">BrewHub<span className="text-stone-400 font-light italic">PHL</span></span>
       </div>
       <div className="hidden md:flex space-x-6 text-xs uppercase tracking-widest font-medium text-stone-500">
-        <a href="#about" className="hover:text-stone-900 transition-colors">Our Story</a>
+        <a href="/about" className="hover:text-stone-900 transition-colors">Our Story</a>
         <a href="#location" className="hover:text-stone-900 transition-colors">Location</a>
         <a href="/portal.html" className="hover:text-stone-900 transition-colors">Parcel Hub</a>
         <a href="/" className="hover:text-stone-900 transition-colors">Mailbox Rentals</a>
@@ -29,7 +29,7 @@ export default function MobileNav() {
         </button>
         {open && (
           <div className="absolute right-4 top-16 bg-white border border-stone-200 rounded shadow-lg flex flex-col w-48 z-50 animate-fade-in">
-            <a href="#about" className="px-6 py-3 border-b border-stone-100 hover:bg-stone-50" onClick={() => setOpen(false)}>Our Story</a>
+            <a href="/about" className="px-6 py-3 border-b border-stone-100 hover:bg-stone-50" onClick={() => setOpen(false)}>Our Story</a>
             <a href="#location" className="px-6 py-3 border-b border-stone-100 hover:bg-stone-50" onClick={() => setOpen(false)}>Location</a>
             <a href="/portal.html" className="px-6 py-3 border-b border-stone-100 hover:bg-stone-50" onClick={() => setOpen(false)}>Parcel Hub</a>
             <a href="/" className="px-6 py-3 border-b border-stone-100 hover:bg-stone-50" onClick={() => setOpen(false)}>Mailbox Rentals</a>
@@ -38,6 +38,5 @@ export default function MobileNav() {
         )}
       </div>
     </div>
-        // TODO: Update nav bar background, text, and button colors to use BrewHub palette and bold style if not already done.
   );
 }

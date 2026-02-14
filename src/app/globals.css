@@ -198,6 +198,98 @@ html, body {
   letter-spacing: 0.03em;
 }
 
+/* ===== ABOUT SECTION ===== */
+.about-section {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5rem 1rem;
+  background: linear-gradient(180deg, #fff 0%, var(--bg-main) 100%);
+}
+.about-card {
+  max-width: 720px;
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(12px);
+  border-radius: 1.5rem;
+  box-shadow: 0 8px 32px rgba(44,24,16,0.12);
+  border: 2px solid var(--hub-tan);
+  padding: 3rem 2.5rem;
+}
+.about-title {
+  font-family: var(--font-playfair), serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--hub-espresso);
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+.about-content {
+  font-size: 1.05rem;
+  line-height: 1.8;
+  color: var(--text-main);
+}
+.about-content p {
+  margin-bottom: 1.25rem;
+}
+.about-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* ===== ABOUT PAGE ===== */
+.about-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: linear-gradient(135deg, var(--bg-main) 0%, #fff 50%, var(--bg-main) 100%);
+}
+.about-page-card {
+  max-width: 680px;
+  background: rgba(255,255,255,0.97);
+  backdrop-filter: blur(16px);
+  border-radius: 2rem;
+  box-shadow: 0 12px 48px rgba(44,24,16,0.14);
+  border: 2.5px solid var(--hub-tan);
+  padding: 3rem 2.5rem;
+  text-align: center;
+}
+.about-logo {
+  border-radius: 50%;
+  margin-bottom: 1.5rem;
+}
+.about-page-title {
+  font-family: var(--font-playfair), serif;
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--hub-espresso);
+  margin-bottom: 2rem;
+}
+.about-page-content {
+  font-size: 1.1rem;
+  line-height: 1.9;
+  color: var(--text-main);
+  text-align: left;
+}
+.about-page-content p {
+  margin-bottom: 1.5rem;
+}
+.about-page-content p:last-child {
+  margin-bottom: 0;
+}
+.about-back-link {
+  display: inline-block;
+  margin-top: 2rem;
+  color: var(--hub-brown);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.about-back-link:hover {
+  color: var(--hub-espresso);
+}
+
 /* ===== CONCIERGE SECTION ===== */
 .concierge-section {
   width: 100%;

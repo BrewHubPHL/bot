@@ -29,7 +29,7 @@ export default function RootLayout({
             </a>
             <div className="hidden md:flex space-x-6">
               <a href="/shop" className="nav-link">Shop</a>
-              <a href="#about" className="nav-link">Our Story</a>
+              <a href="/about" className="nav-link">Our Story</a>
               <a href="#location" className="nav-link">Location</a>
               <a href="mailto:info@brewhubphl.com" className="nav-link">Contact</a>
             </div>
@@ -59,6 +59,7 @@ export default function RootLayout({
               <a href="/staff" className="nav-link">Staff</a>
               <a href="/privacy.html" className="nav-link">Privacy</a>
               <a href="/terms.html" className="nav-link">Terms</a>
+              <a href="/about" className="nav-link">About</a>
               <a href="/portal" className="nav-link">Resident Login</a>
             </div>
           </div>

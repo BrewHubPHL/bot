@@ -54,9 +54,9 @@ exports.handler = async (event) => {
 
       const twilioSid = process.env.TWILIO_ACCOUNT_SID;
       const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-      const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
+      const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
 
-      if (twilioSid && twilioToken && twilioPhone) {
+      if (twilioSid && twilioToken && messagingServiceSid) {
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
         const authHeader = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
 
@@ -67,7 +67,7 @@ exports.handler = async (event) => {
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: new URLSearchParams({
-            From: twilioPhone,
+            MessagingServiceSid: messagingServiceSid,
             To: formattedPhone,
             Body: message
           }).toString()

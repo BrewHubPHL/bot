@@ -66,6 +66,7 @@
   <header class="header">
     <div class="logo" onclick="window.location.href='/staff-hub.html'">Brew<span>Hub</span> Dashboard</div>
     <nav class="nav-links">
+      <a href="staff-hub.html">Staff Hub</a>
       <a href="kds.html">KDS</a>
       <a href="cafe.html">Cafe POS</a>
       <a href="parcels.html">Parcel Hub</a>
@@ -159,6 +160,12 @@
   </main>
 
   <script>
+    // XSS Protection
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     // Static inventory data (Placeholder for now)
     const inventory = [
       { name: 'Espresso Beans', category: 'Coffee', current: 3, threshold: 10, unit: 'lbs' },
@@ -170,9 +177,9 @@
       const container = document.getElementById('inventoryList');
       container.innerHTML = inventory.map((item, i) => `
         <div class="inventory-row">
-          <div><div class="item-name">${item.name}</div><div class="item-category">${item.category}</div></div>
-          <div class="stock-level">${item.current} ${item.unit}</div>
-          <div class="threshold">${item.threshold} ${item.unit}</div>
+          <div><div class="item-name">${escapeHtml(item.name)}</div><div class="item-category">${escapeHtml(item.category)}</div></div>
+          <div class="stock-level">${item.current} ${escapeHtml(item.unit)}</div>
+          <div class="threshold">${item.threshold} ${escapeHtml(item.unit)}</div>
           <div class="stock-controls">
             <button class="stock-btn" onclick="adjustStock(${i}, -1)">−</button>
             <button class="stock-btn" onclick="adjustStock(${i}, 1)">+</button>
@@ -224,13 +231,13 @@
         const nextStatus = order.status === 'paid' ? 'preparing' : order.status === 'preparing' ? 'ready' : 'completed';
         
         return `
-          <div class="kds-card ${order.status}">
+          <div class="kds-card ${escapeHtml(order.status)}">
             <div class="kds-header">
-              <strong>${order.customer_name || 'Guest'}</strong>
+              <strong>${escapeHtml(order.customer_name) || 'Guest'}</strong>
               <span style="font-size:0.75rem;color:#888;">${timeAgo}m ago</span>
             </div>
             <div class="kds-items">
-              ${items.map(i => `<div class="kds-item">☕ ${i.drink_name}</div>`).join('') || '<div class="kds-item" style="color:#666;">No items</div>'}
+              ${items.map(i => `<div class="kds-item">☕ ${escapeHtml(i.drink_name)}</div>`).join('') || '<div class="kds-item" style="color:#666;">No items</div>'}
             </div>
             <div class="kds-actions">
               <button class="kds-btn ${btnClass}" onclick="updateKdsStatus('${order.id}', '${nextStatus}')">${btnText}</button>

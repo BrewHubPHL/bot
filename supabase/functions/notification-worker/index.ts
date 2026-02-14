@@ -27,7 +27,7 @@ const WORKER_SECRET = Deno.env.get('WORKER_SECRET') // For authenticated cron ca
 // Twilio credentials
 const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')
 const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')
-const TWILIO_PHONE_NUMBER = Deno.env.get('TWILIO_PHONE_NUMBER')
+const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID')
 
 serve(async (req) => {
   // Auth check for external triggers
@@ -160,7 +160,7 @@ async function sendParcelNotification(payload: any) {
   }
 
   // Send SMS via Twilio if phone provided
-  if (recipient_phone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER) {
+  if (recipient_phone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_MESSAGING_SERVICE_SID) {
     // Format phone to E.164
     const cleanPhone = recipient_phone.replace(/\D/g, '')
     const formattedPhone = cleanPhone.startsWith('1') ? `+${cleanPhone}` : `+1${cleanPhone}`
@@ -176,7 +176,7 @@ async function sendParcelNotification(payload: any) {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({
-        From: TWILIO_PHONE_NUMBER,
+        MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID,
         To: formattedPhone,
         Body: message
       }).toString()

@@ -42,6 +42,7 @@
   <header class="header">
     <div class="logo">Brew<span>Hub</span></div>
     <nav class="nav-links">
+      <a href="staff-hub.html">Staff Hub</a>
       <a href="cafe.html" class="active">Cafe POS</a>
       <a href="parcels.html">Parcel Hub</a>
       <a href="scan.html">Inventory</a>
@@ -72,6 +73,12 @@
   </main>
 
   <script>
+    // XSS Protection
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     // 1. GLOBAL STATE (No redeclaring 'supabase')
     let cart = [];
 
@@ -83,7 +90,7 @@
 
     function renderCart() {
       const list = document.getElementById('cartItems');
-      list.innerHTML = cart.map(item => `<div>${item.name} - $${item.price.toFixed(2)}</div>`).join('');
+      list.innerHTML = cart.map(item => `<div>${escapeHtml(item.name)} - $${item.price.toFixed(2)}</div>`).join('');
       const total = cart.reduce((s, i) => s + i.price, 0);
       document.getElementById('cartTotal').textContent = `$${total.toFixed(2)}`;
       document.getElementById('checkoutBtn').disabled = cart.length === 0;
@@ -152,7 +159,7 @@
     function addOrderToFeed(order) {
       const feed = document.getElementById('ordersFeed');
       if (!feed) return;
-      feed.innerHTML = `<div class="order-card">Order #${order.id.slice(0,5)} <span class="status-paid">${order.status}</span></div>` + feed.innerHTML;
+      feed.innerHTML = `<div class="order-card">Order #${escapeHtml(order.id.slice(0,5))} <span class="status-paid">${escapeHtml(order.status)}</span></div>` + feed.innerHTML;
     }
 
     init();

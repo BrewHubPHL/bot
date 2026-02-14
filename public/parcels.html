@@ -268,6 +268,7 @@
   <header class="header">
     <div class="logo">Parcel<span>Hub</span></div>
     <nav class="nav-links" aria-label="Staff navigation">
+      <a href="staff-hub.html">Staff Hub</a>
       <a href="cafe.html">Cafe POS</a>
       <a href="parcels.html" class="active" aria-current="page">Parcel Hub</a>
       <a href="scan.html">Inventory</a>
@@ -294,7 +295,10 @@
         <label for="residentSearch" class="visually-hidden">Type recipient name to search</label>
         <input type="text" class="tracking-input" id="residentSearch" placeholder="Type recipient name..." oninput="searchResidents()" autocomplete="off" style="width: 100%; margin-bottom: 0.5rem;">
         <div id="residentResults" style="background: rgba(255,255,255,0.05); border-radius: 12px; max-height: 200px; overflow-y: auto;" role="listbox" aria-label="Search results"></div>
-        <button onclick="manualEntry()" style="margin-top: 0.5rem; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: rgba(255,255,255,0.9); padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">+ Add new recipient</button>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+          <button onclick="manualEntry()" style="flex: 1; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: rgba(255,255,255,0.9); padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">+ Add new recipient</button>
+          <button onclick="shopPackage()" style="flex: 1; background: rgba(139,69,19,0.4); border: 1px solid rgba(139,69,19,0.6); color: rgba(255,255,255,0.9); padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">🏪 Shop Package</button>
+        </div>
       </div>
     </section>
     
@@ -397,11 +401,12 @@
     }
 
     // ===== CHECK IN PARCEL (PRO or PHILLY) =====
-    async function checkInParcel(tracking, residentId, recipientName) {
+    async function checkInParcel(tracking, residentId, recipientName, skipNotification = false) {
       try {
         const body = { tracking_number: tracking };
         if (residentId) body.resident_id = residentId;
         if (recipientName) body.recipient_name = recipientName;
+        if (skipNotification) body.skip_notification = true;
 
         const res = await fetch('/.netlify/functions/parcel-check-in', {
           method: 'POST',
@@ -504,6 +509,13 @@
       const name = prompt('Enter recipient name:');
       if (name && currentTracking) {
         checkInParcel(currentTracking, null, name);
+      }
+    }
+
+    // Shop package (no notification)
+    function shopPackage() {
+      if (currentTracking) {
+        checkInParcel(currentTracking, null, 'BrewHub Shop', true);
       }
     }
 

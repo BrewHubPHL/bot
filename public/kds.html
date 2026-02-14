@@ -38,6 +38,12 @@
     </div>
 
     <script>
+        // XSS Protection
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
         // --- USE AUTH.JS CLIENT ---
         // Wait for brewAuth to be ready, then use its client
         var sbClient = null;
@@ -71,9 +77,9 @@
 
         function formatCustomizations(customs) {
             if (!customs) return "";
-            if (typeof customs === 'string') return customs;
+            if (typeof customs === 'string') return escapeHtml(customs);
             try {
-                return Object.entries(customs).map(([k, v]) => k + ": " + v).join(', ');
+                return Object.entries(customs).map(([k, v]) => escapeHtml(k) + ": " + escapeHtml(v)).join(', ');
             } catch(e) { return ""; }
         }
 
@@ -161,15 +167,15 @@
                                 <div class="bg-slate-800 rounded-[2rem] border-t-[12px] shadow-2xl flex flex-col h-full ${style} ${stale ? 'stale-pulse' : ''}">
                                     <div class="p-8 border-b border-slate-700 flex justify-between items-start">
                                         <div>
-                                            <h3 class="text-4xl font-black text-white leading-none">${order.customer_name || 'Guest'}</h3>
+                                            <h3 class="text-4xl font-black text-white leading-none">${escapeHtml(order.customer_name) || 'Guest'}</h3>
                                             <p class="text-2xl font-mono text-slate-400 mt-3">${timeAgo(order.created_at)} ago</p>
                                         </div>
-                                        <span class="text-lg font-bold uppercase px-4 py-1 rounded-lg ${style}">${order.status}</span>
+                                        <span class="text-lg font-bold uppercase px-4 py-1 rounded-lg ${style}">${escapeHtml(order.status)}</span>
                                     </div>
                                     <div class="p-8 flex-grow space-y-6">
                                         ${(order.coffee_orders || []).map(item => `
                                             <div class="border-l-4 border-amber-500/30 pl-4">
-                                                <p class="text-4xl font-bold text-slate-100">${item.drink_name}</p>
+                                                <p class="text-4xl font-bold text-slate-100">${escapeHtml(item.drink_name)}</p>
                                                 <p class="text-2xl text-amber-400 font-medium mt-1 leading-tight">${formatCustomizations(item.customizations)}</p>
                                             </div>
                                         `).join('')}
