@@ -7,7 +7,7 @@
     <title>BrewHub KDS | Kitchen Display</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.95.3"></script>
     <script src="/js/auth.js"></script>
     
     <style>
@@ -148,9 +148,14 @@
                             <h1 class="text-6xl font-black text-amber-500 tracking-tighter uppercase">BrewHub <span class="text-white">KDS</span></h1>
                             <p class="text-2xl text-slate-500 mt-2 font-mono italic">SYSTEM ONLINE</p>
                         </div>
-                        <div class="text-right">
+                        <div class="text-right flex flex-col items-end gap-3">
+                            <nav class="flex gap-4 text-lg">
+                                <a href="staff-hub.html" class="text-slate-400 hover:text-amber-400 transition-colors">Staff Hub</a>
+                                <a href="cafe.html" class="text-slate-400 hover:text-amber-400 transition-colors">Cafe POS</a>
+                                <a href="manager.html" class="text-slate-400 hover:text-amber-400 transition-colors">Dashboard</a>
+                            </nav>
                             <p class="text-2xl text-slate-400 font-mono">${lastUpdated.toLocaleTimeString()}</p>
-                            <button onclick="fetchOrders()" class="mt-4 bg-slate-800 px-6 py-2 rounded-xl text-2xl hover:bg-slate-700">🔄 SYNC</button>
+                            <button onclick="fetchOrders()" class="bg-slate-800 px-6 py-2 rounded-xl text-2xl hover:bg-slate-700">🔄 SYNC</button>
                         </div>
                     </header>
 

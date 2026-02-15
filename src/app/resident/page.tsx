@@ -1,13 +1,7 @@
-
 "use client";
-import Link from "next/link";
+import Link from "next/link";;
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-export const metadata = {
-  title: "BrewHub Resident Registration",
-  description: "Register for BrewHub PHL package tracking and coffee rewards.",
-};
 
 export default function ResidentRegisterPage() {
   const [form, setForm] = useState({

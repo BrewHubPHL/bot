@@ -1,13 +1,7 @@
-
 "use client";
-import Link from "next/link";
+import Link from "next/link";;
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-export const metadata = {
-  title: "BrewHub Inventory Scanner",
-  description: "Scan and manage inventory at BrewHub PHL.",
-};
 
 export default function ScanPage() {
   const [inventory, setInventory] = useState<any[]>([]);

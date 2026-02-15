@@ -3,11 +3,6 @@ import Link from "next/link";
 import { useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-export const metadata = {
-  title: "BrewHub Waitlist",
-  description: "Join the BrewHub PHL waitlist for early access and updates.",
-};
-
 export default function WaitlistPage() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);

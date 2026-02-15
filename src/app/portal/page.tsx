@@ -81,7 +81,8 @@ export default function ResidentPortal() {
   }
 
   const printKeychain = () => {
-    const safeEmail = user.email.replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c] || c));
+    const htmlEntities: Record<string, string> = {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'};
+    const safeEmail = user.email.replace(/[<>&"']/g, (c: string) => htmlEntities[c] || c);
     const barcodeUrl = `https://barcodeapi.org/api/128/${encodeURIComponent(user.email)}`;
     const printWindow = window.open('', '_blank');
     printWindow?.document.write(`<html><body><div style="border:2px dashed #000; padding:20px; width:200px; text-align:center;">

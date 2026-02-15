@@ -1,13 +1,7 @@
-
 "use client";
-import Link from "next/link";
+import Link from "next/link";;
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-export const metadata = {
-  title: "Parcel Pickup & Package Hub | Point Breeze | BrewHub PHL 19146",
-  description: "Pick up packages at BrewHub PHL in Point Breeze, South Philadelphia (19146). Secure parcel holding, delivery acceptance, and mailbox rentals. Your neighborhood package hub.",
-};
 
 export default function ParcelsPage() {
   const [query, setQuery] = useState("");

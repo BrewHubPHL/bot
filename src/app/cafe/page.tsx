@@ -1,13 +1,7 @@
-
 "use client";
-import Link from "next/link";
+import Link from "next/link";;
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-
-export const metadata = {
-  title: "BrewHub Cafe | Order Coffee & Drinks | Point Breeze PHL",
-  description: "Order coffee, espresso, and drinks at BrewHub Cafe in Point Breeze, Philadelphia. Fast pickup for locals in 19146.",
-};
 
 export default function CafePage() {
   const [menu, setMenu] = useState<any[]>([]);

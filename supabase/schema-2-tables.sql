@@ -158,3 +158,28 @@ CREATE TABLE IF NOT EXISTS gdpr_secrets (
 INSERT INTO gdpr_secrets (key, value)
 VALUES ('pii_hash_salt', encode(gen_random_bytes(32), 'hex'))
 ON CONFLICT (key) DO NOTHING;
+
+-- ============================================================
+-- PERFORMANCE INDEXES
+-- ============================================================
+
+-- Orders: frequently filtered by status
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+
+-- Coffee orders: frequently joined with orders
+CREATE INDEX IF NOT EXISTS idx_coffee_orders_order_id ON coffee_orders(order_id);
+
+-- Parcels: frequently filtered by status
+CREATE INDEX IF NOT EXISTS idx_parcels_status ON parcels(status);
+CREATE INDEX IF NOT EXISTS idx_parcels_received_at ON parcels(received_at DESC);
+
+-- Time logs: queried by employee
+CREATE INDEX IF NOT EXISTS idx_time_logs_employee_email ON time_logs(employee_email);
+CREATE INDEX IF NOT EXISTS idx_time_logs_status ON time_logs(status);
+
+-- Expected parcels: lookup by tracking number
+CREATE INDEX IF NOT EXISTS idx_expected_tracking ON expected_parcels(tracking_number);
+
+-- Waitlist: prevent duplicate signups
+ALTER TABLE waitlist ADD CONSTRAINT waitlist_email_unique UNIQUE (email);
