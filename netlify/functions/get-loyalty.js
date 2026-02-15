@@ -19,7 +19,7 @@ const supabase = createClient(
 
 function validateApiKey(event) {
   const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
-  const validKey = process.env.AI_ORDER_API_KEY;
+  const validKey = process.env.BREWHUB_API_KEY;
   if (!validKey) return true; // Dev mode
   return apiKey === validKey;
 }

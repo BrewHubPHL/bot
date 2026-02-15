@@ -73,11 +73,11 @@ function generateOrderNumber(orderId) {
 // Validate API key
 function validateApiKey(event) {
   const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
-  const validKey = process.env.AI_ORDER_API_KEY;
+  const validKey = process.env.BREWHUB_API_KEY;
   
   // If no API key is configured, allow requests (dev mode)
   if (!validKey) {
-    console.warn('[AI-ORDER] No AI_ORDER_API_KEY configured - allowing request');
+    console.warn('[AI-ORDER] No BREWHUB_API_KEY configured - allowing request');
     return true;
   }
   
@@ -120,7 +120,19 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}');
-    const { items, customer_name, customer_phone, notes } = body;
+    let { items, customer_name, customer_phone, notes } = body;
+
+    // Handle items as JSON string (from Eleven Labs) or array
+    if (typeof items === 'string') {
+      try {
+        items = JSON.parse(items);
+      } catch (e) {
+        return json(400, { 
+          success: false, 
+          error: 'Items must be a valid JSON array. Example: [{"name": "Latte", "quantity": 1}]' 
+        });
+      }
+    }
 
     // Validate items array
     if (!Array.isArray(items) || items.length === 0) {
