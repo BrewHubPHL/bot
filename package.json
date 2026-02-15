@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node -e \"const fs=require('fs');fs.readdirSync('legacy').filter(f=>f.endsWith('.html')).forEach(f=>fs.copyFileSync('legacy/'+f,'public/'+f))\"",
+    "prebuild": "node -e \"const fs=require('fs'); if (fs.existsSync('legacy')) { fs.readdirSync('legacy').filter(f=>f.endsWith('.html')).forEach(f=>fs.copyFileSync('legacy/'+f,'public/'+f)); }\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
