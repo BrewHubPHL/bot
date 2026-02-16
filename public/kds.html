@@ -90,7 +90,7 @@
                 var { data, error } = await sbClient
                     .from('orders')
                     .select('*, coffee_orders (*)')
-                    .in('status', ['paid', 'preparing', 'ready'])
+                    .in('status', ['pending', 'unpaid', 'paid', 'preparing', 'ready'])
                     .order('created_at', { ascending: true });
 
                 if (error) throw error;
@@ -136,6 +136,8 @@
         function render() {
             var app = document.getElementById('app');
             var statusStyles = {
+                pending: 'border-red-500 bg-red-500/10 text-red-400 animate-pulse',
+                unpaid: 'border-red-500 bg-red-500/10 text-red-400 animate-pulse',
                 paid: 'border-emerald-500 bg-emerald-500/10 text-emerald-400',
                 preparing: 'border-amber-500 bg-amber-500/10 text-amber-400',
                 ready: 'border-blue-500 bg-blue-500/10 text-blue-400'
@@ -172,6 +174,7 @@
                                 <div class="bg-slate-800 rounded-[2rem] border-t-[12px] shadow-2xl flex flex-col h-full ${style} ${stale ? 'stale-pulse' : ''}">
                                     <div class="p-8 border-b border-slate-700 flex justify-between items-start">
                                         <div>
+                                            ${(order.status === 'pending' || order.status === 'unpaid' || !order.payment_id) ? '<p class="text-xs font-bold text-red-500 mb-1 animate-pulse">⚠️ COLLECT PAYMENT</p>' : ''}
                                             <h3 class="text-4xl font-black text-white leading-none">${escapeHtml(order.customer_name) || 'Guest'}</h3>
                                             <p class="text-2xl font-mono text-slate-400 mt-3">${timeAgo(order.created_at)} ago</p>
                                         </div>
@@ -186,7 +189,7 @@
                                         `).join('')}
                                     </div>
                                     <div class="p-8 bg-slate-900/40 rounded-b-[2rem]">
-                                        ${order.status === 'paid' ? 
+                                        ${(order.status === 'paid' || order.status === 'unpaid' || order.status === 'pending') ? 
                                             `<button onclick="updateStatus('${order.id}', 'preparing')" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black shadow-lg">START PREPARING</button>` : 
                                           order.status === 'preparing' ? 
                                             `<button onclick="updateStatus('${order.id}', 'ready')" class="w-full bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black shadow-lg">ORDER UP!</button>` : 

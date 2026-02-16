@@ -193,7 +193,7 @@ exports.handler = async (event) => {
     const { data: order, error: orderErr } = await supabase
       .from('orders')
       .insert({
-        status: 'pending',
+        status: 'unpaid',
         total_amount_cents: totalCents,
         customer_name: customer_name || 'AI Order',
         notes: notes || null,

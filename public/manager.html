@@ -204,7 +204,7 @@
         const { data, error } = await client
           .from('orders')
           .select('*, coffee_orders(*)')
-          .in('status', ['paid', 'preparing', 'ready'])
+          .in('status', ['pending', 'unpaid', 'paid', 'preparing', 'ready'])
           .order('created_at', { ascending: true });
         
         if (error) throw error;
