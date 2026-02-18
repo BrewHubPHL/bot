@@ -36,15 +36,27 @@ const supabase = createClient(
 
 // ⚠️ FALLBACK ONLY — keep in sync with merch_products table!
 // These are used only when DB is unreachable. Prices may drift.
+// Last synced: 2026-02-18
 const FALLBACK_PRICES = {
   'Latte': 450,
   'Espresso': 300,
   'Cappuccino': 450,
   'Americano': 350,
-  'Croissant': 350,
-  'Muffin': 300,
+  'Mocha': 525,
+  'Cortado': 400,
+  'Macchiato': 375,
+  'Iced Latte': 500,
+  'Iced Americano': 400,
+  'Iced Mocha': 550,
   'Cold Brew': 500,
-  'Drip Coffee': 250,
+  'Lemonade': 400,
+  'Smoothie': 600,
+  'Bagel': 350,
+  'Scone': 375,
+  'Toast': 400,
+  'Cookie': 275,
+  'Breakfast Sandwich': 650,
+  'Wrap': 600,
 };
 
 // Load menu prices from DB

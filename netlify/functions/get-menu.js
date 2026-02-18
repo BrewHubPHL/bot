@@ -26,16 +26,28 @@ const { createClient } = require('@supabase/supabase-js');
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY);
 
-// Fallback menu if DB is unreachable
+// Fallback menu if DB is unreachable — keep in sync with merch_products table!
+// Last synced: 2026-02-18
 const FALLBACK_MENU = [
-  { name: 'Drip Coffee', price_cents: 250, description: 'Fresh brewed house coffee' },
+  { name: 'Latte', price_cents: 450, description: 'Espresso with steamed milk' },
   { name: 'Espresso', price_cents: 300, description: 'Single shot of espresso' },
   { name: 'Americano', price_cents: 350, description: 'Espresso with hot water' },
-  { name: 'Latte', price_cents: 450, description: 'Espresso with steamed milk' },
   { name: 'Cappuccino', price_cents: 450, description: 'Espresso with steamed milk and foam' },
+  { name: 'Mocha', price_cents: 525, description: 'Espresso, chocolate, steamed milk, whipped cream' },
+  { name: 'Cortado', price_cents: 400, description: 'Espresso cut with warm milk' },
+  { name: 'Macchiato', price_cents: 375, description: 'Espresso stained with a dash of foam' },
+  { name: 'Iced Latte', price_cents: 500, description: 'Espresso over ice with cold milk' },
+  { name: 'Iced Americano', price_cents: 400, description: 'Espresso and cold water over ice' },
+  { name: 'Iced Mocha', price_cents: 550, description: 'Chocolate espresso over ice with cold milk' },
   { name: 'Cold Brew', price_cents: 500, description: 'Smooth cold-steeped coffee' },
-  { name: 'Croissant', price_cents: 350, description: 'Buttery pastry' },
-  { name: 'Muffin', price_cents: 300, description: 'Freshly baked muffin' },
+  { name: 'Lemonade', price_cents: 400, description: 'Fresh-squeezed with cane sugar' },
+  { name: 'Smoothie', price_cents: 600, description: 'Mixed berry with banana and oat milk' },
+  { name: 'Bagel', price_cents: 350, description: 'Plain or everything, with cream cheese' },
+  { name: 'Scone', price_cents: 375, description: 'Cranberry orange, crumbly and sweet' },
+  { name: 'Toast', price_cents: 400, description: 'Sourdough with avocado or jam' },
+  { name: 'Cookie', price_cents: 275, description: 'Chocolate chip, house-made' },
+  { name: 'Breakfast Sandwich', price_cents: 650, description: 'Egg, cheese, bacon on brioche' },
+  { name: 'Wrap', price_cents: 600, description: 'Grilled chicken Caesar wrap' },
 ];
 
 exports.handler = async (event) => {

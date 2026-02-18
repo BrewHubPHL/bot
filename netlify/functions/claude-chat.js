@@ -17,15 +17,27 @@ async function extractUser(event, supabase) {
 
 // ⚠️ FALLBACK ONLY — keep in sync with merch_products table!
 // These are used only when DB is unreachable. Prices may drift.
+// Last synced: 2026-02-18
 const FALLBACK_MENU = {
-    'Drip Coffee': 250,
+    'Latte': 450,
     'Espresso': 300,
     'Americano': 350,
-    'Latte': 450,
     'Cappuccino': 450,
+    'Mocha': 525,
+    'Cortado': 400,
+    'Macchiato': 375,
+    'Iced Latte': 500,
+    'Iced Americano': 400,
+    'Iced Mocha': 550,
     'Cold Brew': 500,
-    'Croissant': 350,
-    'Muffin': 300,
+    'Lemonade': 400,
+    'Smoothie': 600,
+    'Bagel': 350,
+    'Scone': 375,
+    'Toast': 400,
+    'Cookie': 275,
+    'Breakfast Sandwich': 650,
+    'Wrap': 600,
 };
 
 // Tool definitions for Claude
@@ -428,9 +440,9 @@ async function executeTool(toolName, toolInput, supabase) {
         const { destination } = toolInput;
         
         const SITE_PAGES = {
-            'menu': { url: 'https://brewhubphl.com/cafe', description: 'View our cafe menu and place an order' },
-            'cafe': { url: 'https://brewhubphl.com/cafe', description: 'View our cafe menu and place an order' },
-            'order': { url: 'https://brewhubphl.com/cafe', description: 'Place a coffee or food order' },
+            'menu': { url: 'https://brewhubphl.com/menu', description: 'Our menu page (coming soon — read the menu aloud instead)' },
+            'cafe': { url: 'https://brewhubphl.com/menu', description: 'Our menu page (coming soon)' },
+            'order': { url: 'https://brewhubphl.com/menu', description: 'Our menu page (coming soon — use place_order tool to order)' },
             'shop': { url: 'https://brewhubphl.com/shop', description: 'Browse our merchandise and coffee beans' },
             'merch': { url: 'https://brewhubphl.com/shop', description: 'Browse our merchandise' },
             'checkout': { url: 'https://brewhubphl.com/checkout', description: 'Complete your purchase' },
@@ -481,7 +493,7 @@ const SYSTEM_PROMPT = `You are Elise, the friendly digital barista and concierge
 You have access to real APIs - ALWAYS use them instead of making up information:
 
 1. **check_waitlist** - Check if someone is on the waitlist by email
-2. **get_menu** - ALWAYS call this when customers ask about menu items, prices, or what's available. Do not guess prices.
+2. **get_menu** - ALWAYS call this when customers ask about menu items, prices, or what's available. Do not guess prices. Read the menu items and prices aloud — do NOT send customers to a URL for the menu.
 3. **place_order** - ALWAYS call this when a customer confirms they want to order. Never simulate or pretend to place orders.
 4. **get_loyalty_info** - ALWAYS call this when customers ask about their rewards, points, or loyalty QR code. Requires their email or phone. Can also text the QR to them.
 5. **navigate_site** - Use when customers want to see a specific page (menu, shop, checkout, rewards, account, parcels, etc.)
@@ -509,8 +521,10 @@ You have access to real APIs - ALWAYS use them instead of making up information:
 - Parcel services: monthly mailbox rentals with 24/7 access or basic shipping/receiving during business hours
 - Cozy lounge area with comfortable seating, free Wi-Fi, coffee and tea for mailbox renters and community
 
-## Menu Items (for reference)
-Drip Coffee, Espresso, Americano, Latte, Cappuccino, Cold Brew, Croissant, Muffin
+## Menu Items (for reference — use exact names when placing orders)
+HOT: Latte, Espresso, Americano, Cappuccino, Mocha, Cortado, Macchiato
+COLD: Iced Latte, Iced Americano, Iced Mocha, Cold Brew, Lemonade, Smoothie
+FOOD: Bagel, Scone, Toast, Cookie, Breakfast Sandwich, Wrap
 
 ## Location  
 Point Breeze, Philadelphia, PA 19146

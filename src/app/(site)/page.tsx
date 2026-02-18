@@ -5,6 +5,43 @@ import Image from 'next/image';
 import { createClient } from '@supabase/supabase-js';
 import confetti from 'canvas-confetti';
 import { Conversation } from '@elevenlabs/client';
+import React from 'react';
+
+// Convert URLs and markdown links in chat text to clickable <a> tags
+function linkify(text: string): React.ReactNode[] {
+  // Match markdown links [label](url) OR bare URLs
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)|(https?:\/\/[^\s),]+)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    // Push text before the match
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    const label = match[1] || match[3]; // markdown label or bare URL
+    const href = match[2] || match[3];  // markdown href or bare URL
+    parts.push(
+      <a
+        key={match.index}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline font-medium hover:opacity-80"
+      >
+        {label}
+      </a>
+    );
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : [text];
+}
 
 // 1. ENGINE CONFIGURATION
 const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
@@ -219,7 +256,7 @@ export default function BrewHubLanding() {
             {messages.map((m, i) => (
               <div key={i} className={m.role === 'user' ? 'chat-bubble chat-bubble-user' : 'chat-bubble chat-bubble-bot'}>
                 <span className="chat-bubble-label">{m.role === 'user' ? 'Guest' : 'Elise'}</span>
-                {m.content}
+                {linkify(m.content)}
               </div>
             ))}
             <div ref={chatEndRef} />
