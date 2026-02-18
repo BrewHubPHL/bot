@@ -68,7 +68,7 @@ exports.handler = async (event) => {
   if (!auth.ok) return auth.response;
 
   try {
-    const { cart } = JSON.parse(event.body || '{}');
+    const { cart, terminal } = JSON.parse(event.body || '{}');
 
     if (!Array.isArray(cart) || cart.length === 0) {
       return json(400, { error: 'Cart cannot be empty' });
@@ -96,10 +96,13 @@ exports.handler = async (event) => {
     }
 
     // Create order with SERVER-calculated total
+    // POS terminal orders start as 'preparing' (shown on KDS, awaiting payment)
+    // Online/direct orders are marked 'paid' immediately
+    const orderStatus = terminal ? 'preparing' : 'paid';
     const { data: order, error: orderErr } = await supabase
       .from('orders')
       .insert({
-        status: 'paid',
+        status: orderStatus,
         total_amount_cents: totalCents
       })
       .select()

@@ -76,6 +76,58 @@ async function authorize(event, options = {}) {
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
   if (!token) return { ok: false, response: json(401, { error: 'Unauthorized' }) };
 
+  // ═══════════════════════════════════════════════════════════
+  // OPS PIN TOKEN: Accept HMAC tokens from pin-login.js
+  // ═══════════════════════════════════════════════════════════
+  // PIN tokens have 2 dot-separated parts (payload.signature)
+  // JWTs have 3 dot-separated parts (header.payload.signature)
+  const tokenParts = token.split('.');
+  if (tokenParts.length === 2) {
+    try {
+      const [payloadB64, signature] = tokenParts;
+      if (!payloadB64 || !signature) {
+        return { ok: false, response: json(401, { error: 'Invalid token format' }) };
+      }
+      const payloadStr = Buffer.from(payloadB64, 'base64').toString('utf-8');
+      const secret = process.env.INTERNAL_SYNC_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const expected = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
+
+      const sigBuf = Buffer.from(signature, 'hex');
+      const expBuf = Buffer.from(expected, 'hex');
+      if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+        return { ok: false, response: json(401, { error: 'Invalid PIN session' }) };
+      }
+
+      const payload = JSON.parse(payloadStr);
+      if (!payload.exp || Date.now() > payload.exp) {
+        return { ok: false, response: json(401, { error: 'PIN session expired. Enter PIN again.' }) };
+      }
+
+      // Look up staff role from directory
+      const staffEmail = (payload.email || '').toLowerCase();
+      const { data: staffRec, error: staffErr } = await supabaseAdmin
+        .from('staff_directory')
+        .select('role')
+        .eq('email', staffEmail)
+        .single();
+
+      if (staffErr || !staffRec) {
+        return { ok: false, response: json(403, { error: 'Staff not found' }) };
+      }
+
+      const opsRole = staffRec.role;
+      const opsIsManager = (opsRole === 'manager' || opsRole === 'admin');
+      if (requireManager && !opsIsManager) {
+        return { ok: false, response: json(403, { error: 'Forbidden: Manager access required' }) };
+      }
+
+      return { ok: true, via: 'pin', user: { email: staffEmail, id: payload.staffId }, role: opsRole };
+    } catch (err) {
+      console.error('[AUTH] PIN token verification failed:', err);
+      return { ok: false, response: json(401, { error: 'Invalid PIN session' }) };
+    }
+  }
+
   const { data, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !data?.user) {
     return { ok: false, response: json(401, { error: 'Unauthorized' }) };

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { useOpsSession } from "@/components/OpsGate";
 import {
   Coffee, CupSoda, Croissant, ShoppingCart, Plus, Minus, Trash2, X,
   ChevronRight, Clock, CheckCircle2, Loader2, CreditCard, Monitor,
@@ -186,12 +187,9 @@ export default function POSPage() {
     }
   };
 
-  /* ─── Helper: get auth session ───────────────────────────────── */
-  const getSession = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error("Session expired. Log in again.");
-    return session;
-  };
+  /* ─── Auth: use PIN session token for API calls ───────────── */
+  const opsSession = useOpsSession();
+  const getAccessToken = () => opsSession.token;
 
   /* ─── Step 1: Send to KDS (create Supabase order immediately) ─ */
   const handleSendToKDS = async () => {
@@ -199,7 +197,7 @@ export default function POSPage() {
     setTicketPhase("confirm");
 
     try {
-      const session = await getSession();
+      const token = getAccessToken();
 
       // Build cart payload — one entry per item * quantity
       const payload: { name: string }[] = [];
@@ -215,9 +213,9 @@ export default function POSPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ cart: payload }),
+        body: JSON.stringify({ cart: payload, terminal: true }),
       });
 
       if (!resp.ok) {
@@ -248,13 +246,13 @@ export default function POSPage() {
     setTerminalStatus("Sending to terminal…");
 
     try {
-      const session = await getSession();
+      const token = getAccessToken();
 
       const resp = await fetch("/.netlify/functions/collect-payment", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ orderId: createdOrderId }),
       });

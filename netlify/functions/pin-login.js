@@ -77,7 +77,10 @@ exports.handler = async (event) => {
   // Set ALLOWED_IPS env var in Netlify as a comma-separated list
   const allowedRaw = process.env.ALLOWED_IPS || '';
   const allowedIPs = allowedRaw.split(',').map(s => s.trim()).filter(Boolean);
-  if (allowedIPs.length > 0 && !allowedIPs.includes(ip)) {
+  // Always allow localhost for local development
+  const LOCAL_IPS = ['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1'];
+  const isLocal = LOCAL_IPS.includes(ip);
+  if (allowedIPs.length > 0 && !isLocal && !allowedIPs.includes(ip)) {
     console.warn(`[PIN-LOGIN] Blocked IP: ${ip}`);
     return json(403, { error: 'PIN login is only available from the shop network' });
   }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { useOpsSession } from "@/components/OpsGate";
 import {
   Camera, CameraOff, Package, Heart, ScanLine, Plus, Minus,
   Save, X, Loader2, CheckCircle2, AlertTriangle, RotateCcw,
@@ -78,6 +79,9 @@ function isLoyaltyCode(value: string): boolean {
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 export default function ScannerPage() {
+  /* ─── Auth: use PIN session token for API calls ──────────── */
+  const { token: opsToken } = useOpsSession();
+
   /* ─── State ──────────────────────────────────────────────────── */
   const [scanMode, setScanMode] = useState<ScanMode>("inventory");
   const [viewState, setViewState] = useState<ViewState>("idle");
@@ -241,11 +245,8 @@ export default function ScannerPage() {
     setStatusMsg(`Looking up: ${v.sanitized}`);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Not signed in");
-
       const resp = await fetch(`/.netlify/functions/inventory-lookup?barcode=${encodeURIComponent(v.sanitized!)}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${opsToken}` },
       });
       const result = await resp.json();
 
@@ -327,14 +328,11 @@ export default function ScannerPage() {
     setViewState("saving");
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("Not signed in");
-
       const resp = await fetch("/.netlify/functions/adjust-inventory", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${opsToken}`,
         },
         body: JSON.stringify({
           itemId: currentItem.id,

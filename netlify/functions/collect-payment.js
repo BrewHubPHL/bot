@@ -53,14 +53,17 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'Order total is invalid' }) };
     }
 
-    // 5. Use provided deviceId or fallback to Netlify Env variable
-    const terminalDeviceId = deviceId || process.env.SQUARE_LOCATION_ID; 
+    // 5. Use provided deviceId, env var, or error if none configured
+    const terminalDeviceId = deviceId || process.env.SQUARE_TERMINAL_DEVICE_ID;
+    if (!terminalDeviceId) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'No Square Terminal device configured. Set SQUARE_TERMINAL_DEVICE_ID in Netlify.' }) };
+    }
 
     // 6. Create Terminal Checkout
     const response = await client.terminal.checkouts.create({
       checkout: {
         amountMoney: {
-          amount: amount, // In cents
+          amount: BigInt(Math.round(amount)), // Square SDK requires BigInt for cents
           currency: 'USD'
         },
         // IMPORTANT: Tie this sale to the Point Breeze location

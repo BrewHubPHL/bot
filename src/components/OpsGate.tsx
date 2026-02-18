@@ -45,13 +45,21 @@ export default function OpsGate({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<OpsSession | null>(null);
   const [clockLoading, setClockLoading] = useState(false);
   const [clockMsg, setClockMsg] = useState("");
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  // Hydration-safe mount — defer client-only rendering
+  useEffect(() => {
+    setCurrentTime(new Date());
+    setMounted(true);
+  }, []);
 
   // Clock display
   useEffect(() => {
+    if (!mounted) return;
     const tick = setInterval(() => setCurrentTime(new Date()), 15_000);
     return () => clearInterval(tick);
-  }, []);
+  }, [mounted]);
 
   // Check for existing session in sessionStorage on mount
   useEffect(() => {
@@ -204,6 +212,15 @@ export default function OpsGate({ children }: { children: ReactNode }) {
     sessionStorage.removeItem("ops_session");
   }, []);
 
+  /* ─── SSR / pre-mount: show blank black screen to avoid hydration mismatch ─── */
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-zinc-600" />
+      </div>
+    );
+  }
+
   /* ─── Authenticated: show page content ─── */
   if (session) {
     return (
@@ -279,7 +296,7 @@ export default function OpsGate({ children }: { children: ReactNode }) {
         <h1 className="text-2xl font-bold text-white mb-1">BrewHub POS</h1>
         <p className="text-zinc-500 text-sm">
           <Clock className="inline w-3.5 h-3.5 mr-1" />
-          {currentTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+          {currentTime?.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) ?? ""}
         </p>
       </div>
 
