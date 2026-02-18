@@ -1,12 +1,12 @@
 :root {
-    /* Brand Colors */
-    --brand-primary: #3c2f2f;    /* The "Coffee" color */
-    --brand-secondary: #d4b59e;  /* The "Latte" color */
-    --brand-accent: #2c1810;     /* The "Ink/Espresso" color */
+    /* Brand Colors (Warm-Sharp) */
+    --brand-primary: #0a0a0a;    /* True Black */
+    --brand-secondary: #b8860b;  /* Dark Goldenrod accent */
+    --brand-accent: #0a0a0a;     /* Matches primary */
     
     /* Legacy Variables (used in index.html and other pages) */
-    --hub-brown: #3c2f2f;        /* Alias for brand-primary */
-    --hub-tan: #d4b59e;          /* Alias for brand-secondary */
+    --hub-brown: #0a0a0a;        /* Alias for brand-primary */
+    --hub-tan: #b8860b;          /* Alias for brand-secondary */
     
     /* UI States */
     --status-ready: #4caf50;     /* Order Up / In Stock */
@@ -14,9 +14,9 @@
     --status-alert: #f44336;     /* Out of Stock / Error */
 
     /* Surfaces */
-    --bg-main: #f8f4f0;          /* The "Cream" background */
+    --bg-main: #ffffff;          /* Pure White */
     --card-bg: #ffffff;
-    --border-soft: #efe1d2;
+    --border-soft: #e5e7eb;
 
     /* Typography */
     --font-heading: 'Playfair Display', serif;

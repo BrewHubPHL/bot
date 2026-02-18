@@ -16,7 +16,7 @@ const supabase = createClient(
 exports.handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   };
@@ -56,12 +56,24 @@ exports.handler = async (event) => {
     const productIds = cart.map(item => item.id).filter(Boolean);
     const productNames = cart.map(item => item.name).filter(Boolean);
     
+    // Sanitize product names to prevent PostgREST filter injection
+    const safeName = (n) => String(n).replace(/["\\(),]/g, '');
+    const sanitizedNames = productNames.map(safeName).filter(n => n.length > 0);
+
+    // Build safe filter — use separate queries if only IDs or only names
+    let filterParts = [];
+    if (productIds.length > 0) filterParts.push(`id.in.(${productIds.join(',')})`);
+    if (sanitizedNames.length > 0) filterParts.push(`name.in.(${sanitizedNames.map(n => `"${n}"`).join(',')})`);
+    
+    if (filterParts.length === 0) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'No valid products in cart' }) };
+    }
+
     const { data: dbProducts, error: dbErr } = await supabase
       .from('merch_products')
       .select('id, name, price_cents')
       .eq('is_active', true)
-      .or(`id.in.(${productIds.join(',')}),name.in.(${productNames.map(n => `"${n}"`).join(',')})`);
-
+      .or(filterParts.join(','));
     if (dbErr) {
       console.error('DB lookup error:', dbErr);
       return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to validate products' }) };

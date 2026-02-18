@@ -20,21 +20,18 @@ exports.handler = async () => {
       status: error ? 'error' : 'ok',
       latency_ms: Date.now() - start
     };
-    if (error) checks.status = 'degraded';
+    if (error) {
+      console.error('[HEALTH] Supabase error:', error.message);
+      checks.status = 'degraded';
+    }
   } catch (e) {
-    checks.services.supabase = { status: 'error', message: e.message };
+    console.error('[HEALTH] Supabase connectivity error:', e.message);
+    checks.services.supabase = { status: 'error' };
     checks.status = 'degraded';
   }
 
-  // Check env vars are set (without exposing values)
-  checks.services.config = {
-    supabase: !!process.env.SUPABASE_URL,
-    square: !!process.env.SQUARE_SANDBOX_TOKEN || !!process.env.SQUARE_ACCESS_TOKEN,
-    twilio: !!process.env.TWILIO_ACCOUNT_SID,
-    resend: !!process.env.RESEND_API_KEY,
-    claude: !!process.env.CLAUDE_API_KEY,
-    elevenlabs: !!process.env.ELEVENLABS_API_KEY
-  };
+  // Config status: only report whether required services are reachable, not which are configured
+  // (prevents reconnaissance of which third-party services are in use)
 
   return {
     statusCode: checks.status === 'ok' ? 200 : 503,

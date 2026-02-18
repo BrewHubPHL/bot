@@ -1,12 +1,12 @@
 @import "tailwindcss";
 
-/* ===== BREWHUB BRAND PALETTE ===== */
+/* ===== BREWHUB BRAND PALETTE (Warm-Sharp) ===== */
 :root {
-  --hub-brown: #3c2f2f;
-  --hub-tan: #d4b59e;
-  --hub-espresso: #2c1810;
-  --bg-main: #f8f4f0;
-  --bg-alt: #e9ded6;
+  --hub-brown: #0a0a0a;
+  --hub-tan: #b8860b;
+  --hub-espresso: #0a0a0a;
+  --bg-main: #ffffff;
+  --bg-alt: #f3f4f6;
 }
 
 /* ===== GLOBAL RESET & BASE ===== */
@@ -28,7 +28,7 @@ html, body {
   background: rgba(255,255,255,0.88);
   backdrop-filter: blur(14px) saturate(1.2);
   border-bottom: 2.5px solid var(--hub-tan);
-  box-shadow: 0 4px 24px 0 rgba(44,24,16,0.10);
+  box-shadow: 0 4px 24px 0 rgba(0,0,0,0.10);
 }
 .nav-logo {
   font-family: 'Playfair Display', serif;
@@ -91,7 +91,7 @@ html, body {
   background: rgba(255,255,255,0.92);
   backdrop-filter: blur(18px) saturate(1.25);
   border-radius: 2.5rem;
-  box-shadow: 0 16px 64px 0 rgba(44,24,16,0.22), 0 2px 16px 0 rgba(60,40,20,0.13);
+  box-shadow: 0 16px 64px 0 rgba(0,0,0,0.22), 0 2px 16px 0 rgba(0,0,0,0.13);
   padding: 3.5rem 2.5rem 3rem 2.5rem;
   border: 3px solid var(--hub-brown);
   min-width: 340px;
@@ -100,7 +100,7 @@ html, body {
   transition: box-shadow 0.22s, border 0.22s;
 }
 .hero-card:hover {
-  box-shadow: 0 24px 80px 0 rgba(44,24,16,0.28), 0 4px 24px 0 rgba(60,40,20,0.18);
+  box-shadow: 0 24px 80px 0 rgba(0,0,0,0.28), 0 4px 24px 0 rgba(0,0,0,0.18);
   border-color: var(--hub-espresso);
 }
 .hero-logo {
@@ -108,7 +108,7 @@ html, body {
   height: 120px !important;
   margin-bottom: 1.2rem;
   border-radius: 50%;
-  box-shadow: 0 4px 24px 0 rgba(44,24,16,0.14);
+  box-shadow: 0 4px 24px 0 rgba(0,0,0,0.14);
   border: 4px solid var(--hub-tan);
   background: #fff;
 }
@@ -128,7 +128,7 @@ html, body {
   color: var(--hub-espresso);
   margin-bottom: 0.5rem;
   line-height: 1.05;
-  text-shadow: 0 2px 12px rgba(44,24,16,0.10);
+  text-shadow: 0 2px 12px rgba(0,0,0,0.10);
 }
 .hero-title-accent {
   font-style: italic;
@@ -181,14 +181,14 @@ html, body {
   letter-spacing: 0.13em;
   border-radius: 0.7rem;
   border: none;
-  box-shadow: 0 2px 12px 0 rgba(60,40,20,0.12);
+  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.12);
   cursor: pointer;
   transition: background 0.18s, color 0.18s, box-shadow 0.18s;
 }
 .hero-btn:hover {
   background: var(--hub-brown);
   color: #fff;
-  box-shadow: 0 4px 20px 0 rgba(60,40,20,0.18);
+  box-shadow: 0 4px 20px 0 rgba(0,0,0,0.18);
 }
 .hero-success {
   color: var(--hub-brown);
@@ -212,7 +212,7 @@ html, body {
   background: rgba(255,255,255,0.95);
   backdrop-filter: blur(12px);
   border-radius: 1.5rem;
-  box-shadow: 0 8px 32px rgba(44,24,16,0.12);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
   border: 2px solid var(--hub-tan);
   padding: 3rem 2.5rem;
 }
@@ -250,7 +250,7 @@ html, body {
   background: rgba(255,255,255,0.97);
   backdrop-filter: blur(16px);
   border-radius: 2rem;
-  box-shadow: 0 12px 48px rgba(44,24,16,0.14);
+  box-shadow: 0 12px 48px rgba(0,0,0,0.14);
   border: 2.5px solid var(--hub-tan);
   padding: 3rem 2.5rem;
   text-align: center;
@@ -303,7 +303,7 @@ html, body {
   background: rgba(255,255,255,0.90);
   backdrop-filter: blur(14px) saturate(1.15);
   border-radius: 2rem;
-  box-shadow: 0 12px 48px 0 rgba(44,24,16,0.16), 0 2px 12px 0 rgba(60,40,20,0.10);
+  box-shadow: 0 12px 48px 0 rgba(0,0,0,0.16), 0 2px 12px 0 rgba(0,0,0,0.10);
   border: 2.5px solid var(--hub-tan);
   padding: 2.5rem 2rem 2rem 2rem;
   margin: 0 auto;
@@ -312,7 +312,7 @@ html, body {
   transition: box-shadow 0.22s, border 0.22s;
 }
 .concierge-card:hover {
-  box-shadow: 0 20px 64px 0 rgba(44,24,16,0.22), 0 3px 16px 0 rgba(60,40,20,0.14);
+  box-shadow: 0 20px 64px 0 rgba(0,0,0,0.22), 0 3px 16px 0 rgba(0,0,0,0.14);
   border-color: var(--hub-brown);
 }
 .concierge-title {
@@ -336,10 +336,10 @@ html, body {
   text-align: center;
 }
 .concierge-chatbox {
-  background: rgba(248,244,240,0.92);
+  background: rgba(250,250,250,0.92);
   border-radius: 1.2rem;
   border: 1.5px solid var(--hub-tan);
-  box-shadow: 0 2px 10px 0 rgba(44,24,16,0.07);
+  box-shadow: 0 2px 10px 0 rgba(0,0,0,0.07);
   padding: 1.2rem 1rem 1rem 1rem;
   margin-bottom: 1.2rem;
   min-height: 280px;
@@ -358,7 +358,7 @@ html, body {
   border-radius: 1rem;
   line-height: 1.45;
   margin-bottom: 0.2rem;
-  box-shadow: 0 1px 4px 0 rgba(44,24,16,0.06);
+  box-shadow: 0 1px 4px 0 rgba(0,0,0,0.06);
 }
 .chat-bubble-user {
   background: var(--hub-espresso);
@@ -410,14 +410,14 @@ html, body {
   letter-spacing: 0.10em;
   border-radius: 0.7rem;
   border: none;
-  box-shadow: 0 2px 10px 0 rgba(60,40,20,0.12);
+  box-shadow: 0 2px 10px 0 rgba(0,0,0,0.12);
   cursor: pointer;
   transition: background 0.18s, color 0.18s, box-shadow 0.18s;
 }
 .concierge-send-btn:hover {
   background: var(--hub-brown);
   color: #fff;
-  box-shadow: 0 4px 16px 0 rgba(60,40,20,0.18);
+  box-shadow: 0 4px 16px 0 rgba(0,0,0,0.18);
 }
 .voice-btn {
   width: 100%;
@@ -463,9 +463,9 @@ html, body {
 
 /* ===== FOOTER ===== */
 .footer-glass {
-  background: rgba(244,238,232,0.95);
+  background: rgba(250,250,250,0.95);
   border-top: 2.5px solid var(--hub-tan);
-  box-shadow: 0 -4px 24px 0 rgba(44,24,16,0.08);
+  box-shadow: 0 -4px 24px 0 rgba(0,0,0,0.08);
   color: var(--hub-brown);
   font-size: 1rem;
   letter-spacing: 0.08em;

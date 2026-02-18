@@ -15,7 +15,7 @@ exports.handler = async (event) => {
     return json(405, { error: 'Method not allowed' });
   }
 
-  const { cart, user_id } = JSON.parse(event.body || '{}');
+  const { cart } = JSON.parse(event.body || '{}');
 
   if (!Array.isArray(cart) || cart.length === 0) {
     return json(400, { error: 'Cart must include at least one item' });
@@ -67,7 +67,7 @@ exports.handler = async (event) => {
     .insert({
       total_amount_cents: totalCents,
       status: 'pending',
-      user_id: user_id || null
+      user_id: auth.user?.id || null
     })
     .select()
     .single();

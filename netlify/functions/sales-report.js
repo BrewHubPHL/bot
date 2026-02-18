@@ -7,12 +7,9 @@ const supabase = createClient(
 );
 
 exports.handler = async (event, context) => {
-  // 1. Handle Auth (Skip if it's a Netlify Scheduled trigger)
-  const isCron = event.headers && event.headers['x-netlify-event'] === 'cron';
-  if (!isCron) {
-    const auth = await authorize(event, { requireManager: true });
-    if (!auth.ok) return auth.response;
-  }
+  // Always require manager auth — no header-based bypass
+  const auth = await authorize(event, { requireManager: true });
+  if (!auth.ok) return auth.response;
 
   try {
     // 2. Query the View we just built
@@ -37,6 +34,6 @@ exports.handler = async (event, context) => {
 
   } catch (err) {
     console.error("Function Crash:", err.message);
-    return json(500, { error: "Failed to fetch report", details: err.message });
+    return json(500, { error: "Failed to fetch report" });
   }
 };

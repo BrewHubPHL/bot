@@ -1,7 +1,8 @@
 const { checkQuota } = require('./_usage');
 const { createClient } = require('@supabase/supabase-js');
 
-// Fallback menu prices if DB unavailable
+// ⚠️ FALLBACK ONLY — keep in sync with merch_products table!
+// These are used only when DB is unreachable. Prices may drift.
 const FALLBACK_MENU = {
     'Drip Coffee': 250,
     'Espresso': 300,
@@ -477,8 +478,9 @@ Point Breeze, Philadelphia, PA 19146
 Never make up order numbers, prices, or loyalty balances. Always use the tools to get real data. Keep responses short (1-2 sentences max). Use emojis sparingly.`;
 
 exports.handler = async (event) => {
+    const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
     const headers = {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
         'Access-Control-Allow-Headers': 'Content-Type',
         'Content-Type': 'application/json'
     };
@@ -512,7 +514,18 @@ exports.handler = async (event) => {
         if (event.body) {
             const body = JSON.parse(event.body);
             userText = body.text || "Hello";
-            conversationHistory = body.history || [];
+            conversationHistory = (body.history || [])
+              .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+        }
+
+        // Input length guard — prevent cost-amplification attacks
+        const MAX_TEXT_LENGTH = 2000;
+        const MAX_HISTORY_ITEMS = 10;
+        if (userText.length > MAX_TEXT_LENGTH) {
+            userText = userText.slice(0, MAX_TEXT_LENGTH);
+        }
+        if (conversationHistory.length > MAX_HISTORY_ITEMS) {
+            conversationHistory = conversationHistory.slice(-MAX_HISTORY_ITEMS);
         }
 
         const claudeKey = process.env.CLAUDE_API_KEY;

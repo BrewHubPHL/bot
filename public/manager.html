@@ -240,7 +240,7 @@
               ${items.map(i => `<div class="kds-item">☕ ${escapeHtml(i.drink_name)}</div>`).join('') || '<div class="kds-item" style="color:#666;">No items</div>'}
             </div>
             <div class="kds-actions">
-              <button class="kds-btn ${btnClass}" onclick="updateKdsStatus('${order.id}', '${nextStatus}')">${btnText}</button>
+              <button class="kds-btn ${btnClass}" onclick="updateKdsStatus('${escapeHtml(order.id)}', '${nextStatus}')">${btnText}</button>
             </div>
           </div>
         `;
@@ -380,11 +380,11 @@
 
                 list.innerHTML += `
                     <div class="inventory-row" style="grid-template-columns: 2fr 1fr 1fr 1fr 100px;">
-                        <div><strong>${emp.name || 'Staff'}</strong><div style="font-size:0.75rem;color:#666;">${emp.email}</div></div>
+                        <div><strong>${escapeHtml(emp.name) || 'Staff'}</strong><div style="font-size:0.75rem;color:#666;">${escapeHtml(emp.email)}</div></div>
                         <div>$${rate.toFixed(2)}/hr</div>
                         <div>${totalHours.toFixed(2)} hrs</div>
                         <div style="color: #27ae60; font-weight: 600;">$${earned.toFixed(2)}</div>
-                        <div><span style="background:${statusColor}; padding:4px 10px; border-radius:12px; font-size:11px; font-weight:bold; color:white;">${status}</span></div>
+                        <div><span style="background:${statusColor}; padding:4px 10px; border-radius:12px; font-size:11px; font-weight:bold; color:white;">${escapeHtml(status)}</span></div>
                     </div>
                 `;
             });

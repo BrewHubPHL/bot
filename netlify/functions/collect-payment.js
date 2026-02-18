@@ -87,7 +87,7 @@ exports.handler = async (event) => {
     console.error("Terminal Error:", error);
     return { 
       statusCode: 500, 
-      body: JSON.stringify({ error: "Failed to create terminal checkout", details: error.message }) 
+      body: JSON.stringify({ error: "Failed to create terminal checkout" }) 
     };
   }
 };

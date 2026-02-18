@@ -112,3 +112,59 @@ CREATE POLICY "Deny public access to expected_parcels" ON expected_parcels FOR A
 
 DROP POLICY IF EXISTS "Deny public access to marketing_leads" ON marketing_leads;
 CREATE POLICY "Deny public access to marketing_leads" ON marketing_leads FOR ALL USING (false);
+
+-- ============================================================
+-- RLS for property management tables (financial data)
+-- ============================================================
+
+ALTER TABLE IF EXISTS listings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS properties ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS property_expenses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS expected_rents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS rent_roll ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS water_charges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS unit_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS settlements ENABLE ROW LEVEL SECURITY;
+-- NOTE: brewhub_nnn_summary is a VIEW in production — RLS not applicable (secured by underlying tables)
+
+DROP POLICY IF EXISTS "Deny public access to listings" ON listings;
+CREATE POLICY "Deny public access to listings" ON listings FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to properties" ON properties;
+CREATE POLICY "Deny public access to properties" ON properties FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to property_expenses" ON property_expenses;
+CREATE POLICY "Deny public access to property_expenses" ON property_expenses FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to expected_rents" ON expected_rents;
+CREATE POLICY "Deny public access to expected_rents" ON expected_rents FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to rent_roll" ON rent_roll;
+CREATE POLICY "Deny public access to rent_roll" ON rent_roll FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to water_charges" ON water_charges;
+CREATE POLICY "Deny public access to water_charges" ON water_charges FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to unit_profiles" ON unit_profiles;
+CREATE POLICY "Deny public access to unit_profiles" ON unit_profiles FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to settlements" ON settlements;
+CREATE POLICY "Deny public access to settlements" ON settlements FOR ALL USING (false);
+
+-- NOTE: brewhub_nnn_summary is a VIEW — secure by revoking SELECT from anon/authenticated instead
+REVOKE SELECT ON brewhub_nnn_summary FROM anon, authenticated;
+
+-- ============================================================
+-- REVOKE dangerous RPC access from anon/authenticated roles
+-- These functions should only be callable via service_role (Netlify functions)
+-- ============================================================
+
+REVOKE EXECUTE ON FUNCTION adjust_inventory_quantity(uuid, int) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION decrement_inventory(text, int) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION invalidate_staff_sessions(text) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION invalidate_all_staff_sessions() FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION increment_loyalty(uuid, int, uuid) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION atomic_redeem_voucher(text, uuid, uuid) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION claim_notification_tasks(text, int) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION complete_notification(uuid) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION fail_notification(uuid, text) FROM anon, authenticated;

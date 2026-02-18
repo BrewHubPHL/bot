@@ -12,7 +12,8 @@ exports.handler = async (event) => {
   if (!auth.ok) return auth.response;
 
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' }, body: '' };
+    const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }, body: '' };
   }
 
   try {

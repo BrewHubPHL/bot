@@ -1,4 +1,4 @@
-const { SquareClient, SquareEnvironment } = require('square');
+﻿const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
 const { randomUUID } = require('crypto');
 const { checkQuota } = require('./_usage');
@@ -23,7 +23,7 @@ exports.handler = async (event) => {
   }
 
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': '*' }, body: '' };
+    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com' }, body: '' };
   }
   
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -33,7 +33,7 @@ exports.handler = async (event) => {
 
     if (!cart || cart.length === 0) return { statusCode: 400, body: "Cart empty" };
 
-    // Server-side price lookup — NEVER trust client-supplied prices
+    // Server-side price lookup â€” NEVER trust client-supplied prices
     const itemNames = cart.map(i => i.name);
     const { data: dbProducts, error: dbErr } = await supabase
       .from('merch_products')
@@ -53,7 +53,7 @@ exports.handler = async (event) => {
       if (priceMap[item.name] === undefined) {
         return {
           statusCode: 400,
-          headers: { 'Access-Control-Allow-Origin': '*' },
+          headers: { 'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com' },
           body: JSON.stringify({ error: `Unknown product: ${item.name}` })
         };
       }
@@ -122,12 +122,16 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com' },
       body: JSON.stringify({ url: result.paymentLink.url })
     };
 
   } catch (err) {
     console.error(err);
-    return { statusCode: 500, body: JSON.stringify({ error: 'Checkout failed' }) };
+    return {
+      statusCode: 500,
+      headers: { 'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com' },
+      body: JSON.stringify({ error: 'Checkout failed' })
+    };
   }
 };

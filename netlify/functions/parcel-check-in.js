@@ -1,4 +1,4 @@
-const { createClient } = require('@supabase/supabase-js');
+﻿const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -27,15 +27,17 @@ function identifyCarrier(tracking) {
 }
 
 exports.handler = async (event) => {
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' }, body: '' };
+    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }, body: '' };
   }
 
   const auth = await authorize(event);
   if (!auth.ok) {
     return {
       statusCode: auth.response.statusCode,
-      headers: { 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
       body: auth.response.body,
     };
   }
@@ -46,7 +48,7 @@ exports.handler = async (event) => {
     if (!tracking_number) {
       return { 
         statusCode: 400, 
-        headers: { 'Access-Control-Allow-Origin': '*' },
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
         body: JSON.stringify({ error: 'tracking_number required' }) 
       };
     }
@@ -93,7 +95,7 @@ exports.handler = async (event) => {
 
         return {
           statusCode: 200,
-          headers: { 'Access-Control-Allow-Origin': '*' },
+          headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
           body: JSON.stringify({
             success: true,
             match_type: 'pre-registered',
@@ -102,15 +104,15 @@ exports.handler = async (event) => {
             recipient: expected.customer_name,
             unit: expected.unit_number,
             notified: false,
-            message: `✅ Shop package checked in (no notification)`
+            message: `âœ… Shop package checked in (no notification)`
           })
         };
       }
 
-      // ═══════════════════════════════════════════════════════════
+      // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
       // ATOMIC CHECK-IN: Parcel + Notification Queue in ONE transaction
       // If either fails, both roll back. No limbo state.
-      // ═══════════════════════════════════════════════════════════
+      // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
       const { data, error } = await supabase.rpc('atomic_parcel_checkin', {
         p_tracking_number: tracking_number,
         p_carrier: detectedCarrier,
@@ -130,7 +132,7 @@ exports.handler = async (event) => {
 
       return {
         statusCode: 200,
-        headers: { 'Access-Control-Allow-Origin': '*' },
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
         body: JSON.stringify({
           success: true,
           match_type: 'pre-registered',
@@ -139,7 +141,7 @@ exports.handler = async (event) => {
           recipient: expected.customer_name,
           unit: expected.unit_number,
           queue_task_id: data[0]?.queue_task_id,
-          message: `✅ Auto-matched! Package for ${expected.customer_name} (Unit ${expected.unit_number || 'N/A'})`
+          message: `âœ… Auto-matched! Package for ${expected.customer_name} (Unit ${expected.unit_number || 'N/A'})`
         })
       };
     }
@@ -148,13 +150,13 @@ exports.handler = async (event) => {
     if (scan_only) {
       return {
         statusCode: 200,
-        headers: { 'Access-Control-Allow-Origin': '*' },
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
         body: JSON.stringify({
           success: true,
           match_type: 'none',
           tracking: tracking_number,
           carrier: detectedCarrier,
-          message: `📦 ${detectedCarrier} package scanned. Select recipient below.`
+          message: `ðŸ“¦ ${detectedCarrier} package scanned. Select recipient below.`
         })
       };
     }
@@ -163,7 +165,7 @@ exports.handler = async (event) => {
     if (!recipient_name && !resident_id) {
       return {
         statusCode: 400,
-        headers: { 'Access-Control-Allow-Origin': '*' },
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
         body: JSON.stringify({ 
           error: 'No pre-registration found. Please provide recipient_name or resident_id',
           tracking: tracking_number,
@@ -213,7 +215,7 @@ exports.handler = async (event) => {
 
       return {
         statusCode: 200,
-        headers: { 'Access-Control-Allow-Origin': '*' },
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
         body: JSON.stringify({
           success: true,
           match_type: 'manual',
@@ -221,15 +223,15 @@ exports.handler = async (event) => {
           carrier: detectedCarrier,
           recipient: finalRecipient,
           notified: false,
-          message: `📦 Shop package checked in (no notification)`
+          message: `ðŸ“¦ Shop package checked in (no notification)`
         })
       };
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // ATOMIC CHECK-IN: Parcel + Notification Queue in ONE transaction
     // If either fails, both roll back. No limbo state.
-    // ═══════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     const { data, error } = await supabase.rpc('atomic_parcel_checkin', {
       p_tracking_number: tracking_number,
       p_carrier: detectedCarrier,
@@ -250,7 +252,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
       body: JSON.stringify({
         success: true,
         match_type: 'manual',
@@ -259,7 +261,7 @@ exports.handler = async (event) => {
         recipient: finalRecipient,
         unit: unitNumber,
         queue_task_id: data[0]?.queue_task_id,
-        message: `📦 Checked in for ${finalRecipient}`
+        message: `ðŸ“¦ Checked in for ${finalRecipient}`
       })
     };
 
@@ -267,7 +269,7 @@ exports.handler = async (event) => {
     console.error('[PARCEL-CHECK-IN ERROR]', err);
     return {
       statusCode: 500,
-      headers: { 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
       body: JSON.stringify({ error: 'Check-in failed' })
     };
   }

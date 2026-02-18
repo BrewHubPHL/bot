@@ -64,7 +64,9 @@ exports.handler = async (event) => {
     .update(payload, 'utf8')
     .digest('base64');
 
-  if (digest !== signatureHeader) {
+  const digestBuf = Buffer.from(digest, 'base64');
+  const sigBuf = Buffer.from(signatureHeader || '', 'base64');
+  if (digestBuf.length !== sigBuf.length || !crypto.timingSafeEqual(digestBuf, sigBuf)) {
     console.error('[SECURITY] Invalid Square webhook signature. Potential spoofing attempt.');
     return { statusCode: 401, body: JSON.stringify({ error: 'Invalid signature' }) };
   }

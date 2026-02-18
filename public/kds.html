@@ -190,10 +190,10 @@
                                     </div>
                                     <div class="p-8 bg-slate-900/40 rounded-b-[2rem]">
                                         ${(order.status === 'paid' || order.status === 'unpaid' || order.status === 'pending') ? 
-                                            `<button onclick="updateStatus('${order.id}', 'preparing')" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black shadow-lg">START PREPARING</button>` : 
+                                            `<button onclick="updateStatus('${escapeHtml(order.id)}', 'preparing')" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black shadow-lg">START PREPARING</button>` : 
                                           order.status === 'preparing' ? 
-                                            `<button onclick="updateStatus('${order.id}', 'ready')" class="w-full bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black shadow-lg">ORDER UP!</button>` : 
-                                            `<button onclick="updateStatus('${order.id}', 'completed')" class="w-full bg-slate-600 hover:bg-slate-500 text-white rounded-2xl font-black">COMPLETED</button>`
+                                            `<button onclick="updateStatus('${escapeHtml(order.id)}', 'ready')" class="w-full bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black shadow-lg">ORDER UP!</button>` : 
+                                            `<button onclick="updateStatus('${escapeHtml(order.id)}', 'completed')" class="w-full bg-slate-600 hover:bg-slate-500 text-white rounded-2xl font-black">COMPLETED</button>`
                                         }
                                     </div>
                                 </div>

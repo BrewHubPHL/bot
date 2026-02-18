@@ -7,10 +7,11 @@ const supabase = createClient(
 );
 
 exports.handler = async (event) => {
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' },
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type' },
       body: ''
     };
   }

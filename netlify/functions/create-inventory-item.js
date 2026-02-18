@@ -21,11 +21,26 @@ exports.handler = async (event) => {
     return json(400, { error: 'barcode and name are required' });
   }
 
+  // Validate barcode format (ASCII printable, reasonable length, no special chars)
+  const barcodeStr = String(barcode).trim();
+  if (barcodeStr.length < 1 || barcodeStr.length > 50) {
+    return json(400, { error: 'Barcode must be 1-50 characters' });
+  }
+  if (!/^[A-Za-z0-9\-_.]+$/.test(barcodeStr)) {
+    return json(400, { error: 'Barcode contains invalid characters' });
+  }
+
+  // Validate name (reasonable length, no control characters)
+  const nameStr = String(name).trim();
+  if (nameStr.length < 1 || nameStr.length > 100) {
+    return json(400, { error: 'Name must be 1-100 characters' });
+  }
+
   // Check for duplicate barcode
   const { data: existing } = await supabase
     .from('inventory')
     .select('id')
-    .eq('barcode', barcode)
+    .eq('barcode', barcodeStr)
     .single();
 
   if (existing) {
@@ -35,8 +50,8 @@ exports.handler = async (event) => {
   const { data, error } = await supabase
     .from('inventory')
     .insert({
-      barcode,
-      item_name: name,
+      barcode: barcodeStr,
+      item_name: nameStr,
       current_stock: 0,
       min_threshold: 10,
       unit: 'units'

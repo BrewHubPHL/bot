@@ -18,18 +18,24 @@ const supabase = createClient(
 );
 
 function validateApiKey(event) {
+  const crypto = require('crypto');
   const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
   const validKey = process.env.BREWHUB_API_KEY;
-  if (!validKey) return true; // Dev mode
-  return apiKey === validKey;
+  if (!validKey) { console.error('[LOYALTY] BREWHUB_API_KEY not configured'); return false; }
+  if (!apiKey) return false;
+  const bufA = Buffer.from(String(apiKey));
+  const bufB = Buffer.from(String(validKey));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 function json(status, data) {
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
   return {
     statusCode: status,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
     },

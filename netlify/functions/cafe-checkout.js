@@ -1,12 +1,18 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 
+// HTML-escape user-supplied strings to prevent injection in emails
+const escapeHtml = (s) => String(s || '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Fallback menu if DB is unreachable (defense-in-depth)
+// ⚠️ FALLBACK ONLY — keep in sync with merch_products table!
+// These are used only when DB is unreachable. Prices may drift.
 const FALLBACK_MENU = {
   'Latte': 450,
   'Espresso': 300,
@@ -38,12 +44,14 @@ async function getCafeMenu() {
 }
 
 exports.handler = async (event) => {
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+
   // CORS
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
       headers: {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
       },
@@ -120,8 +128,11 @@ exports.handler = async (event) => {
 
     // Send order confirmation email if customer email provided
     const { customer_email, customer_name } = JSON.parse(event.body || '{}');
-    if (customer_email && process.env.RESEND_API_KEY) {
-      const itemList = validatedItems.map(i => `${i.drink_name} - $${i.price.toFixed(2)}`).join('<br>');
+    // Validate email format before sending
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (customer_email && EMAIL_RE.test(customer_email) && process.env.RESEND_API_KEY) {
+      const safeName = escapeHtml(customer_name);
+      const itemList = validatedItems.map(i => `${escapeHtml(i.drink_name)} - $${i.price.toFixed(2)}`).join('<br>');
       fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
@@ -135,7 +146,7 @@ exports.handler = async (event) => {
           html: `
             <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px;">
               <h1 style="color: #333;">Thanks for your order!</h1>
-              <p>Hi ${customer_name || 'there'},</p>
+              <p>Hi ${safeName || 'there'},</p>
               <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
                 <p style="margin: 0;"><strong>Order #:</strong> ${order.id.slice(0,8).toUpperCase()}</p>
                 <p style="margin: 10px 0 0 0;"><strong>Items:</strong></p>

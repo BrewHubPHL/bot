@@ -1,18 +1,19 @@
 -- ============================================================
 -- BREWHUB SCHEMA PART 2: More Tables
+-- Synced with live Supabase DB: 2026-02-17
 -- ============================================================
 
 -- 13. EXPECTED_PARCELS
 CREATE TABLE IF NOT EXISTS expected_parcels (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id serial PRIMARY KEY,
   tracking_number text NOT NULL,
   carrier text,
-  customer_name text,
+  customer_name text NOT NULL,
   customer_phone text,
   customer_email text,
   unit_number text,
-  status text DEFAULT 'pending' CHECK (status IN ('pending', 'arrived', 'picked_up')),
-  registered_at timestamptz DEFAULT now(),
+  status text DEFAULT 'pending',
+  registered_at timestamptz,
   arrived_at timestamptz
 );
 
@@ -22,22 +23,22 @@ CREATE TABLE IF NOT EXISTS parcels (
   tracking_number text NOT NULL,
   carrier text,
   recipient_name text,
+  status text DEFAULT 'in_transit',
+  received_at timestamptz,
+  picked_up_at timestamptz,
   recipient_phone text,
   unit_number text,
-  status text DEFAULT 'pending' CHECK (status IN ('pending', 'pending_notification', 'notified', 'picked_up')),
-  received_at timestamptz DEFAULT now(),
-  picked_up_at timestamptz,
-  match_type text DEFAULT 'manual'
+  match_type text,
+  notified_at timestamptz
 );
 
 -- 15. RESIDENTS
 CREATE TABLE IF NOT EXISTS residents (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id serial PRIMARY KEY,
   name text NOT NULL,
   unit_number text,
   phone text,
-  email text,
-  created_at timestamptz DEFAULT now()
+  email text
 );
 
 -- 16. API_USAGE
@@ -61,22 +62,22 @@ ON CONFLICT (service_name, usage_date) DO NOTHING;
 
 -- 17. MARKETING_POSTS
 CREATE TABLE IF NOT EXISTS marketing_posts (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id bigint PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT (timezone('utc', now())),
   day_of_week text,
   topic text,
-  caption text,
-  created_at timestamptz DEFAULT now()
+  caption text
 );
 
 -- 18. LOCAL_MENTIONS
 CREATE TABLE IF NOT EXISTS local_mentions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id text PRIMARY KEY,
+  created_at timestamptz DEFAULT now(),
   username text,
-  likes int DEFAULT 0,
   caption text,
-  link text,
-  posted_at timestamptz,
-  created_at timestamptz DEFAULT now()
+  image_url text,
+  likes int,
+  posted_at timestamptz
 );
 
 -- 18b. MARKETING_LEADS (Apify scrape results)
@@ -119,7 +120,7 @@ CREATE TABLE IF NOT EXISTS notification_queue (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   task_type text NOT NULL,
   payload jsonb NOT NULL,
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'dead_letter')),
+  status text NOT NULL DEFAULT 'pending',
   attempt_count int NOT NULL DEFAULT 0,
   max_attempts int NOT NULL DEFAULT 3,
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
@@ -148,7 +149,7 @@ CREATE TABLE IF NOT EXISTS deletion_tombstones (
   UNIQUE(table_name, record_key)
 );
 
--- GDPR secrets
+-- 24. GDPR_SECRETS
 CREATE TABLE IF NOT EXISTS gdpr_secrets (
   key text PRIMARY KEY,
   value text NOT NULL,
@@ -158,6 +159,110 @@ CREATE TABLE IF NOT EXISTS gdpr_secrets (
 INSERT INTO gdpr_secrets (key, value)
 VALUES ('pii_hash_salt', encode(gen_random_bytes(32), 'hex'))
 ON CONFLICT (key) DO NOTHING;
+
+-- 25. LISTINGS
+CREATE TABLE IF NOT EXISTS listings (
+  id bigint PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT (timezone('utc', now())),
+  address text NOT NULL,
+  price numeric NOT NULL,
+  beds numeric NOT NULL,
+  baths numeric NOT NULL,
+  sqft numeric NOT NULL,
+  image_url text,
+  status text DEFAULT 'Available'
+);
+
+-- 26. PROPERTIES
+CREATE TABLE IF NOT EXISTS properties (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  unit_name text NOT NULL,
+  monthly_rent numeric NOT NULL,
+  security_deposit numeric NOT NULL,
+  water_rule text,
+  tenant_email text
+);
+
+-- 27. PROPERTY_EXPENSES
+CREATE TABLE IF NOT EXISTS property_expenses (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  created_at timestamptz DEFAULT now(),
+  property_address text DEFAULT '1448 S 17th St',
+  vendor_name text,
+  description text,
+  amount numeric NOT NULL,
+  category text NOT NULL,
+  status text DEFAULT 'estimated',
+  due_date date,
+  paid_at timestamptz,
+  invoice_url text,
+  is_nnn_reimbursable boolean DEFAULT false,
+  tenant_name text DEFAULT 'Daycare'
+);
+
+-- 28. EXPECTED_RENTS
+CREATE TABLE IF NOT EXISTS expected_rents (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  unit_type text NOT NULL,
+  expected_monthly_rent numeric NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 29. RENT_ROLL
+CREATE TABLE IF NOT EXISTS rent_roll (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  date date NOT NULL,
+  unit text NOT NULL,
+  rent numeric NOT NULL,
+  water numeric NOT NULL,
+  total_due numeric NOT NULL,
+  status text NOT NULL DEFAULT 'Pending',
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 30. WATER_CHARGES
+CREATE TABLE IF NOT EXISTS water_charges (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  unit text NOT NULL,
+  total_bill numeric DEFAULT 0,
+  tenant_owes numeric DEFAULT 0,
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 31. UNIT_PROFILES
+CREATE TABLE IF NOT EXISTS unit_profiles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  unit text NOT NULL,
+  tenant_type text,
+  security_deposit numeric DEFAULT 0,
+  payment_method text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 32. SETTLEMENTS
+CREATE TABLE IF NOT EXISTS settlements (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item text NOT NULL,
+  amount numeric NOT NULL,
+  action text,
+  lease_terms text,
+  reference text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 33. BREWHUB_NNN_SUMMARY (view or table)
+CREATE TABLE IF NOT EXISTS brewhub_nnn_summary (
+  property_address text,
+  total_taxes numeric,
+  total_insurance numeric,
+  total_cam numeric,
+  total_tenant_billback numeric
+);
+
+-- 34. DAILY_SALES_REPORT (likely a view, represented as table for reference)
+-- CREATE VIEW daily_sales_report AS SELECT ... ;
 
 -- ============================================================
 -- PERFORMANCE INDEXES
@@ -180,6 +285,3 @@ CREATE INDEX IF NOT EXISTS idx_time_logs_status ON time_logs(status);
 
 -- Expected parcels: lookup by tracking number
 CREATE INDEX IF NOT EXISTS idx_expected_tracking ON expected_parcels(tracking_number);
-
--- Waitlist: prevent duplicate signups
-ALTER TABLE waitlist ADD CONSTRAINT waitlist_email_unique UNIQUE (email);

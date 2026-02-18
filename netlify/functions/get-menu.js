@@ -24,7 +24,7 @@
 const { createClient } = require('@supabase/supabase-js');
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY);
 
 // Fallback menu if DB is unreachable
 const FALLBACK_MENU = [

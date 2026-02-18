@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const crypto = require('crypto');
 
 exports.handler = async (event) => {
   // 1. Only allow POST requests (standard for ElevenLabs tools)
@@ -6,19 +7,32 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
 
+  // API key authentication — reject unauthenticated calls
+  // ElevenLabs sends the key as AI_ORDER_API_KEY; also accept standard X-API-Key
+  const apiKey = event.headers['ai_order_api_key'] || event.headers['AI_ORDER_API_KEY'] || event.headers['x-api-key'] || event.headers['X-Api-Key'];
+  const validKey = process.env.BREWHUB_API_KEY;
+  if (!validKey || !apiKey) {
+    return { statusCode: 401, body: JSON.stringify({ result: "Unauthorized" }) };
+  }
+  const bufA = Buffer.from(String(apiKey));
+  const bufB = Buffer.from(String(validKey));
+  if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+    return { statusCode: 401, body: JSON.stringify({ result: "Unauthorized" }) };
+  }
+
   // Check env vars
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
+    console.error("Missing SUPABASE_URL or SUPABASE_ANON_KEY");
     return { 
       statusCode: 200, 
       body: JSON.stringify({ result: "I'm having trouble accessing the list right now. Please try again later." }) 
     };
   }
 
-  // Initialize Supabase inside handler
+  // Initialize Supabase with anon key (read-only, RLS-protected)
   const supabase = createClient(
     process.env.SUPABASE_URL, 
-    process.env.SUPABASE_SERVICE_ROLE_KEY
+    process.env.SUPABASE_ANON_KEY
   );
 
   try {

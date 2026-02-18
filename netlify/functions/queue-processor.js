@@ -12,13 +12,35 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const crypto = require('crypto');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// Timing-safe secret comparison to prevent timing attacks
+function safeCompare(a, b) {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 exports.handler = async (event, context) => {
+  // Only allow scheduled/cron invocations — reject direct HTTP calls
+  const isScheduled = context?.clientContext?.custom?.scheduled === true
+    || event.headers?.['x-netlify-event'] === 'schedule';
+  const hasCronSecret = safeCompare(
+    event.headers?.['x-cron-secret'],
+    process.env.CRON_SECRET
+  );
+
+  if (!isScheduled && !hasCronSecret) {
+    return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden' }) };
+  }
+
   const workerId = `netlify-cron-${Date.now()}`;
   console.log(`[QUEUE-PROCESSOR] Starting ${workerId}`);
 
@@ -94,9 +116,14 @@ exports.handler = async (event, context) => {
 
   } catch (err) {
     console.error('[QUEUE-PROCESSOR] Fatal error:', err);
-    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
+    return { statusCode: 500, body: JSON.stringify({ error: 'Internal server error' }) };
   }
 };
+
+// HTML-escape user-supplied strings to prevent injection in emails
+const escapeHtml = (s) => String(s || '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 async function sendParcelNotification(payload) {
   const { recipient_name, recipient_email, recipient_phone, tracking_number, carrier } = payload;
@@ -119,8 +146,8 @@ async function sendParcelNotification(payload) {
         html: `
           <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
             <h1>Package Arrived!</h1>
-            <p>Hi ${recipient_name || 'Neighbor'},</p>
-            <p>Your ${carrier || 'package'} (${tracking_number || 'pickup'}) is at BrewHub PHL!</p>
+            <p>Hi ${escapeHtml(recipient_name) || 'Neighbor'},</p>
+            <p>Your ${escapeHtml(carrier) || 'package'} (${escapeHtml(tracking_number) || 'pickup'}) is at BrewHub PHL!</p>
           </div>
         `,
       }),

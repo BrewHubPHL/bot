@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { authorize, json } = require('./_auth');
 
 // Initialize with Service Role Key (Bypasses RLS)
 const supabase = createClient(
@@ -6,13 +7,15 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+
 exports.handler = async (event) => {
-  // 1. Handle CORS (Allow browser access)
+  // 1. Handle CORS
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
       headers: {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
       },
@@ -29,34 +32,24 @@ exports.handler = async (event) => {
   }
 
   try {
-    // 3. MANUAL AUTH CHECK (Replaces the broken authorize function)
-    const token = event.headers.authorization?.split(' ')[1];
-    if (!token) {
-      return { statusCode: 401, body: JSON.stringify({ error: 'No token provided' }) };
-    }
+    // 3. Staff auth via centralized _auth.js (includes token versioning, revocation, freshness)
+    const auth = await authorize(event);
+    if (!auth.ok) return auth.response;
 
-    // Verify the user exists using Supabase Auth
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    
-    if (authError || !user) {
-      console.warn("Auth Token Invalid:", authError);
-      return { statusCode: 401, body: JSON.stringify({ error: 'Invalid Token' }) };
-    }
+    const user = auth.user;
 
-    // 4. CHECK STAFF DIRECTORY (Using Master Key - Cannot be blocked)
-    const { data: staffMember } = await supabase
-      .from('staff_directory')
-      .select('*')
-      .ilike('email', user.email) // Case-insensitive match
-      .maybeSingle();
-
-    if (!staffMember) {
-      console.error(`[AUTH] User ${user.email} not found in staff_directory`);
-      return { statusCode: 403, body: JSON.stringify({ error: 'Access denied: Not in staff directory.' }) };
-    }
-
-    // 5. PARSE REQUEST
+    // 4. PARSE REQUEST
     const { employee_email, action_type } = JSON.parse(event.body);
+
+    // Validate action_type against allowed values
+    const VALID_ACTIONS = ['in', 'out'];
+    if (!VALID_ACTIONS.includes(action_type)) {
+      return {
+        statusCode: 400,
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+        body: JSON.stringify({ error: 'action_type must be "in" or "out"' })
+      };
+    }
 
     // Security: Ensure they are clocking in for THEMSELVES
     if (user.email.toLowerCase() !== employee_email.toLowerCase()) {
@@ -91,7 +84,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
       body: JSON.stringify({ success: true, message: `Clocked ${action_type} successfully` })
     };
 
@@ -99,8 +92,8 @@ exports.handler = async (event) => {
     console.error('[LOG-TIME] Critical Error:', err);
     return {
       statusCode: 500,
-      headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ error: 'System Error', details: err.message })
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+      body: JSON.stringify({ error: 'System Error' })
     };
   }
 };

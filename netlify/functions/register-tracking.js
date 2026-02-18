@@ -1,4 +1,4 @@
-// PRO WAY: Customer pre-registers their tracking number
+﻿// PRO WAY: Customer pre-registers their tracking number
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 
@@ -16,8 +16,10 @@ function identifyCarrier(tracking) {
 }
 
 exports.handler = async (event) => {
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }, body: '' };
+    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }, body: '' };
   }
 
   // Require authenticated user (customer or staff)
@@ -30,7 +32,7 @@ exports.handler = async (event) => {
     if (!tracking_number || !customer_name) {
       return { 
         statusCode: 400, 
-        headers: { 'Access-Control-Allow-Origin': '*' },
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
         body: JSON.stringify({ error: 'tracking_number and customer_name required' }) 
       };
     }
@@ -47,7 +49,7 @@ exports.handler = async (event) => {
     if (existing) {
       return { 
         statusCode: 409, 
-        headers: { 'Access-Control-Allow-Origin': '*' },
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
         body: JSON.stringify({ error: 'Tracking number already registered', carrier }) 
       };
     }
@@ -74,7 +76,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
       body: JSON.stringify({ 
         success: true, 
         message: `Package registered! We'll notify you when ${carrier} delivers it.`,
@@ -87,7 +89,7 @@ exports.handler = async (event) => {
     console.error('[REGISTER-TRACKING ERROR]', err);
     return { 
       statusCode: 500, 
-      headers: { 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
       body: JSON.stringify({ error: 'Registration failed' }) 
     };
   }

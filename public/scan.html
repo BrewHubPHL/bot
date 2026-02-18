@@ -117,6 +117,12 @@
 
     <script>
         // Use brewAuth.client for consistent session storage
+        // XSS Protection
+        function esc(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
         let sb = null;
         async function initSupabase() {
             while (!window.brewAuth?.client) await new Promise(r => setTimeout(r, 50));
@@ -448,7 +454,7 @@
                 const cls = u.change >= 0 ? 'plus' : 'minus';
                 return `
                     <div class="history-item">
-                        <span class="name">${u.name}</span>
+                        <span class="name">${esc(u.name)}</span>
                         <span class="change ${cls}">${sign}${u.change} → ${u.newStock}</span>
                     </div>
                 `;

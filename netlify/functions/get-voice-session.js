@@ -1,8 +1,9 @@
 const { checkQuota } = require('./_usage');
 
 exports.handler = async function(event, context) {
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
   const headers = {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Content-Type': 'application/json'

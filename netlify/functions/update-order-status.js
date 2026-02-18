@@ -8,12 +8,14 @@ const supabase = createClient(
 );
 
 exports.handler = async (event) => {
-  // 1. Handle CORS (Allow browser access)
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+
+  // 1. Handle CORS
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
       headers: {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
       },
@@ -53,7 +55,7 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
       body: JSON.stringify({ success: true, order: data })
     };
 
@@ -61,8 +63,8 @@ exports.handler = async (event) => {
     console.error('[COMPLETE-ORDER] Error:', err);
     return {
       statusCode: 500,
-      headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ error: err.message })
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+      body: JSON.stringify({ error: 'Internal server error' })
     };
   }
 };

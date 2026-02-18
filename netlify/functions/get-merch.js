@@ -5,7 +5,7 @@ exports.handler = async () => {
 
   const { data, error } = await supabase
     .from('merch_products')
-    .select('*')
+    .select('name, price_cents, description, image_url, checkout_url, sort_order')
     .eq('is_active', true);
 
   return {

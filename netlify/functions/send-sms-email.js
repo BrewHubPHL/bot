@@ -1,18 +1,24 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, verifyServiceSecret } = require('./_auth');
 
+// HTML-escape user-supplied strings to prevent injection in emails
+const escapeHtml = (s) => String(s || '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 exports.handler = async (event) => {
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
       headers: {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
       },
@@ -101,8 +107,8 @@ exports.handler = async (event) => {
             html: `
               <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px;">
                 <h1>Package Arrived!</h1>
-                <p>Hi ${recipient_name || 'Neighbor'},</p>
-                <p>Your package <strong>(${tracking || 'Parcel'})</strong> is at <strong>BrewHub PHL</strong>.</p>
+                <p>Hi ${escapeHtml(recipient_name) || 'Neighbor'},</p>
+                <p>Your package <strong>(${escapeHtml(tracking) || 'Parcel'})</strong> is at <strong>BrewHub PHL</strong>.</p>
                 <p>Stop by during cafe hours to pick it up. Fresh coffee waiting!</p>
                 <p>— Thomas & The BrewHub PHL Team</p>
               </div>
@@ -125,7 +131,7 @@ exports.handler = async (event) => {
     
     return {
       statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
       body: JSON.stringify({ success: true, sms: smsSuccess, email: emailSuccess, sid: smsSid })
     };
   } catch (error) {

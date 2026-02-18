@@ -34,7 +34,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Fallback menu prices if DB is unreachable
+// ⚠️ FALLBACK ONLY — keep in sync with merch_products table!
+// These are used only when DB is unreachable. Prices may drift.
 const FALLBACK_PRICES = {
   'Latte': 450,
   'Espresso': 300,
@@ -70,26 +71,34 @@ function generateOrderNumber(orderId) {
   return orderId.slice(0, 4).toUpperCase();
 }
 
-// Validate API key
+// Validate API key (fail-closed + timing-safe)
 function validateApiKey(event) {
+  const crypto = require('crypto');
   const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
   const validKey = process.env.BREWHUB_API_KEY;
   
-  // If no API key is configured, allow requests (dev mode)
+  // Fail-closed: reject if no key is configured
   if (!validKey) {
-    console.warn('[AI-ORDER] No BREWHUB_API_KEY configured - allowing request');
-    return true;
+    console.error('[AI-ORDER] BREWHUB_API_KEY not configured - rejecting request');
+    return false;
   }
   
-  return apiKey === validKey;
+  if (!apiKey) return false;
+  
+  // Constant-time comparison to prevent timing attacks
+  const bufA = Buffer.from(String(apiKey));
+  const bufB = Buffer.from(String(validKey));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 function json(status, data) {
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
   return {
     statusCode: status,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
     },

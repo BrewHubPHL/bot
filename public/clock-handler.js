@@ -364,11 +364,13 @@ STAFF ID USED: ${staffId}
     });
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Expose for manual debugging
-    window.BrewHubClockDebug = {
-        getStaffId,
-        testClock: (action) => handleClockAction({ preventDefault: () => {}, stopPropagation: () => {}, currentTarget: document.querySelector('#clock-in-btn') || {} }, action || 'clock_in'),
-        config: CONFIG
-    };
+    // Expose for debugging (localhost only)
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        window.BrewHubClockDebug = {
+            getStaffId,
+            testClock: (action) => handleClockAction({ preventDefault: () => {}, stopPropagation: () => {}, currentTarget: document.querySelector('#clock-in-btn') || {} }, action || 'clock_in'),
+            config: CONFIG
+        };
+    }
 
 })();

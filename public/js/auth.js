@@ -67,8 +67,11 @@
           return null;
         }
         staffCache = staffRow;
-        // Persist to sessionStorage for back/forward nav
-        try { sessionStorage.setItem('brewhub-staff-cache', JSON.stringify(staffCache)); } catch (e) {}
+        // Persist to sessionStorage for back/forward nav (strip sensitive fields)
+        try {
+          const { hourly_rate, ...safeCache } = staffCache;
+          sessionStorage.setItem('brewhub-staff-cache', JSON.stringify(safeCache));
+        } catch (e) {}
       }
 
       // Check role hierarchy
