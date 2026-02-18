@@ -92,10 +92,12 @@ function verifySupabaseSignature(event, secret) {
     .update(payload)
     .digest('hex');
   
-  const valid = crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expected)
-  );
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expected);
+  if (sigBuf.length !== expBuf.length) {
+    return { valid: false, reason: 'Signature length mismatch' };
+  }
+  const valid = crypto.timingSafeEqual(sigBuf, expBuf);
   
   return { valid, reason: valid ? 'Signature valid' : 'Signature mismatch' };
 }

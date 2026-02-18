@@ -1,17 +1,21 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { supabase } from '../../../lib/supabase';
+import { supabase } from '@/lib/supabase';
 
 export default function KDS() {
   const [orders, setOrders] = useState<any[]>([]);
+  const [clock, setClock] = useState<string>("");
 
   useEffect(() => {
+    const tick = () => setClock(new Date().toLocaleTimeString());
+    tick();
+    const t = setInterval(tick, 1000);
     fetchOrders();
     const channel = supabase.channel('kds-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => { clearInterval(t); supabase.removeChannel(channel); };
   }, []);
 
   async function fetchOrders() {
@@ -32,7 +36,7 @@ export default function KDS() {
       <header className="flex justify-between items-end mb-12 border-b-2 border-stone-800 pb-8">
         <div>
           <h1 className="text-6xl font-black font-playfair tracking-tighter uppercase italic">BrewHub <span className="text-stone-500">KDS</span></h1>
-          <p className="text-sm font-mono text-stone-600 mt-2">SYSTEM ONLINE // {new Date().toLocaleTimeString()}</p>
+          <p className="text-sm font-mono text-stone-600 mt-2">SYSTEM ONLINE // {clock || "—"}</p>
         </div>
       </header>
 

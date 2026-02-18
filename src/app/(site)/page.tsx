@@ -146,9 +146,16 @@ export default function BrewHubLanding() {
     setChatInput("");
 
     try {
+      // Include auth token if user is logged in (enables ordering and loyalty lookup)
+      const chatHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        chatHeaders['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
       const response = await fetch('/.netlify/functions/claude-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: chatHeaders,
         body: JSON.stringify({ 
           text: userText,
           email: localStorage.getItem('brewhub_email') || "" 

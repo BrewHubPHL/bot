@@ -11,7 +11,7 @@ export default function ManagerNav() {
         <Link href="/kds" className="text-gray-300 hover:text-yellow-500">KDS</Link>
         <Link href="/cafe" className="text-gray-300 hover:text-yellow-500">Cafe POS</Link>
         <Link href="/parcels" className="text-gray-300 hover:text-yellow-500">Parcel Hub</Link>
-        <Link href="/scan" className="text-gray-300 hover:text-yellow-500">Inventory</Link>
+        <Link href="/scanner" className="text-gray-300 hover:text-yellow-500">Inventory</Link>
         <Link href="/manager" className="text-yellow-500 font-semibold">Dashboard</Link>
         <button className="text-red-400 hover:text-red-600 ml-4" onClick={() => {/* TODO: sign out logic */}}>Logout</button>
       </nav>

@@ -15,9 +15,10 @@ const client = new SquareClient({
 // Helper: Generate unique voucher codes like BRW-K8L9P2
 const generateVoucherCode = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No 'I' or '1' to avoid confusion
+  const bytes = crypto.randomBytes(6);
   let code = '';
   for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars.charAt(bytes[i] % chars.length);
   }
   return `BRW-${code}`;
 };
@@ -73,24 +74,29 @@ exports.handler = async (event) => {
 
   // Security: Replay Attack Protection (Timestamp Check)
   // Window: 5 minutes (300 seconds) to account for network latency.
+  // MANDATORY: Square always sends a timestamp header. Rejecting requests
+  // without one prevents replay attacks using stripped headers.
   const REPLAY_WINDOW_MS = 5 * 60 * 1000;
   const squareTimestamp = event.headers['x-square-hmacsha256-signature-timestamp'] || 
                           event.headers['x-square-timestamp'];
   
-  if (squareTimestamp) {
-    const webhookTime = parseInt(squareTimestamp, 10) * 1000; // Square sends Unix seconds
-    const now = Date.now();
-    const drift = Math.abs(now - webhookTime);
-    
-    if (isNaN(webhookTime)) {
-      console.error('[SECURITY] Invalid timestamp format received.');
-      return { statusCode: 401, body: JSON.stringify({ error: 'Invalid timestamp' }) };
-    }
-    
-    if (drift > REPLAY_WINDOW_MS) {
-      console.error(`[SECURITY] Replay attack detected? Drift: ${drift}ms > ${REPLAY_WINDOW_MS}ms`);
-      return { statusCode: 401, body: JSON.stringify({ error: 'Timestamp outside acceptable window' }) };
-    }
+  if (!squareTimestamp) {
+    console.error('[SECURITY] Rejecting webhook with missing timestamp header.');
+    return { statusCode: 401, body: JSON.stringify({ error: 'Missing timestamp' }) };
+  }
+
+  const webhookTime = parseInt(squareTimestamp, 10) * 1000; // Square sends Unix seconds
+  const now = Date.now();
+  const drift = Math.abs(now - webhookTime);
+
+  if (isNaN(webhookTime)) {
+    console.error('[SECURITY] Invalid timestamp format received.');
+    return { statusCode: 401, body: JSON.stringify({ error: 'Invalid timestamp' }) };
+  }
+
+  if (drift > REPLAY_WINDOW_MS) {
+    console.error(`[SECURITY] Replay attack detected? Drift: ${drift}ms > ${REPLAY_WINDOW_MS}ms`);
+    return { statusCode: 401, body: JSON.stringify({ error: 'Timestamp outside acceptable window' }) };
   }
 
   // ---------------------------------------------------------------------------
@@ -128,9 +134,30 @@ async function handleRefund(body, supabase) {
   
   const refund = body.data?.object?.refund;
   const paymentId = refund?.payment_id;
+  const refundId = refund?.id;
 
   if (!paymentId) {
     return { statusCode: 200, body: "No payment ID in refund event" };
+  }
+
+  // Idempotency: Prevent duplicate refund processing (matches payment handler pattern)
+  const eventKey = `square:refund.created:${refundId || paymentId}`;
+  const { error: idempotencyError } = await supabase
+    .from('processed_webhooks')
+    .insert({
+      event_key: eventKey,
+      event_type: 'refund.created',
+      source: 'square',
+      payload: { refund_id: refundId, payment_id: paymentId }
+    });
+
+  if (idempotencyError) {
+    if (idempotencyError.code === '23505') { // Postgres unique_violation
+      console.warn(`[IDEMPOTENCY] Refund ${refundId || paymentId} already processed. Skipping.`);
+      return { statusCode: 200, body: "Duplicate refund webhook ignored" };
+    }
+    console.error('[IDEMPOTENCY] Database error:', idempotencyError);
+    return { statusCode: 500, body: 'Idempotency check failed' };
   }
 
   try {

@@ -64,7 +64,7 @@
 <body>
   <a href="#main-content" class="skip-link" style="position:absolute;top:-40px;left:0;background:#000;color:#fff;padding:8px;z-index:100;transition:top 0.3s;" onfocus="this.style.top='0'" onblur="this.style.top='-40px'">Skip to main content</a>
   <header class="header">
-    <div class="logo" onclick="window.location.href='/staff-hub.html'">Brew<span>Hub</span> Dashboard</div>
+    <div class="logo" id="logo-nav" style="cursor:pointer;">Brew<span>Hub</span> Dashboard</div>
     <nav class="nav-links">
       <a href="staff-hub.html">Staff Hub</a>
       <a href="kds.html">KDS</a>
@@ -72,14 +72,14 @@
       <a href="parcels.html">Parcel Hub</a>
       <a href="scan.html">Inventory</a>
       <a href="manager.html" class="active">Dashboard</a>
-      <a href="#" onclick="window.brewAuth.signOut()" style="color: #e74c3c;">Logout</a>
+      <a href="#" id="logout-link" style="color: #e74c3c;">Logout</a>
     </nav>
   </header>
 
   <main class="container">
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-label">Today's Revenue <button onclick="loadSalesReport()" style="background:none;border:none;cursor:pointer;font-size:0.8rem;">🔄</button></div>
+        <div class="stat-label">Today's Revenue <button id="refresh-sales-btn" style="background:none;border:none;cursor:pointer;font-size:0.8rem;">🔄</button></div>
         <div class="stat-value revenue" id="totalRevenue">$0.00</div>
         <div class="stat-change" id="revenueChange">Syncing...</div>
       </div>
@@ -104,7 +104,7 @@
       <section>
         <div class="section-header">
           <h2>📦 Inventory Status</h2>
-          <button class="refresh-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;" onclick="renderInventory()">↻ Refresh</button>
+          <button class="refresh-btn" id="refresh-inventory-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;">↻ Refresh</button>
         </div>
         <div class="inventory-table">
           <div class="inventory-header">
@@ -131,7 +131,7 @@
     <section style="margin-top: 2rem;">
       <div class="section-header">
         <h2>☕ Active Orders (KDS)</h2>
-        <button style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;" onclick="loadKdsOrders()">↻ Refresh</button>
+        <button id="refresh-kds-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;">↻ Refresh</button>
       </div>
       <div class="kds-grid" id="kdsGrid">
         <div style="padding: 1rem; color: #666;">Loading orders...</div>
@@ -181,8 +181,8 @@
           <div class="stock-level">${item.current} ${escapeHtml(item.unit)}</div>
           <div class="threshold">${item.threshold} ${escapeHtml(item.unit)}</div>
           <div class="stock-controls">
-            <button class="stock-btn" onclick="adjustStock(${i}, -1)">−</button>
-            <button class="stock-btn" onclick="adjustStock(${i}, 1)">+</button>
+            <button class="stock-btn" data-stock-index="${i}" data-stock-delta="-1">−</button>
+            <button class="stock-btn" data-stock-index="${i}" data-stock-delta="1">+</button>
           </div>
         </div>
       `).join('');
@@ -240,7 +240,7 @@
               ${items.map(i => `<div class="kds-item">☕ ${escapeHtml(i.drink_name)}</div>`).join('') || '<div class="kds-item" style="color:#666;">No items</div>'}
             </div>
             <div class="kds-actions">
-              <button class="kds-btn ${btnClass}" onclick="updateKdsStatus('${escapeHtml(order.id)}', '${nextStatus}')">${btnText}</button>
+              <button class="kds-btn ${btnClass}" data-order-id="${escapeHtml(order.id)}" data-next-status="${escapeHtml(nextStatus)}">${btnText}</button>
             </div>
           </div>
         `;
@@ -447,6 +447,31 @@
           console.log('[REALTIME] Subscription status:', status);
         });
     }
+
+    // --- Event Delegation ---
+    document.getElementById('logo-nav').addEventListener('click', function() { window.location.href = '/staff-hub.html'; });
+    document.getElementById('logout-link').addEventListener('click', function(e) { e.preventDefault(); window.brewAuth.signOut(); });
+    document.getElementById('refresh-sales-btn').addEventListener('click', function() { loadSalesReport(); });
+    document.getElementById('refresh-inventory-btn').addEventListener('click', function() { renderInventory(); });
+    document.getElementById('refresh-kds-btn').addEventListener('click', function() { loadKdsOrders(); });
+
+    document.getElementById('inventoryList').addEventListener('click', function(e) {
+      var btn = e.target.closest('.stock-btn');
+      if (btn) {
+        var index = parseInt(btn.getAttribute('data-stock-index'), 10);
+        var delta = parseInt(btn.getAttribute('data-stock-delta'), 10);
+        if (!isNaN(index) && !isNaN(delta)) adjustStock(index, delta);
+      }
+    });
+
+    document.getElementById('kdsGrid').addEventListener('click', function(e) {
+      var btn = e.target.closest('.kds-btn');
+      if (btn) {
+        var orderId = btn.getAttribute('data-order-id');
+        var nextStatus = btn.getAttribute('data-next-status');
+        if (orderId && nextStatus) updateKdsStatus(orderId, nextStatus);
+      }
+    });
 
     init();
   </script>

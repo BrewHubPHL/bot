@@ -4,10 +4,8 @@ const { randomUUID } = require('crypto');
 const { checkQuota } = require('./_usage');
 
 const square = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN, 
-  environment: process.env.SQUARE_ENV === 'production' 
-    ? SquareEnvironment.Production 
-    : SquareEnvironment.Sandbox,
+  token: process.env.SQUARE_PRODUCTION_TOKEN,
+  environment: SquareEnvironment.Production,
 });
 
 const supabase = createClient(

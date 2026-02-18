@@ -81,14 +81,31 @@ export default function ResidentPortal() {
   }
 
   const printKeychain = () => {
-    const htmlEntities: Record<string, string> = {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'};
-    const safeEmail = user.email.replace(/[<>&"']/g, (c: string) => htmlEntities[c] || c);
     const barcodeUrl = `https://barcodeapi.org/api/128/${encodeURIComponent(user.email)}`;
     const printWindow = window.open('', '_blank');
-    printWindow?.document.write(`<html><body><div style="border:2px dashed #000; padding:20px; width:200px; text-align:center;">
-      <h3>BrewHub Loyalty</h3><img src="${barcodeUrl}" style="width:100%" /><p>${safeEmail}</p>
-    </div></body></html>`);
-    printWindow?.print();
+    if (!printWindow) return;
+
+    const doc = printWindow.document;
+    doc.title = 'BrewHub Loyalty';
+
+    const container = doc.createElement('div');
+    container.style.cssText = 'border:2px dashed #000; padding:20px; width:200px; text-align:center;';
+
+    const heading = doc.createElement('h3');
+    heading.textContent = 'BrewHub Loyalty';
+    container.appendChild(heading);
+
+    const img = doc.createElement('img');
+    img.src = barcodeUrl;
+    img.style.width = '100%';
+    container.appendChild(img);
+
+    const emailP = doc.createElement('p');
+    emailP.textContent = user.email;
+    container.appendChild(emailP);
+
+    doc.body.appendChild(container);
+    printWindow.print();
   };
 
   // Loading state

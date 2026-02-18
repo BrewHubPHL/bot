@@ -1,6 +1,20 @@
 const { checkQuota } = require('./_usage');
 const { createClient } = require('@supabase/supabase-js');
 
+// Lightweight JWT user extraction (token is validated by Supabase, not us)
+async function extractUser(event, supabase) {
+    const authHeader = event.headers?.authorization || event.headers?.Authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!token || !supabase) return null;
+    try {
+        const { data, error } = await supabase.auth.getUser(token);
+        if (error || !data?.user) return null;
+        return { id: data.user.id, email: data.user.email };
+    } catch {
+        return null;
+    }
+}
+
 // ⚠️ FALLBACK ONLY — keep in sync with merch_products table!
 // These are used only when DB is unreachable. Prices may drift.
 const FALLBACK_MENU = {
@@ -193,9 +207,21 @@ async function executeTool(toolName, toolInput, supabase) {
     if (toolName === 'place_order') {
         const { items, customer_name, notes } = toolInput;
 
+        // Security: require authentication to place orders
+        if (!toolInput._authed_user) {
+            return {
+                success: false,
+                requires_login: true,
+                result: 'You need to be logged in to place an order! Sign in or create an account at brewhubphl.com/portal, then come back and I\'ll get your order going. ☕'
+            };
+        }
+
         if (!items || !Array.isArray(items) || items.length === 0) {
             return { success: false, result: 'No items provided for the order.' };
         }
+
+        // Cap quantity to prevent abuse
+        const MAX_ITEM_QUANTITY = 20;
 
         try {
             // Load menu prices
@@ -216,7 +242,7 @@ async function executeTool(toolName, toolInput, supabase) {
             const validatedItems = [];
 
             for (const item of items) {
-                const quantity = Math.max(1, parseInt(item.quantity) || 1);
+                const quantity = Math.min(MAX_ITEM_QUANTITY, Math.max(1, parseInt(item.quantity) || 1));
                 const matchedName = menuItemNames.find(
                     name => name.toLowerCase() === (item.name || '').toLowerCase()
                 );
@@ -286,9 +312,22 @@ async function executeTool(toolName, toolInput, supabase) {
 
     if (toolName === 'get_loyalty_info') {
         const { email, phone, send_sms } = toolInput;
+        const authedUser = toolInput._authed_user;
 
         if (!email && !phone) {
+            if (!authedUser) {
+                return { result: 'I need you to log in first so I can look up your loyalty info! Sign in at brewhubphl.com/portal ☕' };
+            }
             return { result: 'I need your email or phone number to look up your loyalty info.' };
+        }
+
+        // Security: Only allow looking up your OWN info unless authenticated
+        // Anonymous users cannot enumerate other customers' PII
+        if (!authedUser) {
+            return {
+                requires_login: true,
+                result: 'To check your loyalty points, please log in first at brewhubphl.com/portal — that way I can securely pull up your account! ☕'
+            };
         }
 
         try {
@@ -340,8 +379,8 @@ async function executeTool(toolName, toolInput, supabase) {
             const qrUrl = `https://brewhubphl.com/portal`;
             const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(profile.email)}`;
 
-            // Send SMS if requested
-            if (send_sms && phone && process.env.TWILIO_ACCOUNT_SID) {
+            // Send SMS if requested — only to the authenticated user's own verified data
+            if (send_sms && phone && authedUser && process.env.TWILIO_ACCOUNT_SID) {
                 const twilioSid = process.env.TWILIO_ACCOUNT_SID;
                 const twilioToken = process.env.TWILIO_AUTH_TOKEN;
                 const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
@@ -369,9 +408,10 @@ async function executeTool(toolName, toolInput, supabase) {
                 };
             }
 
+            // Only return PII to the authenticated owner
             return {
                 found: true,
-                email: profile.email,
+                email: authedUser?.email === profile.email?.toLowerCase() ? profile.email : undefined,
                 points,
                 points_to_next_reward: pointsToReward,
                 portal_url: qrUrl,
@@ -475,13 +515,18 @@ Drip Coffee, Espresso, Americano, Latte, Cappuccino, Cold Brew, Croissant, Muffi
 ## Location  
 Point Breeze, Philadelphia, PA 19146
 
+## Login & Registration
+- When a customer needs to log in to place orders or check loyalty, direct them to **brewhubphl.com/portal** where they can sign in or create an account.
+- If a tool returns requires_login: true, tell the customer they need to sign in first and give the link.
+- Never try to work around login requirements - security first!
+
 Never make up order numbers, prices, or loyalty balances. Always use the tools to get real data. Keep responses short (1-2 sentences max). Use emojis sparingly.`;
 
 exports.handler = async (event) => {
     const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
     const headers = {
         'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Content-Type': 'application/json'
     };
 
@@ -508,6 +553,9 @@ exports.handler = async (event) => {
                 process.env.SUPABASE_SERVICE_ROLE_KEY
             );
         }
+
+        // Extract authenticated user (optional — chat works for everyone, but orders require auth)
+        const authedUser = await extractUser(event, supabase);
 
         let userText = "Hello";
         let conversationHistory = [];
@@ -570,8 +618,10 @@ exports.handler = async (event) => {
                     if (toolUseBlock) {
                         console.log(`Tool call: ${toolUseBlock.name}`, toolUseBlock.input);
                         
+                        // Inject auth context into tool input for security checks
+                        const toolInputWithAuth = { ...toolUseBlock.input, _authed_user: authedUser };
                         // Execute the tool
-                        const toolResult = await executeTool(toolUseBlock.name, toolUseBlock.input, supabase);
+                        const toolResult = await executeTool(toolUseBlock.name, toolInputWithAuth, supabase);
                         
                         // Add assistant's tool_use response and our tool_result to messages
                         messages.push({ role: 'assistant', content: claudeData.content });

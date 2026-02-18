@@ -59,7 +59,7 @@ export default function CafePage() {
         <nav className="flex gap-4 text-xs">
           <Link href="/cafe" className="text-stone-900 font-bold underline">Cafe POS</Link>
           <Link href="/parcels" className="text-stone-500 hover:text-stone-900">Parcel Hub</Link>
-          <Link href="/scan" className="text-stone-500 hover:text-stone-900">Inventory</Link>
+          <Link href="/scanner" className="text-stone-500 hover:text-stone-900">Inventory</Link>
           <Link href="/manager" className="text-stone-500 hover:text-stone-900">Dashboard</Link>
         </nav>
       </header>

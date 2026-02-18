@@ -53,7 +53,8 @@ exports.handler = async (event) => {
     }
 
     // Server-side price lookup — NEVER trust client prices
-    const productIds = cart.map(item => item.id).filter(Boolean);
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const productIds = cart.map(item => item.id).filter(Boolean).filter(id => UUID_RE.test(String(id)));
     const productNames = cart.map(item => item.name).filter(Boolean);
     
     // Sanitize product names to prevent PostgREST filter injection
