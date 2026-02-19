@@ -6,10 +6,11 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// In-memory rate limiting (per-instance, resets on cold start)
+// In-memory rate limiting (fast first-line defense; DB lockout below is authoritative)
 const attempts = new Map();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 60_000; // 1 minute lockout after 5 failures
+const LOCKOUT_SECONDS = 60;
 
 function checkRateLimit(ip) {
   const now = Date.now();
@@ -85,10 +86,22 @@ exports.handler = async (event) => {
     return json(403, { error: 'PIN login is only available from the shop network' });
   }
 
-  // Rate limit by IP
+  // Rate limit by IP (in-memory first, then DB check)
   const rateCheck = checkRateLimit(ip);
   if (!rateCheck.allowed) {
     return json(429, { error: 'Too many attempts. Try again shortly.', retryAfter: rateCheck.retryAfter });
+  }
+
+  // DB-backed lockout check (survives cold starts + scales across instances)
+  try {
+    const { data: lockCheck } = await supabase.rpc('check_pin_lockout', { p_ip: ip });
+    const lockRow = lockCheck?.[0] || lockCheck;
+    if (lockRow?.locked) {
+      return json(429, { error: 'Too many attempts. Try again shortly.', retryAfter: lockRow.retry_after_seconds });
+    }
+  } catch (dbErr) {
+    // If DB check fails, fall through to in-memory only (fail-open for availability)
+    console.warn('[PIN-LOGIN] DB lockout check failed, relying on in-memory:', dbErr.message);
   }
 
   try {
@@ -121,11 +134,29 @@ exports.handler = async (event) => {
 
     if (!matchedStaff) {
       recordAttempt(ip, false);
+      // Record failure in DB (atomic, survives cold starts)
+      try {
+        const { data: failResult } = await supabase.rpc('record_pin_failure', {
+          p_ip: ip,
+          p_max_attempts: MAX_ATTEMPTS,
+          p_lockout_seconds: LOCKOUT_SECONDS,
+        });
+        const failRow = failResult?.[0] || failResult;
+        if (failRow?.locked) {
+          console.warn(`[PIN-LOGIN] IP ${ip} locked out for ${failRow.retry_after_seconds}s (DB)`);
+          return json(429, { error: 'Too many attempts. Try again shortly.', retryAfter: failRow.retry_after_seconds });
+        }
+      } catch (dbErr) {
+        console.warn('[PIN-LOGIN] DB failure record failed:', dbErr.message);
+      }
       console.warn(`[PIN-LOGIN] Failed attempt from ${ip}`);
       return json(401, { error: 'Invalid PIN' });
     }
 
     recordAttempt(ip, true);
+
+    // Clear DB lockout on successful login
+    await supabase.rpc('clear_pin_lockout', { p_ip: ip });
 
     // Generate a session token (signed, short-lived)
     // This is NOT a Supabase JWT — it's a simple HMAC token for ops pages

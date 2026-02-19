@@ -5,11 +5,13 @@
 
 ```
 brewhubbot/
-├── netlify/functions/     # 45+ serverless API endpoints
+├── netlify/functions/     # 50+ serverless API endpoints
 │   ├── _auth.js           # Central auth (JWT + PIN tokens)
 │   ├── _gdpr.js           # Request logging & compliance
 │   ├── _ip-guard.js       # Rate limiting & IP checks
+│   ├── _receipt.js        # 32-col thermal receipt generator (shared)
 │   ├── _usage.js          # API quota tracking
+│   ├── cancel-stale-orders.js  # Scheduled: cleanup abandoned orders
 │   └── oauth/             # Square OAuth flow
 ├── public/                # Legacy HTML pages (KDS, Manager, etc.)
 ├── src/
@@ -20,7 +22,7 @@ brewhubbot/
 │   ├── components/
 │   │   └── OpsGate.tsx    # Fullscreen PIN pad + session context
 │   └── lib/               # Supabase client, utilities
-├── supabase/              # DB schemas (schema-1 through schema-8)
+├── supabase/              # DB schemas (schema-1 through schema-11)
 ├── scripts/               # Utility & test scripts
 └── tests/                 # Jest tests
 ```
@@ -64,10 +66,18 @@ All routes wrapped by `OpsGate` component — requires 6-digit staff PIN.
 
 ### 2. Kitchen Display System (KDS)
 - **public/kds.html** — Real-time order display for baristas
-- **public/manager.html** — Dashboard with KDS widget
+- **public/manager.html** — Dashboard with KDS widget + 🖨️ Live Receipt Roll
 - Order statuses: `pending` → `unpaid` → `paid` → `preparing` → `ready` → `completed`
 - POS orders start as `preparing` (terminal flag); online orders start as `paid`
 - Payment warning shows on KDS until `payment_id` is set
+- `completed_at` timestamp recorded on order completion for speed tracking
+
+### 2b. Virtual Receipt System
+- **_receipt.js** — Shared 32-column thermal receipt formatter (fixed-width, monospace)
+- **receipt_queue** table — Persistent receipt store, Realtime-subscribed
+- Manager dashboard shows live receipt roll with slide + flash animations
+- Receipts generated on: payment webhook (Square), cash/comp completion (KDS)
+- Format: centered header, items with qty × price, totals, order tag (BRW-XXXX)
 
 ### 3. Voice & AI
 - **get-voice-session.js** — ElevenLabs ConvAI signed URL
@@ -123,7 +133,10 @@ The `authorize(event, { requiredRole })` function accepts **two token formats**:
 ### PIN Login System
 
 - **pin-login.js** — Validates 6-digit PIN, returns HMAC session token (8hr TTL)
-  - Rate limiting: 5 attempts/min per IP
+  - Rate limiting: 5 attempts/min per IP (in-memory fast path + DB-backed persistent lockout)
+  - DB lockout: `pin_attempts` table keyed by IP, atomic upsert via `record_pin_failure()` RPC
+  - Pre-check: `check_pin_lockout()` RPC called before PIN validation
+  - Cleanup: `clear_pin_lockout()` RPC deletes row on successful login
   - Timing-safe PIN comparison (`crypto.timingSafeEqual`)
   - IP allowlist via `ALLOWED_IPS` env var (localhost always allowed)
 - **pin-clock.js** — Clock in/out using PIN session token
@@ -152,7 +165,10 @@ All Square clients use `SquareEnvironment.Production` + `SQUARE_PRODUCTION_TOKEN
 3. **Timing-safe comparison** — `crypto.timingSafeEqual` on base64-decoded buffers
 4. **Replay protection** — 5-minute timestamp window
 5. **Idempotency** — `processed_webhooks` table with unique constraint (Postgres 23505)
-6. **Fraud detection** — Amount validation (1% tolerance), currency check, payment reuse detection
+6. **Fraud detection** — Amount validation (2¢ flat tolerance), currency check, payment reuse detection
+7. **Self-heal guard** — `.neq('status', 'paid')` on update enables safe retry after idempotency crash
+8. **Receipt generation** — Queues 32-col thermal receipt on successful payment
+9. **Paid amount persistence** — Stores `paid_amount_cents` for double-credit prevention
 
 ### Event Routing
 | Event | Handler | Action |
@@ -165,10 +181,10 @@ All Square clients use `SquareEnvironment.Production` + `SQUARE_PRODUCTION_TOKEN
 
 ## Database (Supabase)
 
-### Schema migrations: `supabase/schema-1` through `schema-8-pin`
+### Schema migrations: `supabase/schema-1` through `schema-11`
 
 Key tables:
-- `orders` — Cafe orders with status, payment_id, total_amount_cents
+- `orders` — Cafe orders with status, payment_id, total_amount_cents, completed_at, paid_amount_cents
 - `coffee_orders` — Line items linked to orders
 - `menu_items` — Cafe menu with prices
 - `merch_products` — Shop products with price_cents, is_active
@@ -180,10 +196,25 @@ Key tables:
 - `vouchers` — Generated free coffee codes with QR
 - `processed_webhooks` — Idempotency table (unique `event_key`)
 - `refund_locks` — Prevents voucher redemption during refund processing
+- `receipt_queue` — Virtual thermal receipts (order_id, receipt_text, printed flag)
+- `pin_attempts` — DB-backed PIN brute-force lockout (keyed by IP)
 
 ### Key RPC functions
 - `increment_loyalty` — Atomic points increment, triggers voucher at threshold
 - `decrement_loyalty_on_refund` — Safe decrement (never below zero)
+- `cancel_stale_orders` — Cancels orders stuck in pending/unpaid for >30 min
+- `record_pin_failure` — Atomic PIN attempt counter with auto-lockout
+- `check_pin_lockout` — Fast pre-check if IP is locked
+- `clear_pin_lockout` — Deletes lockout row on successful login
+
+### Scheduled Functions
+- `cancel-stale-orders.js` — Runs every 5 minutes (`@every 5m`), calls `cancel_stale_orders` RPC
+
+### RLS Strategy
+- **Default**: Deny-all (`USING(false)`) on all tables
+- **Staff SELECT**: Authenticated users whose email is in `staff_directory` can read operational tables (`orders`, `coffee_orders`, `staff_directory`, `time_logs`, `receipt_queue`)
+- **Service role**: Backend functions use service role key for INSERT/UPDATE/DELETE
+- **Customer**: Supabase Auth scopes reads to own profile/parcels/vouchers
 
 ---
 

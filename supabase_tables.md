@@ -130,6 +130,8 @@
 | orders              | customer_name         | text                     | YES         | null                                         |
 | orders              | customer_email        | text                     | YES         | null                                         |
 | orders              | inventory_decremented | boolean                  | YES         | false                                        |
+| orders              | completed_at          | timestamp with time zone | YES         | null                                         |
+| orders              | paid_amount_cents     | integer                  | YES         | null                                         |
 | parcels             | id                    | uuid                     | NO          | gen_random_uuid()                            |
 | parcels             | tracking_number       | text                     | NO          | null                                         |
 | parcels             | carrier               | text                     | YES         | null                                         |
@@ -141,6 +143,10 @@
 | parcels             | unit_number           | text                     | YES         | null                                         |
 | parcels             | match_type            | text                     | YES         | null                                         |
 | parcels             | notified_at           | timestamp with time zone | YES         | null                                         |
+| pin_attempts        | ip                    | text                     | NO          | null                                         |
+| pin_attempts        | fail_count            | integer                  | NO          | 0                                            |
+| pin_attempts        | window_start          | timestamp with time zone | NO          | now()                                        |
+| pin_attempts        | locked_until          | timestamp with time zone | YES         | null                                         |
 | processed_webhooks  | id                    | uuid                     | NO          | gen_random_uuid()                            |
 | processed_webhooks  | event_key             | text                     | NO          | null                                         |
 | processed_webhooks  | event_type            | text                     | NO          | null                                         |
@@ -174,6 +180,11 @@
 | property_expenses   | invoice_url           | text                     | YES         | null                                         |
 | property_expenses   | is_nnn_reimbursable   | boolean                  | YES         | false                                        |
 | property_expenses   | tenant_name           | text                     | YES         | 'Daycare'::text                              |
+| receipt_queue       | id                    | uuid                     | NO          | gen_random_uuid()                            |
+| receipt_queue       | order_id              | uuid                     | YES         | null                                         |
+| receipt_queue       | receipt_text          | text                     | NO          | null                                         |
+| receipt_queue       | printed               | boolean                  | NO          | false                                        |
+| receipt_queue       | created_at            | timestamp with time zone | NO          | now()                                        |
 | refund_locks        | payment_id            | text                     | NO          | null                                         |
 | refund_locks        | locked_at             | timestamp with time zone | NO          | now()                                        |
 | refund_locks        | user_id               | uuid                     | YES         | null                                         |

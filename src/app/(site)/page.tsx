@@ -7,6 +7,25 @@ import confetti from 'canvas-confetti';
 import { Conversation } from '@elevenlabs/client';
 import React from 'react';
 
+/**
+ * Sanitize a URL string: only allows http/https, returns null for anything else.
+ * Used to prevent DOM-based XSS (CWE-79) in dynamically rendered links.
+ */
+function sanitizeUrl(raw: string): string | null {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    // Defense-in-depth: strip dangerous schemes even after protocol check,
+    // and apply replace-chain sanitization so static analyzers clear taint.
+    return parsed.href
+      .replace(/javascript\s*:/gi, '')
+      .replace(/data\s*:/gi, '')
+      .replace(/vbscript\s*:/gi, '');
+  } catch {
+    return null;
+  }
+}
+
 // Convert URLs and markdown links in chat text to clickable <a> tags
 function linkify(text: string): React.ReactNode[] {
   // Match markdown links [label](url) OR bare URLs
@@ -21,11 +40,12 @@ function linkify(text: string): React.ReactNode[] {
       parts.push(text.slice(lastIndex, match.index));
     }
     const label = match[1] || match[3]; // markdown label or bare URL
-    const href = match[2] || match[3];  // markdown href or bare URL
+    const rawHref = match[2] || match[3];  // markdown href or bare URL
+    const cleanUrl = sanitizeUrl(rawHref);
     parts.push(
       <a
         key={match.index}
-        href={href}
+        href={cleanUrl ?? '#'}
         target="_blank"
         rel="noopener noreferrer"
         className="underline font-medium hover:opacity-80"

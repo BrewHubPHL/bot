@@ -286,17 +286,45 @@ export default function POSPage() {
   };
 
   /* ─── Mark as Paid (skip terminal — cash, comp, etc.) ────────── */
-  const handleMarkPaid = () => {
-    // Order already created as 'paid' by cafe-checkout
-    setTicketPhase("paid");
-    setTerminalStatus("Marked paid — order on KDS");
+  const handleMarkPaid = async () => {
+    if (!createdOrderId) return;
+    setTicketPhase("paying");
+    setTerminalStatus("Recording cash payment…");
 
-    setTimeout(() => {
-      setCart([]);
-      setTicketPhase("building");
-      setCreatedOrderId(null);
-      setTerminalStatus("");
-    }, 3000);
+    try {
+      const token = getAccessToken();
+      const resp = await fetch("/.netlify/functions/update-order-status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          orderId: createdOrderId,
+          status: "preparing",
+          paymentMethod: "cash",
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to record payment");
+      }
+
+      setTicketPhase("paid");
+      setTerminalStatus("Marked paid (cash) — order on KDS");
+
+      setTimeout(() => {
+        setCart([]);
+        setTicketPhase("building");
+        setCreatedOrderId(null);
+        setTerminalStatus("");
+      }, 3000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to record payment";
+      setErrorMsg(msg);
+      setTicketPhase("error");
+    }
   };
 
   /* ─── Reset from error ───────────────────────────────────────── */

@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { SquareClient, SquareEnvironment } = require('square');
 const QRCode = require('qrcode');
 const crypto = require('crypto');
+const { generateReceiptString, queueReceipt } = require('./_receipt');
 
 // 1. Initialize Clients
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -305,13 +306,14 @@ async function handlePaymentUpdate(body, supabase) {
     return { statusCode: 200, body: "Payment reuse detected" };
   }
 
-  // Check C: Amount Validation (Allow 1% tolerance for tax rounding)
+  // Check C: Amount Validation (Flat 2-cent tolerance for rounding)
+  // Coffee shop orders cap at ~$30; percentage-based tolerance is too generous.
   const paidAmount = Number(payment.amount_money?.amount || 0);
   const expectedAmount = order.total_amount_cents || 0;
-  const tolerance = Math.max(1, Math.floor(expectedAmount * 0.01));
+  const AMOUNT_TOLERANCE_CENTS = 2;
   
-  if (Math.abs(paidAmount - expectedAmount) > tolerance) {
-     console.error(`[FRAUD] Amount mismatch: Expected ${expectedAmount}, Got ${paidAmount}`);
+  if (Math.abs(paidAmount - expectedAmount) > AMOUNT_TOLERANCE_CENTS) {
+     console.error(`[FRAUD] Amount mismatch: Expected ${expectedAmount}, Got ${paidAmount} (tolerance: ${AMOUNT_TOLERANCE_CENTS}c)`);
      // Flag it but don't fail the webhook, as money moved.
      await supabase.from('orders').update({ 
        status: 'amount_mismatch',
@@ -327,18 +329,53 @@ async function handlePaymentUpdate(body, supabase) {
   }
 
   // 5. Update Order Status
-  const { error: updateError } = await supabase
+  // Self-healing: the .neq('status', 'paid') guard ensures that if the function
+  // crashed after idempotency insert but before this update on a previous attempt,
+  // a manual retry won't double-process. The idempotency record can be cleared and
+  // the webhook re-sent safely — this guard is the second line of defense.
+  const { data: updatedRows, error: updateError } = await supabase
     .from('orders')
     .update({ 
       status: 'paid',
       payment_id: payment.id,
-      paid_at: new Date().toISOString()
+      paid_at: new Date().toISOString(),
+      paid_amount_cents: paidAmount  // Persisted for increment_loyalty re-entry guard
     })
-    .eq('id', orderId);
+    .eq('id', orderId)
+    .neq('status', 'paid')
+    .select('id');
+
+  // If no rows matched, the order was already paid (concurrent/crash recovery)
+  if (!updateError && (!updatedRows || updatedRows.length === 0)) {
+    console.warn(`[SELF-HEAL] Order ${orderId} already paid. Skipping downstream.`);
+    return { statusCode: 200, body: 'Order already paid (self-heal)' };
+  }
 
   if (updateError) {
     console.error("[DB ERROR] Failed to update order:", updateError);
     return { statusCode: 500, body: "DB Update Failed" };
+  }
+
+  // 5b. RECEIPT GENERATION
+  try {
+    const { data: lineItems } = await supabase
+      .from('coffee_orders')
+      .select('drink_name, price')
+      .eq('order_id', orderId);
+
+    const { data: fullOrder } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', orderId)
+      .single();
+
+    if (fullOrder && lineItems) {
+      const receiptText = generateReceiptString(fullOrder, lineItems);
+      await queueReceipt(supabase, orderId, receiptText);
+    }
+  } catch (receiptErr) {
+    // Non-fatal: don't break the payment flow for a receipt failure
+    console.error('[RECEIPT] Non-fatal receipt error:', receiptErr.message);
   }
 
   // 6. LOYALTY & VOUCHER ENGINE

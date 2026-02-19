@@ -1,11 +1,35 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 
 export default function KDS() {
   const [orders, setOrders] = useState<any[]>([]);
   const [clock, setClock] = useState<string>("");
+  const fetchingRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchOrders = useCallback(async () => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+    try {
+      const { data } = await supabase
+        .from('orders')
+        .select('*, coffee_orders (*)')
+        .in('status', ['pending', 'unpaid', 'paid', 'preparing', 'ready'])
+        .order('created_at', { ascending: true });
+      setOrders(data || []);
+    } catch (err) {
+      console.error("KDS: Fetch Error:", err);
+    } finally {
+      fetchingRef.current = false;
+    }
+  }, []);
+
+  const debouncedFetch = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(fetchOrders, 500);
+  }, [fetchOrders]);
 
   useEffect(() => {
     const tick = () => setClock(new Date().toLocaleTimeString());
@@ -13,19 +37,15 @@ export default function KDS() {
     const t = setInterval(tick, 1000);
     fetchOrders();
     const channel = supabase.channel('kds-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => debouncedFetch())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'coffee_orders' }, () => debouncedFetch())
       .subscribe();
-    return () => { clearInterval(t); supabase.removeChannel(channel); };
-  }, []);
-
-  async function fetchOrders() {
-    const { data } = await supabase
-      .from('orders')
-      .select('*, coffee_orders (*)')
-      .in('status', ['paid', 'preparing', 'ready'])
-      .order('created_at', { ascending: true });
-    setOrders(data || []);
-  }
+    return () => {
+      clearInterval(t);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, [fetchOrders, debouncedFetch]);
 
   async function updateStatus(id: string, status: string) {
     await supabase.from('orders').update({ status }).eq('id', id);

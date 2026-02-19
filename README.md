@@ -36,8 +36,8 @@ brewhubbot/
 │   │   └── scanner/       #     Inventory barcode scanner
 │   └── layout.tsx         #   Root layout
 ├── public/                # Legacy HTML pages (kds, manager, cafe, parcels)
-├── netlify/functions/     # Serverless API endpoints (~40 functions)
-├── supabase/              # DB schemas, RPC functions, RLS policies
+├── netlify/functions/     # Serverless API endpoints (50+ functions)
+├── supabase/              # DB schemas (1–11), RPC functions, RLS policies
 ├── scripts/               # Utilities (Apple Pay, secret rotation, AI tests)
 └── tests/                 # Jest test suite
 ```
@@ -61,7 +61,7 @@ brewhubbot/
 | Page | Description |
 |---|---|
 | `kds.html` | Full-featured KDS (realtime, status transitions, stale alerts) |
-| `manager.html` | Manager dashboard with embedded KDS widget |
+| `manager.html` | Manager dashboard with embedded KDS widget + 🖨️ receipt roll |
 | `cafe.html` | Legacy staff POS |
 | `parcels.html` | Parcel check-in & pickup |
 | `scan.html` | Inventory scanner |
@@ -79,9 +79,9 @@ brewhubbot/
 | `create-checkout` | Generates Square payment links |
 | `create-order` | Generic order creation with server-side price validation |
 | `ai-order` | API for AI agents (Elise/Claude) to place orders |
-| `square-webhook` | Handles `payment.updated` → marks paid, triggers loyalty + inventory |
+| `square-webhook` | Handles `payment.updated` → marks paid, triggers loyalty + inventory + receipt |
 | `square-sync` | Syncs new Supabase orders to Square |
-| `update-order-status` | KDS status transitions (preparing → ready → completed) |
+| `update-order-status` | KDS status transitions (preparing → ready → completed), records `completed_at` |
 
 ### AI & Voice
 | Function | Description |
@@ -100,6 +100,21 @@ brewhubbot/
 | `sales-report` | Daily sales aggregation |
 | `send-sms-email` | Notifications via Resend |
 
+### Scheduled & Background
+| Function | Description |
+|---|---|
+| `cancel-stale-orders` | Cancels orders stuck in pending/unpaid >30 min (cron: `@every 5m`) |
+| `queue-processor` | Processes parcel notification queue (batches of 5) |
+
+### Shared Modules (not endpoints)
+| Module | Description |
+|---|---|
+| `_auth.js` | Central auth: JWT validation + PIN HMAC tokens |
+| `_gdpr.js` | Request logging & GDPR compliance |
+| `_ip-guard.js` | Rate limiting with timing-safe comparison |
+| `_receipt.js` | 32-column thermal receipt generator (shared by webhook + KDS) |
+| `_usage.js` | API quota tracking |
+
 ---
 
 ## 🔄 Order Lifecycle
@@ -114,6 +129,19 @@ brewhubbot/
 **POS flow:** Staff builds order → "Send to KDS" (creates Supabase order, KDS sees it instantly via realtime) → "Pay on Terminal" (calls `collect-payment` → Square Terminal) or "Cash/Comp".
 
 **Database triggers:** `sync_coffee_order_status` syncs status to line items · `handle_order_completion` decrements inventory on completion.
+
+### Supabase Schema Migrations
+The database is managed through sequential migration files (`schema-1` through `schema-11`):
+
+| Schema | Purpose |
+|---|---|
+| `schema-1` – `schema-5` | Core tables, functions, RPCs, RLS policies |
+| `schema-6` – `schema-7` | Feature extensions |
+| `schema-8-pin` | PIN auth system (staff_directory.pin, token_version) |
+| `schema-9-receipts` | `receipt_queue` table + `orders.completed_at` column |
+| `schema-10-payment-hardening` | `cancel_stale_orders` RPC + `orders.paid_amount_cents` column |
+| `schema-11-medium-fixes` | DB-backed PIN lockout (`pin_attempts`) + staff-scoped RLS SELECT policies |
+| `schema-free-coffee` | Loyalty voucher auto-generation |
 
 ---
 

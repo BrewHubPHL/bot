@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
+const { generateReceiptString, queueReceipt } = require('./_receipt');
 
 // Initialize with Service Role Key (Bypasses RLS)
 const supabase = createClient(
@@ -32,26 +33,55 @@ exports.handler = async (event) => {
   if (!auth.ok) return auth.response;
 
   try {
-    const { orderId, status } = JSON.parse(event.body);
+    const { orderId, status, paymentMethod } = JSON.parse(event.body);
 
     if (!orderId) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Missing Order ID' }) };
     }
 
     // Validate status is one of allowed values
-    const allowedStatuses = ['preparing', 'ready', 'completed', 'cancelled'];
+    const allowedStatuses = ['paid', 'preparing', 'ready', 'completed', 'cancelled'];
     if (!status || !allowedStatuses.includes(status)) {
       return { statusCode: 400, body: JSON.stringify({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }) };
+    }
+
+    // Build update payload
+    const updatePayload = { status };
+
+    // Track order completion speed
+    if (status === 'completed') {
+      updatePayload.completed_at = new Date().toISOString();
+    }
+
+    // Record payment method (cash, comp, etc.) and set payment_id marker
+    const ALLOWED_PAYMENT_METHODS = ['cash', 'comp', 'square', 'other'];
+    if (paymentMethod && ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
+      updatePayload.payment_id = paymentMethod;    // marks order as paid
     }
 
     // Update the Order Status
     const { data, error } = await supabase
       .from('orders')
-      .update({ status })
+      .update(updatePayload)
       .eq('id', orderId)
       .select();
 
     if (error) throw error;
+
+    // Generate receipt for cash/comp payments (Square receipts handled by webhook)
+    if (paymentMethod && ['cash', 'comp'].includes(paymentMethod) && data && data[0]) {
+      try {
+        const { data: lineItems } = await supabase
+          .from('coffee_orders')
+          .select('drink_name, price')
+          .eq('order_id', orderId);
+
+        const receiptText = generateReceiptString(data[0], lineItems || []);
+        await queueReceipt(supabase, orderId, receiptText);
+      } catch (receiptErr) {
+        console.error('[RECEIPT] Non-fatal receipt error:', receiptErr.message);
+      }
+    }
 
     return {
       statusCode: 200,

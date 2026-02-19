@@ -6,7 +6,7 @@
   "[typescript]": {
     "editor.defaultFormatter": "denoland.vscode-deno"
   },
-  "snyk.advanced.organization": "03d7190b-dfcb-444f-83c3-1b95e7d24b07",
+  "snyk.advanced.organization": "ae7e8c3a-18f6-47ec-a9c3-7b22b937af54",
   "snyk.advanced.autoSelectOrganization": true,
   "sonarlint.connectedMode.project": {
     "connectionId": "brewhubphl",

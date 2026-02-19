@@ -55,6 +55,9 @@
         // --- STATE ---
         var orders = [];
         var lastUpdated = new Date();
+        var fetchDebounceTimer = null;
+        var fetchAbortController = null;
+        var isFetching = false;
 
         // --- HELPERS ---
         // This was the missing piece causing your ReferenceError!
@@ -83,23 +86,37 @@
             } catch(e) { return ""; }
         }
 
-        // --- DATA FETCHING ---
+        // --- DATA FETCHING (debounced + abortable) ---
+        function debouncedFetchOrders() {
+            clearTimeout(fetchDebounceTimer);
+            fetchDebounceTimer = setTimeout(fetchOrders, 500);
+        }
+
         async function fetchOrders() {
+            if (isFetching) return; // skip if already in-flight
+            isFetching = true;
+
+            // Abort any lingering previous request
+            if (fetchAbortController) fetchAbortController.abort();
+            fetchAbortController = new AbortController();
+
             try {
-                console.log("KDS: Fetching active orders...");
                 var { data, error } = await sbClient
                     .from('orders')
                     .select('*, coffee_orders (*)')
                     .in('status', ['pending', 'unpaid', 'paid', 'preparing', 'ready'])
-                    .order('created_at', { ascending: true });
+                    .order('created_at', { ascending: true })
+                    .abortSignal(fetchAbortController.signal);
 
                 if (error) throw error;
                 orders = data || [];
                 lastUpdated = new Date();
                 render();
-                console.log("KDS: Success! Orders count:", orders.length);
             } catch (err) {
+                if (err.name === 'AbortError') return; // expected, ignore
                 console.error("KDS: Fetch Error:", err);
+            } finally {
+                isFetching = false;
             }
         }
 
@@ -203,18 +220,9 @@
                 </div>
             `;
 
-            // Bind event listeners after rendering
+            // Bind SYNC button listener after rendering
             var syncBtn = document.getElementById('kds-sync-btn');
             if (syncBtn) syncBtn.addEventListener('click', function() { fetchOrders(); });
-
-            app.addEventListener('click', function(e) {
-                var btn = e.target.closest('.kds-status-btn');
-                if (btn) {
-                    var orderId = btn.getAttribute('data-order-id');
-                    var nextStatus = btn.getAttribute('data-next-status');
-                    if (orderId && nextStatus) updateStatus(orderId, nextStatus);
-                }
-            });
         }
 
         // --- STARTUP ---
@@ -223,15 +231,26 @@
             while (!window.brewAuth) await new Promise(r => setTimeout(r, 100));
             await initSupabase();
             await window.brewAuth.protectPage({ requiredRole: 'staff' });
-            
+
+            // Delegated click handler — registered ONCE, survives re-renders
+            document.getElementById('app').addEventListener('click', function(e) {
+                var btn = e.target.closest('.kds-status-btn');
+                if (btn) {
+                    var orderId = btn.getAttribute('data-order-id');
+                    var nextStatus = btn.getAttribute('data-next-status');
+                    if (orderId && nextStatus) updateStatus(orderId, nextStatus);
+                }
+            });
+
             fetchOrders();
 
-            // Subscriptions
+            // Realtime subscriptions — debounced so bursts collapse into one fetch
             sbClient.channel('kds-realtime')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'coffee_orders' }, () => fetchOrders())
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => debouncedFetchOrders())
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'coffee_orders' }, () => debouncedFetchOrders())
                 .subscribe();
 
+            // Gentle UI refresh for "time ago" labels (no network call)
             setInterval(render, 30000);
         }
         init();

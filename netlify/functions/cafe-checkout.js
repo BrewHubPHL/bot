@@ -136,7 +136,8 @@ exports.handler = async (event) => {
     if (customer_email && EMAIL_RE.test(customer_email) && process.env.RESEND_API_KEY) {
       const safeName = escapeHtml(customer_name);
       const itemList = validatedItems.map(i => `${escapeHtml(i.drink_name)} - $${i.price.toFixed(2)}`).join('<br>');
-      fetch('https://api.resend.com/emails', {
+      try {
+        await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -162,7 +163,10 @@ exports.handler = async (event) => {
             </div>
           `
         })
-      }).catch(err => console.error('[CAFE] Email send error:', err));
+      });
+      } catch (emailErr) {
+        console.error('[CAFE] Email send error:', emailErr.message);
+      }
     }
 
     return json(200, { 
