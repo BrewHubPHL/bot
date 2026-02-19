@@ -215,7 +215,8 @@ export default function BrewHubLanding() {
         headers: chatHeaders,
         body: JSON.stringify({ 
           text: userText,
-          email: localStorage.getItem('brewhub_email') || "" 
+          email: localStorage.getItem('brewhub_email') || "",
+          history: messages.slice(-10).map(m => ({ role: m.role, content: m.content }))
         })
       });
       const data = await response.json();

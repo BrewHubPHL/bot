@@ -52,11 +52,11 @@
   
   <main class="container">
     <section>
-      <h2>📋 Live Orders</h2>
-      <div style="margin-bottom: 20px; display: flex; gap: 10px;">
-          <button onclick="addToCart({name: 'Latte', price: 4.50})" style="padding:10px; border-radius:8px; border:none; background:#3498db; color:white; cursor:pointer;">+ Add Latte</button>
-          <button onclick="addToCart({name: 'Croissant', price: 3.50})" style="padding:10px; border-radius:8px; border:none; background:#3498db; color:white; cursor:pointer;">+ Add Croissant</button>
+      <h2>📋 Menu</h2>
+      <div id="menuGrid" style="margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px;">
+        <span style="color: rgba(255,255,255,0.5); font-size: 0.9rem;">Loading menu...</span>
       </div>
+      <h2 style="margin-top:1.5rem;">📋 Live Orders</h2>
       <div id="ordersFeed"></div>
     </section>
     
@@ -145,6 +145,24 @@
       
       const client = window.brewAuth.client;
       console.log("✅ Cafe POS Connected");
+
+      // Load menu from merch_products (same source as Next.js POS)
+      const { data: menuData, error: menuErr } = await client
+        .from('merch_products')
+        .select('id, name, price_cents')
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+
+      const grid = document.getElementById('menuGrid');
+      if (!menuErr && menuData && menuData.length > 0) {
+        grid.innerHTML = menuData.map(item => {
+          const priceDollars = (item.price_cents / 100).toFixed(2);
+          return `<button onclick="addToCart({name:'${escapeHtml(item.name).replace(/'/g, "\\'")}',price:${priceDollars}})" style="padding:10px 14px;border-radius:8px;border:none;background:#3498db;color:white;cursor:pointer;font-size:0.85rem;white-space:nowrap;">+ ${escapeHtml(item.name)} $${priceDollars}</button>`;
+        }).join('');
+      } else {
+        grid.innerHTML = '<span style="color:#e74c3c;">Could not load menu</span>';
+      }
       
       // Load recent orders for the feed
       const { data } = await client.from('orders').select('*').order('created_at', { ascending: false }).limit(5);

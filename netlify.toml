@@ -43,6 +43,16 @@
   status = 200
 
 [[redirects]]
+  from = "/queue"
+  to = "/queue.html"
+  status = 200
+
+[[redirects]]
+  from = "/queue.html"
+  to = "/queue.html"
+  status = 200
+
+[[redirects]]
   from = "/manager.html"
   to = "/manager.html"
   status = 200

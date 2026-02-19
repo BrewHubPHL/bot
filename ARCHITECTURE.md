@@ -22,7 +22,7 @@ brewhubbot/
 │   ├── components/
 │   │   └── OpsGate.tsx    # Fullscreen PIN pad + session context
 │   └── lib/               # Supabase client, utilities
-├── supabase/              # DB schemas (schema-1 through schema-11)
+├── supabase/              # DB schemas (schema-1 through schema-14)
 ├── scripts/               # Utility & test scripts
 └── tests/                 # Jest tests
 ```
@@ -48,6 +48,7 @@ All routes wrapped by `OpsGate` component — requires 6-digit staff PIN.
 | `/admin/*` | Admin dashboard + inventory (JWT auth) |
 | `/manager` | Staff dashboard (JWT auth) |
 | `/parcels` | Parcel hub management |
+| `/parcels/monitor` | Parcel departure board (Smart TV kiosk) |
 | `/portal` | Resident portal |
 | `/waitlist` | Pre-launch waitlist |
 
@@ -89,6 +90,10 @@ All routes wrapped by `OpsGate` component — requires 6-digit staff PIN.
 - **parcel-check-in.js** — Register incoming packages
 - **parcel-pickup.js** — Verify resident pickup
 - **search-residents.js** — Resident lookup
+- **Parcel Monitor** (`/parcels/monitor`) — Smart TV digital signage (airport departure board)
+  - Queries `parcel_departure_board` VIEW — PII masked at SQL level
+  - 10 s polling (no WebSockets — Smart TV compatibility)
+  - Full-viewport kiosk overlay, pitch-black background, amber pulse on new arrivals
 
 ### 5. Marketing & CRM
 - **marketing-bot.js** — AI-powered social media
@@ -108,6 +113,25 @@ All routes wrapped by `OpsGate` component — requires 6-digit staff PIN.
 - **adjust-inventory.js** — Increment/decrement stock
 - **inventory-check.js** / **inventory-lookup.js** — Stock queries
 - **get-merch.js** / **shop-data.js** — Merch product APIs
+
+### 8. Manager Dashboard — Visual Command Center (`/manager`)
+Server component composing independent client components. Each manages its own data lifecycle.
+
+| Component | Purpose |
+|-----------|---------|
+| `StatsGrid` | Key metrics (orders, revenue, parcels) |
+| **`CatalogManager`** | Visual product grid + slide-out drawer for CRUD |
+| `InventoryTable` | Stock management table |
+| `KdsSection` | Embedded Kitchen Display widget |
+| `PayrollSection` | Staff hours + cost |
+| `RecentActivity` | Latest order/event feed |
+
+#### CatalogManager Details
+- **Grid**: Responsive 2/3/4 columns, product cards with image or ☕ emoji fallback, Active/Inactive badges
+- **Drawer**: Slide-out form with drag-and-drop `ImageDropZone` → Supabase Storage (`menu-images/catalog/`)
+- **Upload**: 5 MB max, PNG/JPEG/WebP/GIF only, sanitized filenames, double-upload guard
+- **Price**: Dollar string → cents via `Math.round(parseFloat * 100)` (no floating-point drift)
+- **RLS**: Requires schema-13 (`is_brewhub_staff()` for SELECT/INSERT/UPDATE on `merch_products`)
 
 ---
 
@@ -181,7 +205,7 @@ All Square clients use `SquareEnvironment.Production` + `SQUARE_PRODUCTION_TOKEN
 
 ## Database (Supabase)
 
-### Schema migrations: `supabase/schema-1` through `schema-11`
+### Schema migrations: `supabase/schema-1` through `schema-14`
 
 Key tables:
 - `orders` — Cafe orders with status, payment_id, total_amount_cents, completed_at, paid_amount_cents
@@ -198,6 +222,7 @@ Key tables:
 - `refund_locks` — Prevents voucher redemption during refund processing
 - `receipt_queue` — Virtual thermal receipts (order_id, receipt_text, printed flag)
 - `pin_attempts` — DB-backed PIN brute-force lockout (keyed by IP)
+- `parcel_departure_board` — **VIEW** (not a table); pre-masks PII for TV kiosk (`security_invoker = false`)
 
 ### Key RPC functions
 - `increment_loyalty` — Atomic points increment, triggers voucher at threshold
@@ -213,6 +238,8 @@ Key tables:
 ### RLS Strategy
 - **Default**: Deny-all (`USING(false)`) on all tables
 - **Staff SELECT**: Authenticated users whose email is in `staff_directory` can read operational tables (`orders`, `coffee_orders`, `staff_directory`, `time_logs`, `receipt_queue`)
+- **Catalog (schema-13)**: Staff-scoped SELECT/INSERT/UPDATE on `merch_products` + SELECT on `inventory` via `is_brewhub_staff()` SECURITY DEFINER
+- **Parcel Monitor (schema-14)**: Zero-PII `parcel_departure_board` VIEW (`security_invoker = false`); no anon policy on raw `parcels` table; staff SELECT via `is_brewhub_staff()`
 - **Service role**: Backend functions use service role key for INSERT/UPDATE/DELETE
 - **Customer**: Supabase Auth scopes reads to own profile/parcels/vouchers
 

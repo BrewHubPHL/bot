@@ -6,6 +6,7 @@ import RecentActivity from "../components/manager/RecentActivity";
 import KdsSection from "../components/manager/KdsSection";
 import PayrollSection from "../components/manager/PayrollSection";
 import ManagerNav from "../components/manager/ManagerNav";
+import CatalogManager from "../components/manager/CatalogManager";
 
 export const metadata = {
   title: "BrewHub Manager Dashboard",
@@ -20,7 +21,9 @@ export default function ManagerDashboard() {
         <h1 className="text-3xl font-bold mb-6">Manager Dashboard</h1>
         <p className="text-gray-400 mb-8">Welcome to the BrewHub manager dashboard. All admin features are being migrated here.</p>
         <StatsGrid />
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <CatalogManager />
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-10">
           <div className="lg:col-span-2">
             <InventoryTable />
             <KdsSection />
