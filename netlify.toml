@@ -93,4 +93,4 @@
 
 # Scheduled: Cancel orders stuck in 'pending' for >30 minutes
 [functions."cancel-stale-orders"]
-  schedule = "@every 5m"
+  schedule = "*/5 * * * *"
