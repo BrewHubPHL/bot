@@ -100,6 +100,86 @@
       100% { box-shadow: 2px 4px 12px rgba(0,0,0,0.45); }
     }
     .printer-empty { padding: 2rem; text-align: center; color: #666; font-size: 0.85rem; }
+
+    /* ── Tab System ─────────────────────────────────── */
+    .tab-bar { display: flex; gap: 4px; overflow-x: auto; padding: 0 2rem; background: #1a1a1a; border-bottom: 1px solid #333; }
+    .tab-bar::-webkit-scrollbar { display: none; }
+    .tab-btn { background: none; border: none; border-bottom: 2px solid transparent; color: #888; padding: 0.75rem 1.25rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: color 0.2s, border-color 0.2s; display: flex; align-items: center; gap: 6px; }
+    .tab-btn:hover { color: #ccc; }
+    .tab-btn.active { color: #f39c12; border-bottom-color: #f39c12; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Catalog Tab ────────────────────────────────── */
+    .catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+    .catalog-card { background: #1a1a1a; border-radius: 12px; border: 1px solid #333; padding: 1.25rem; position: relative; }
+    .catalog-card .cat-name { font-weight: 600; font-size: 1rem; margin-bottom: 0.25rem; }
+    .catalog-card .cat-price { color: #27ae60; font-weight: 700; }
+    .catalog-card .cat-badge { position: absolute; top: 12px; right: 12px; background: #333; color: #aaa; font-size: 0.65rem; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; font-weight: 700; }
+    .catalog-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+    .catalog-actions button { flex: 1; padding: 0.4rem; border-radius: 8px; border: 1px solid #444; background: #222; color: #ccc; font-size: 0.75rem; cursor: pointer; transition: background 0.2s; }
+    .catalog-actions button:hover { background: #333; }
+    .catalog-actions button.cat-delete { border-color: #c0392b; color: #e74c3c; }
+    .catalog-actions button.cat-delete:hover { background: #2c1010; }
+    #catalog-add-form { background: #1a1a1a; border-radius: 12px; border: 1px solid #333; padding: 1.5rem; margin-bottom: 1.5rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    #catalog-add-form input, #catalog-add-form select { background: #222; border: 1px solid #444; color: #f5f5f5; padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.85rem; }
+    #catalog-add-form button { grid-column: span 2; background: #27ae60; color: #fff; border: none; padding: 0.6rem; border-radius: 8px; cursor: pointer; font-weight: 600; }
+
+    /* ── Image Drop Zone ── */
+    .image-drop-zone { border: 2px dashed #444; border-radius: 12px; padding: 1.25rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; cursor: pointer; transition: border-color 0.2s, background 0.2s; min-height: 120px; text-align: center; position: relative; }
+    .image-drop-zone.drag-over { border-color: #3498db; background: rgba(52,152,219,0.08); }
+    .image-drop-zone:hover { border-color: #666; }
+    .drop-prompt { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; color: #888; font-size: 0.85rem; pointer-events: none; }
+    .drop-preview-img { max-height: 140px; max-width: 100%; border-radius: 8px; object-fit: cover; border: 1px solid #333; }
+    .drop-uploading .pulse-text { color: #3498db; animation: pulse-fade 1.2s infinite; font-size: 0.85rem; }
+    @keyframes pulse-fade { 0%,100%{ opacity:0.4; } 50%{ opacity:1; } }
+    .drop-error { color: #e74c3c; font-size: 0.75rem; min-height: 1rem; }
+    .price-field { display: flex; align-items: center; background: #222; border: 1px solid #444; border-radius: 8px; overflow: hidden; }
+    .price-field .price-prefix { padding: 0.5rem 0.5rem 0.5rem 0.75rem; color: #27ae60; font-weight: 700; font-size: 0.9rem; }
+    .price-field input { background: transparent; border: none; color: #f5f5f5; padding: 0.5rem 0.75rem 0.5rem 0; font-size: 0.85rem; flex: 1; outline: none; }
+    .cat-img-thumb { width: 100%; height: 120px; object-fit: cover; border-radius: 8px; margin-bottom: 0.5rem; border: 1px solid #333; }
+    .cat-img-placeholder { width: 100%; height: 120px; border-radius: 8px; margin-bottom: 0.5rem; background: #222; display: flex; align-items: center; justify-content: center; color: #444; font-size: 2rem; border: 1px dashed #333; }
+
+    /* ── Edit Modal ── */
+    .edit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+    .edit-modal { background: #1a1a1a; border-radius: 16px; border: 1px solid #444; padding: 1.5rem; width: 90%; max-width: 440px; max-height: 90vh; overflow-y: auto; }
+    .edit-modal h3 { margin: 0 0 1rem; font-size: 1.1rem; }
+    .edit-field { margin-bottom: 0.75rem; }
+    .edit-field label { display: block; color: #888; font-size: 0.75rem; margin-bottom: 4px; text-transform: uppercase; font-weight: 600; }
+    .edit-field input, .edit-field select { width: 100%; background: #222; border: 1px solid #444; color: #f5f5f5; padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.85rem; box-sizing: border-box; }
+    .edit-btns { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    .edit-btns button { flex: 1; padding: 0.6rem; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; }
+    .edit-btns .save-btn { background: #27ae60; color: #fff; }
+    .edit-btns .cancel-btn { background: #333; color: #ccc; }
+
+    /* ── Hiring Tab ─────────────────────────────────── */
+    .hiring-filters { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .hiring-pill { background: #222; border: 1px solid #333; color: #888; padding: 0.4rem 1rem; border-radius: 20px; font-size: 0.75rem; cursor: pointer; font-weight: 600; text-transform: uppercase; transition: all 0.2s; }
+    .hiring-pill:hover { border-color: #555; color: #ccc; }
+    .hiring-pill.active { background: rgba(243,156,18,0.15); border-color: rgba(243,156,18,0.4); color: #f39c12; }
+    .applicant-card { background: #1a1a1a; border-radius: 12px; border: 1px solid #333; margin-bottom: 0.75rem; overflow: hidden; }
+    .applicant-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.25rem; cursor: pointer; transition: background 0.2s; }
+    .applicant-row:hover { background: #222; }
+    .applicant-avatar { width: 36px; height: 36px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: #888; flex-shrink: 0; }
+    .applicant-name { font-weight: 600; }
+    .applicant-email { font-size: 0.75rem; color: #666; }
+    .applicant-meta { display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
+    .app-status { padding: 3px 10px; border-radius: 20px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
+    .app-status.pending { background: rgba(243,156,18,0.15); color: #f39c12; }
+    .app-status.reviewed { background: rgba(52,152,219,0.15); color: #3498db; }
+    .app-status.interview { background: rgba(155,89,182,0.15); color: #9b59b6; }
+    .app-status.hired { background: rgba(39,174,96,0.15); color: #27ae60; }
+    .app-status.rejected { background: rgba(231,76,60,0.15); color: #e74c3c; }
+    .resume-link { background: #222; border: 1px solid #444; color: #f39c12; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .resume-link:hover { background: #333; }
+    .applicant-detail { padding: 0 1.25rem 1.25rem; border-top: 1px solid #2a2a2a; display: none; }
+    .applicant-detail.open { display: block; padding-top: 1rem; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .detail-label { font-size: 0.7rem; color: #666; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .detail-value { font-size: 0.85rem; color: #ccc; }
+    .status-btns { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+    .status-btns button { padding: 0.35rem 0.75rem; border-radius: 6px; border: 1px solid #444; background: #222; color: #ccc; font-size: 0.7rem; cursor: pointer; font-weight: 600; transition: all 0.2s; }
+    .status-btns button:hover { background: #333; }
   </style>
 </head>
 <body>
@@ -117,7 +197,15 @@
     </nav>
   </header>
 
-  <main class="container">
+  <!-- ── Tab Bar ────────────────────────────────── -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="overview">📊 Overview</button>
+    <button class="tab-btn" data-tab="catalog">🍽️ Menu &amp; Catalog</button>
+    <button class="tab-btn" data-tab="hiring">📋 Hiring</button>
+  </div>
+
+  <!-- ═══ TAB: OVERVIEW (existing dashboard) ═══ -->
+  <main class="container tab-panel active" id="tab-overview">
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">Today's Revenue <button id="refresh-sales-btn" style="background:none;border:none;cursor:pointer;font-size:0.8rem;">🔄</button></div>
@@ -210,6 +298,61 @@
       </div>
     </section>
   </main>
+
+  <!-- ═══ TAB: MENU & CATALOG ═══ -->
+  <div class="container tab-panel" id="tab-catalog">
+    <div class="section-header">
+      <h2>🍽️ Menu &amp; Catalog</h2>
+      <button id="refresh-catalog-btn" style="color:#888;background:none;border:1px solid #333;padding:5px 10px;cursor:pointer;">↻ Refresh</button>
+    </div>
+
+    <form id="catalog-add-form" autocomplete="off">
+      <input type="text" name="name" placeholder="Item name" required />
+      <div class="price-field">
+        <span class="price-prefix">$</span>
+        <input type="number" name="price_dollars" placeholder="0.00" min="0" step="0.01" required />
+      </div>
+      <input type="text" name="description" placeholder="Short description" />
+      <select name="category">
+        <option value="menu">☕ Cafe Menu</option>
+        <option value="merch">🛍️ Merch &amp; Beans</option>
+      </select>
+      <div class="image-drop-zone" id="add-image-drop" style="grid-column:span 2;">
+        <img id="add-image-preview" class="drop-preview-img" style="display:none;" alt="Preview" />
+        <div class="drop-prompt" id="add-drop-prompt">
+          <span style="font-size:2rem;">📸</span>
+          <span>Drag &amp; drop a photo here<br><small style="color:#5dade2;text-decoration:underline;">or click to browse</small></span>
+        </div>
+        <div class="drop-uploading" id="add-drop-uploading" style="display:none;">
+          <span class="pulse-text">Uploading…</span>
+        </div>
+        <input type="file" id="add-image-file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;" />
+        <input type="hidden" name="image_url" id="add-image-url" />
+        <div class="drop-error" id="add-drop-error"></div>
+      </div>
+      <select name="active">
+        <option value="true">✅ Active (visible to customers)</option>
+        <option value="false">🙈 Hidden</option>
+      </select>
+      <button type="submit">+ Add Item</button>
+    </form>
+
+    <div class="catalog-grid" id="catalog-grid">
+      <div style="padding:1rem;color:#666;">Loading catalog...</div>
+    </div>
+  </div>
+
+  <!-- ═══ TAB: HIRING ═══ -->
+  <div class="container tab-panel" id="tab-hiring">
+    <div class="section-header">
+      <h2>📋 Applicants</h2>
+      <button id="refresh-hiring-btn" style="color:#888;background:none;border:1px solid #333;padding:5px 10px;cursor:pointer;">↻ Refresh</button>
+    </div>
+    <div class="hiring-filters" id="hiring-filters"></div>
+    <div id="applicants-list">
+      <div style="padding:1rem;color:#666;">Loading applications...</div>
+    </div>
+  </div>
 
   <script>
     // XSS Protection
@@ -591,6 +734,380 @@
         if (orderId && nextStatus) updateKdsStatus(orderId, nextStatus);
       }
     });
+
+    // ─── Tab Switching ──────────────────────────────────
+    document.querySelector('.tab-bar').addEventListener('click', function(e) {
+      var btn = e.target.closest('.tab-btn');
+      if (!btn) return;
+      var tab = btn.getAttribute('data-tab');
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+      btn.classList.add('active');
+      var panel = document.getElementById('tab-' + tab);
+      if (panel) panel.classList.add('active');
+      // Lazy-load tab data on first visit
+      if (tab === 'catalog' && !catalogLoaded) loadCatalog();
+      if (tab === 'hiring' && !hiringLoaded) loadHiring();
+    });
+
+    // ─── CATALOG TAB ────────────────────────────────────
+    var catalogLoaded = false;
+    var catalogItems = [];
+
+    async function loadCatalog() {
+      try {
+        var client = window.brewAuth.client;
+        if (!client) return;
+        var { data, error } = await client
+          .from('merch_products')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        catalogItems = data || [];
+        catalogLoaded = true;
+        renderCatalog();
+      } catch (err) {
+        console.error('Catalog fetch failed:', err);
+        document.getElementById('catalog-grid').innerHTML = '<div style="padding:1rem;color:#e74c3c;">Failed to load catalog</div>';
+      }
+    }
+
+    function renderCatalog() {
+      var grid = document.getElementById('catalog-grid');
+      if (catalogItems.length === 0) {
+        grid.innerHTML = '<div style="padding:2rem;color:#666;text-align:center;">No products yet. Add one above!</div>';
+        return;
+      }
+      grid.innerHTML = catalogItems.map(function(p) {
+        var price = (parseInt(p.price_cents) || 0) / 100;
+        var cat = (p.category || 'menu').toUpperCase();
+        var active = p.active !== false;
+        var imgHtml = p.image_url
+          ? '<img class="cat-img-thumb" src="' + escapeHtml(p.image_url) + '" alt="' + escapeHtml(p.name) + '" onerror="this.outerHTML=\'<div class=cat-img-placeholder>☕</div>\'" />'
+          : '<div class="cat-img-placeholder">☕</div>';
+        return '<div class="catalog-card' + (active ? '' : '" style="opacity:0.5') + '">' +
+          imgHtml +
+          '<div class="cat-badge">' + escapeHtml(cat) + '</div>' +
+          '<div class="cat-name">' + escapeHtml(p.name) + '</div>' +
+          (p.description ? '<div style="font-size:0.8rem;color:#888;margin-bottom:0.5rem;">' + escapeHtml(p.description) + '</div>' : '') +
+          '<div class="cat-price">$' + price.toFixed(2) + '</div>' +
+          '<div class="catalog-actions">' +
+            '<button data-catalog-edit="' + escapeHtml(p.id) + '">✏️ Edit</button>' +
+            '<button data-catalog-toggle="' + escapeHtml(p.id) + '" data-active="' + active + '">' + (active ? '👁 Hide' : '👁 Show') + '</button>' +
+            '<button class="cat-delete" data-catalog-delete="' + escapeHtml(p.id) + '">🗑 Delete</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    // ─── IMAGE UPLOAD HELPERS ───────────────────────────
+    var IMAGE_TYPES = ['image/png','image/jpeg','image/webp','image/gif'];
+    var MAX_IMG_SIZE = 5 * 1024 * 1024; // 5 MB
+
+    function setupDropZone(zoneId, previewId, promptId, uploadingId, errorId, hiddenInputId, fileInputId) {
+      var zone = document.getElementById(zoneId);
+      var preview = document.getElementById(previewId);
+      var prompt = document.getElementById(promptId);
+      var uploading = document.getElementById(uploadingId);
+      var errorEl = document.getElementById(errorId);
+      var hidden = document.getElementById(hiddenInputId);
+      var fileInput = document.getElementById(fileInputId);
+      var busy = false;
+
+      zone.addEventListener('click', function() { if (!busy) fileInput.click(); });
+      zone.addEventListener('dragover', function(e) { e.preventDefault(); zone.classList.add('drag-over'); });
+      zone.addEventListener('dragleave', function() { zone.classList.remove('drag-over'); });
+      zone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+        var file = e.dataTransfer.files[0];
+        if (file) handleImageFile(file);
+      });
+      fileInput.addEventListener('change', function(e) {
+        var file = e.target.files[0];
+        if (file) handleImageFile(file);
+        fileInput.value = '';
+      });
+
+      async function handleImageFile(file) {
+        if (busy) return;
+        errorEl.textContent = '';
+        if (IMAGE_TYPES.indexOf(file.type) === -1) {
+          errorEl.textContent = '⚠️ Only PNG, JPG, WebP, or GIF photos are allowed.';
+          return;
+        }
+        if (file.size > MAX_IMG_SIZE) {
+          errorEl.textContent = '⚠️ Photo must be under 5 MB.';
+          return;
+        }
+        busy = true;
+        prompt.style.display = 'none';
+        preview.style.display = 'none';
+        uploading.style.display = '';
+        try {
+          var client = window.brewAuth.client;
+          var ext = file.name.split('.').pop() || 'png';
+          var safeName = (Date.now() + '_' + file.name.replace(/\.[^.]+$/, '')).replace(/[^a-zA-Z0-9_-]/g, '_');
+          var path = 'catalog/' + safeName + '.' + ext;
+          var result = await client.storage.from('menu-images').upload(path, file, { cacheControl: '3600', upsert: false });
+          if (result.error) throw result.error;
+          var urlData = client.storage.from('menu-images').getPublicUrl(path);
+          var publicUrl = urlData.data.publicUrl;
+          hidden.value = publicUrl;
+          preview.src = publicUrl;
+          preview.style.display = '';
+          prompt.style.display = 'none';
+        } catch (err) {
+          errorEl.textContent = '⚠️ Upload failed: ' + (err.message || 'unknown error');
+          prompt.style.display = '';
+        } finally {
+          uploading.style.display = 'none';
+          busy = false;
+        }
+      }
+
+      return { reset: function() {
+        hidden.value = '';
+        preview.src = '';
+        preview.style.display = 'none';
+        prompt.style.display = '';
+        uploading.style.display = 'none';
+        errorEl.textContent = '';
+      }};
+    }
+
+    var addDropZone = setupDropZone('add-image-drop', 'add-image-preview', 'add-drop-prompt', 'add-drop-uploading', 'add-drop-error', 'add-image-url', 'add-image-file');
+
+    // ─── ADD NEW PRODUCT ────────────────────────────────
+    document.getElementById('catalog-add-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      try {
+        var client = window.brewAuth.client;
+        var fd = new FormData(e.target);
+        var dollars = parseFloat(fd.get('price_dollars')) || 0;
+        var cents = Math.round(dollars * 100);
+        var { error } = await client.from('merch_products').insert({
+          name: fd.get('name'),
+          price_cents: cents,
+          description: fd.get('description') || null,
+          category: fd.get('category') || 'menu',
+          image_url: fd.get('image_url') || null,
+          active: fd.get('active') === 'true'
+        });
+        if (error) throw error;
+        e.target.reset();
+        addDropZone.reset();
+        loadCatalog();
+      } catch (err) {
+        alert('Failed to add item: ' + err.message);
+      }
+    });
+
+    // ─── TOGGLE / DELETE / EDIT CATALOG ─────────────────
+    document.getElementById('catalog-grid').addEventListener('click', async function(e) {
+      var toggleBtn = e.target.closest('[data-catalog-toggle]');
+      var deleteBtn = e.target.closest('[data-catalog-delete]');
+      var editBtn = e.target.closest('[data-catalog-edit]');
+      var client = window.brewAuth.client;
+      if (toggleBtn) {
+        var id = toggleBtn.getAttribute('data-catalog-toggle');
+        var isActive = toggleBtn.getAttribute('data-active') === 'true';
+        await client.from('merch_products').update({ active: !isActive }).eq('id', id);
+        loadCatalog();
+      }
+      if (deleteBtn) {
+        var did = deleteBtn.getAttribute('data-catalog-delete');
+        if (confirm('Delete this product?')) {
+          await client.from('merch_products').delete().eq('id', did);
+          loadCatalog();
+        }
+      }
+      if (editBtn) {
+        var eid = editBtn.getAttribute('data-catalog-edit');
+        openEditModal(eid);
+      }
+    });
+
+    document.getElementById('refresh-catalog-btn').addEventListener('click', function() { loadCatalog(); });
+
+    // ─── INLINE EDIT MODAL ──────────────────────────────
+    function openEditModal(productId) {
+      var p = catalogItems.find(function(i) { return i.id === productId; });
+      if (!p) return;
+      var price = (parseInt(p.price_cents) || 0) / 100;
+
+      var overlay = document.createElement('div');
+      overlay.className = 'edit-overlay';
+      overlay.innerHTML =
+        '<div class="edit-modal">' +
+          '<h3>✏️ Edit Item</h3>' +
+          '<div class="edit-field"><label>Name</label><input id="edit-name" value="' + escapeHtml(p.name || '') + '" /></div>' +
+          '<div class="edit-field"><label>Price ($)</label><input id="edit-price" type="number" step="0.01" min="0" value="' + price.toFixed(2) + '" /></div>' +
+          '<div class="edit-field"><label>Description</label><input id="edit-desc" value="' + escapeHtml(p.description || '') + '" /></div>' +
+          '<div class="edit-field"><label>Category</label><select id="edit-cat"><option value="menu"' + (p.category === 'menu' ? ' selected' : '') + '>☕ Cafe Menu</option><option value="merch"' + (p.category === 'merch' ? ' selected' : '') + '>🛍️ Merch & Beans</option></select></div>' +
+          '<div class="edit-field"><label>Photo</label>' +
+            '<div class="image-drop-zone" id="edit-image-drop" style="min-height:100px;">' +
+              '<img id="edit-image-preview" class="drop-preview-img" ' + (p.image_url ? 'src="' + escapeHtml(p.image_url) + '"' : 'style="display:none;"') + ' alt="Preview" />' +
+              '<div class="drop-prompt" id="edit-drop-prompt"' + (p.image_url ? ' style="display:none;"' : '') + '><span style="font-size:1.5rem;">📸</span><span style="font-size:0.8rem;color:#888;">Drop new photo or click to browse</span></div>' +
+              '<div class="drop-uploading" id="edit-drop-uploading" style="display:none;"><span class="pulse-text">Uploading…</span></div>' +
+              '<input type="file" id="edit-image-file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;" />' +
+              '<input type="hidden" id="edit-image-url" value="' + escapeHtml(p.image_url || '') + '" />' +
+              '<div class="drop-error" id="edit-drop-error"></div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="edit-btns">' +
+            '<button class="cancel-btn" id="edit-cancel">Cancel</button>' +
+            '<button class="save-btn" id="edit-save">💾 Save Changes</button>' +
+          '</div>' +
+        '</div>';
+
+      document.body.appendChild(overlay);
+
+      // Wire the drop zone inside the modal
+      var editDZ = setupDropZone('edit-image-drop', 'edit-image-preview', 'edit-drop-prompt', 'edit-drop-uploading', 'edit-drop-error', 'edit-image-url', 'edit-image-file');
+
+      overlay.addEventListener('click', function(evt) {
+        if (evt.target === overlay) overlay.remove();
+      });
+      document.getElementById('edit-cancel').addEventListener('click', function() { overlay.remove(); });
+      document.getElementById('edit-save').addEventListener('click', async function() {
+        var btn = this;
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+        try {
+          var client = window.brewAuth.client;
+          var newDollars = parseFloat(document.getElementById('edit-price').value) || 0;
+          var newCents = Math.round(newDollars * 100);
+          var { error } = await client.from('merch_products').update({
+            name: document.getElementById('edit-name').value,
+            price_cents: newCents,
+            description: document.getElementById('edit-desc').value || null,
+            category: document.getElementById('edit-cat').value,
+            image_url: document.getElementById('edit-image-url').value || null
+          }).eq('id', productId);
+          if (error) throw error;
+          overlay.remove();
+          loadCatalog();
+        } catch (err) {
+          alert('Save failed: ' + err.message);
+          btn.disabled = false;
+          btn.textContent = '💾 Save Changes';
+        }
+      });
+    }
+
+    // ─── HIRING TAB ─────────────────────────────────────
+    var hiringLoaded = false;
+    var allApplicants = [];
+    var hiringFilter = 'all';
+    var expandedApplicant = null;
+    var HIRING_STATUSES = ['pending', 'reviewed', 'interview', 'hired', 'rejected'];
+
+    async function loadHiring() {
+      try {
+        var client = window.brewAuth.client;
+        if (!client) return;
+        var { data, error } = await client
+          .from('job_applications')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        allApplicants = data || [];
+        hiringLoaded = true;
+        renderHiringFilters();
+        renderApplicants();
+      } catch (err) {
+        console.error('Hiring fetch failed:', err);
+        document.getElementById('applicants-list').innerHTML = '<div style="padding:1rem;color:#e74c3c;">Failed to load applications</div>';
+      }
+    }
+
+    function renderHiringFilters() {
+      var counts = { all: allApplicants.length };
+      HIRING_STATUSES.forEach(function(s) { counts[s] = allApplicants.filter(function(a) { return a.status === s; }).length; });
+      var container = document.getElementById('hiring-filters');
+      container.innerHTML = ['all'].concat(HIRING_STATUSES).map(function(s) {
+        return '<button class="hiring-pill' + (hiringFilter === s ? ' active' : '') + '" data-hiring-filter="' + s + '">' + s + ' (' + (counts[s] || 0) + ')</button>';
+      }).join('');
+    }
+
+    function renderApplicants() {
+      var list = hiringFilter === 'all' ? allApplicants : allApplicants.filter(function(a) { return a.status === hiringFilter; });
+      var container = document.getElementById('applicants-list');
+      if (list.length === 0) {
+        container.innerHTML = '<div style="padding:2rem;text-align:center;color:#666;">No applications found.</div>';
+        return;
+      }
+      container.innerHTML = list.map(function(a) {
+        var initials = a.name.split(' ').map(function(w) { return w[0]; }).join('').slice(0,2).toUpperCase();
+        var dateStr = new Date(a.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        var isOpen = expandedApplicant === a.id;
+        return '<div class="applicant-card">' +
+          '<div class="applicant-row" data-applicant-toggle="' + escapeHtml(a.id) + '">' +
+            '<div style="display:flex;align-items:center;gap:0.75rem;min-width:0;">' +
+              '<div class="applicant-avatar">' + escapeHtml(initials) + '</div>' +
+              '<div style="min-width:0;"><div class="applicant-name">' + escapeHtml(a.name) + '</div><div class="applicant-email">' + escapeHtml(a.email) + (a.phone ? ' · ' + escapeHtml(a.phone) : '') + '</div></div>' +
+            '</div>' +
+            '<div class="applicant-meta">' +
+              (a.resume_url ? '<a href="' + escapeHtml(a.resume_url) + '" target="_blank" rel="noopener" class="resume-link" onclick="event.stopPropagation()">📄 PDF</a>' : '') +
+              '<span class="app-status ' + escapeHtml(a.status) + '">' + escapeHtml(a.status) + '</span>' +
+              '<span style="font-size:0.75rem;color:#666;">' + escapeHtml(dateStr) + '</span>' +
+              '<span style="color:#555;">' + (isOpen ? '▲' : '▼') + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="applicant-detail' + (isOpen ? ' open' : '') + '" id="detail-' + escapeHtml(a.id) + '">' +
+            '<div class="detail-grid">' +
+              '<div><div class="detail-label">⏰ Availability</div><div class="detail-value">' + escapeHtml(a.availability || 'Not specified') + '</div></div>' +
+              '<div><div class="detail-label">💬 Scenario Answer</div><div class="detail-value" style="font-style:italic;">"' + escapeHtml(a.scenario_answer) + '"</div></div>' +
+            '</div>' +
+            '<div class="status-btns">' +
+              '<span style="font-size:0.7rem;color:#666;align-self:center;margin-right:0.25rem;">Move to:</span>' +
+              HIRING_STATUSES.filter(function(s) { return s !== a.status; }).map(function(s) {
+                return '<button data-status-update="' + escapeHtml(a.id) + '" data-new-status="' + s + '">' + s + '</button>';
+              }).join('') +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    // Hiring event delegation
+    document.getElementById('hiring-filters').addEventListener('click', function(e) {
+      var pill = e.target.closest('.hiring-pill');
+      if (!pill) return;
+      hiringFilter = pill.getAttribute('data-hiring-filter');
+      renderHiringFilters();
+      renderApplicants();
+    });
+
+    document.getElementById('applicants-list').addEventListener('click', async function(e) {
+      // Toggle expand
+      var row = e.target.closest('[data-applicant-toggle]');
+      if (row) {
+        var id = row.getAttribute('data-applicant-toggle');
+        expandedApplicant = (expandedApplicant === id) ? null : id;
+        renderApplicants();
+        return;
+      }
+      // Status update
+      var statusBtn = e.target.closest('[data-status-update]');
+      if (statusBtn) {
+        var aid = statusBtn.getAttribute('data-status-update');
+        var ns = statusBtn.getAttribute('data-new-status');
+        try {
+          var client = window.brewAuth.client;
+          var { error } = await client.from('job_applications').update({ status: ns }).eq('id', aid);
+          if (error) throw error;
+          allApplicants = allApplicants.map(function(a) { return a.id === aid ? Object.assign({}, a, { status: ns }) : a; });
+          renderHiringFilters();
+          renderApplicants();
+        } catch (err) {
+          alert('Failed to update status: ' + err.message);
+        }
+      }
+    });
+
+    document.getElementById('refresh-hiring-btn').addEventListener('click', function() { loadHiring(); });
 
     init();
   </script>
