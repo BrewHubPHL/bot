@@ -1,13 +1,18 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
-  // 1. Secure Auth (Staff Only)
-  const auth = await authorize(event);
+  // 1. Secure Auth (Manager Only — baristas cannot adjust stock)
+  const auth = await authorize(event, { requireManager: true });
   if (!auth.ok) return auth.response;
+
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
 
   if (event.httpMethod !== 'POST') {
     return json(405, { error: 'Method Not Allowed' });

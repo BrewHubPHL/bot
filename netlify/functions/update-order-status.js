@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 const { generateReceiptString, queueReceipt } = require('./_receipt');
+const { requireCsrfHeader } = require('./_csrf');
 
 // Initialize with Service Role Key (Bypasses RLS)
 const supabase = createClient(
@@ -17,7 +18,7 @@ exports.handler = async (event) => {
       statusCode: 200,
       headers: {
         'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
       },
       body: '',
@@ -27,6 +28,10 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
+
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
 
   // 2. Staff Authentication Required
   const auth = await authorize(event);

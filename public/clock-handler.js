@@ -250,6 +250,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json',
+                        'X-BrewHub-Action': 'true',
                         // Include auth header if available
                         ...(window.supabaseClient?.auth?.session()?.access_token && {
                             'Authorization': `Bearer ${window.supabaseClient.auth.session().access_token}`

@@ -32,7 +32,8 @@ export default function InventoryScanner() {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session?.access_token}`
+        'Authorization': `Bearer ${session?.access_token}`,
+        'X-BrewHub-Action': 'true'
       },
       body: JSON.stringify({ itemId: item.id, delta })
     });

@@ -168,3 +168,16 @@ REVOKE EXECUTE ON FUNCTION atomic_redeem_voucher(text, uuid, uuid) FROM anon, au
 REVOKE EXECUTE ON FUNCTION claim_notification_tasks(text, int) FROM anon, authenticated;
 REVOKE EXECUTE ON FUNCTION complete_notification(uuid) FROM anon, authenticated;
 REVOKE EXECUTE ON FUNCTION fail_notification(uuid, text) FROM anon, authenticated;
+
+-- Prevent unauthenticated users from accessing OpenAPI schema
+ALTER SYSTEM SET postgrest.open_api_schema TO 'authenticated';
+
+-- Ensure no public access to sensitive tables
+DROP POLICY IF EXISTS "Deny public access to orders" ON orders;
+CREATE POLICY "Deny public access to orders" ON orders FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to coffee_orders" ON coffee_orders;
+CREATE POLICY "Deny public access to coffee_orders" ON coffee_orders FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Deny public access to vouchers" ON vouchers;
+CREATE POLICY "Deny public access to vouchers" ON vouchers FOR ALL USING (false);

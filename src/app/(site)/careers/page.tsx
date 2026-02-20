@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { Briefcase, Send, CheckCircle, ShieldCheck, Paperclip, FileText } from "lucide-react";
+import { Briefcase, Send, CheckCircle, ShieldCheck, Paperclip, FileText, Loader2 } from "lucide-react";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
@@ -97,43 +97,69 @@ export default function CareersPage() {
       let resume_url: string | null = null;
 
       if (resumeFile) {
+        /* ── FIX 1: strict client-side size guard before any network call ── */
+        if (resumeFile.size > MAX_FILE_SIZE) {
+          setLoading(false);
+          alert("File is too large. Please upload a PDF under 5 MB.");
+          return;
+        }
+
         setUploading(true);
-        const slug = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        const filePath = `${Date.now()}-${slug}.pdf`;
+        try {
+          const slug = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          const filePath = `${Date.now()}-${slug}.pdf`;
 
-        const { error: uploadErr } = await supabase.storage
-          .from("resumes")
-          .upload(filePath, resumeFile, {
-            contentType: "application/pdf",
-            upsert: false,
-          });
+          const { error: uploadErr } = await supabase.storage
+            .from("resumes")
+            .upload(filePath, resumeFile, {
+              contentType: "application/pdf",
+              upsert: false,
+            });
 
-        if (uploadErr) throw new Error(`Resume upload failed: ${uploadErr.message}`);
+          if (uploadErr) throw new Error(`Resume upload failed: ${uploadErr.message}`);
 
-        const { data: urlData } = supabase.storage
-          .from("resumes")
-          .getPublicUrl(filePath);
+          const { data: urlData } = supabase.storage
+            .from("resumes")
+            .getPublicUrl(filePath);
 
-        resume_url = urlData.publicUrl;
-        setUploading(false);
+          resume_url = urlData.publicUrl;
+        } catch (uploadErr) {
+          throw uploadErr;
+        } finally {
+          setUploading(false);
+        }
       }
 
-      /* ── Submit application ────────────────────────── */
-      const res = await fetch("/.netlify/functions/submit-application", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name.trim(),
-          email: form.email.trim(),
-          phone: form.phone.trim() || null,
-          availability: form.availability,
-          scenario_answer: form.scenario_answer.trim(),
-          vibe_check: form.vibe_check.trim(),
-          resume_url,
-          user_zip_verification: honeypot,
-          loadTime: loadTimeRef.current,
-        }),
-      });
+      /* ── Submit application (with 15 s timeout) ───── */
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      let res: Response;
+      try {
+        res = await fetch("/.netlify/functions/submit-application", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-BrewHub-Action": "true" },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            email: form.email.trim(),
+            phone: form.phone.trim() || null,
+            availability: form.availability,
+            scenario_answer: form.scenario_answer.trim(),
+            vibe_check: form.vibe_check.trim(),
+            resume_url,
+            user_zip_verification: honeypot,
+            loadTime: loadTimeRef.current,
+          }),
+          signal: controller.signal,
+        });
+      } catch (fetchErr: any) {
+        if (fetchErr.name === "AbortError") {
+          throw new Error("Request timed out. Please check your connection and try again.");
+        }
+        throw new Error("Network disconnected. Please check your connection and try again.");
+      } finally {
+        clearTimeout(timeout);
+      }
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Submission failed");
@@ -142,7 +168,6 @@ export default function CareersPage() {
       setForm(EMPTY_FORM);
       setResumeFile(null);
     } catch (err: any) {
-      setUploading(false);
       setError(err.message || "Something went wrong. Please try again.");
     }
     setLoading(false);
@@ -399,13 +424,19 @@ export default function CareersPage() {
                 {/* Submit */}
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || uploading}
                   className="w-full flex items-center justify-center gap-2 py-3.5 rounded-lg font-bold text-sm tracking-widest uppercase bg-amber-600 hover:bg-amber-500 text-white active:scale-[0.99] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                 >
                   {uploading ? (
-                    "Uploading resume…"
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Uploading resume…
+                    </>
                   ) : loading ? (
-                    "Submitting…"
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Submitting…
+                    </>
                   ) : (
                     <>
                       <Send size={16} /> Apply Now

@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+/* ===== GLOBAL FOCUS-VISIBLE UTILITY ===== */
+/* Restore visible focus rings for keyboard navigation */
+*:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+/* ===== iOS SAFE AREA SUPPORT ===== */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 /* ===== BREWHUB BRAND PALETTE (Warm-Sharp) ===== */
 :root {
   --hub-brown: #0a0a0a;
@@ -170,6 +184,10 @@ html, body {
 }
 .hero-input:focus {
   border-color: var(--hub-brown);
+}
+.hero-input:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
 }
 .hero-btn {
   background: var(--hub-espresso);
@@ -399,6 +417,10 @@ html, body {
 }
 .concierge-input:focus {
   border-color: var(--hub-brown);
+}
+.concierge-input:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
 }
 .concierge-send-btn {
   background: var(--hub-espresso);

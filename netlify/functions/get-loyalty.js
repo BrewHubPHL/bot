@@ -11,6 +11,7 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const { checkQuota } = require('./_usage');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -50,6 +51,12 @@ exports.handler = async (event) => {
 
   if (!validateApiKey(event)) {
     return json(401, { success: false, error: 'Invalid or missing API key' });
+  }
+
+  // Rate limit to prevent Denial-of-Wallet
+  const hasQuota = await checkQuota('loyalty_lookup');
+  if (!hasQuota) {
+    return json(429, { success: false, error: 'Rate limit reached. Try again later.' });
   }
 
   try {

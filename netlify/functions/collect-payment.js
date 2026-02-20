@@ -1,6 +1,7 @@
 const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 
 // 1. Initialize Square for Production using your Netlify variables
 const client = new SquareClient({
@@ -20,11 +21,20 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
 
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
+
   // Require staff authentication for terminal checkout
   const auth = await authorize(event);
   if (!auth.ok) return auth.response;
 
-  const { orderId, deviceId } = JSON.parse(event.body || '{}');
+  let orderId, deviceId;
+  try {
+    ({ orderId, deviceId } = JSON.parse(event.body || '{}'));
+  } catch {
+    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body' }) };
+  }
 
   if (!orderId) {
     return { statusCode: 400, body: JSON.stringify({ error: 'orderId is required' }) };

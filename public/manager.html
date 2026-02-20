@@ -15,15 +15,17 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Inter', sans-serif; background: #0f0f0f; min-height: 100vh; color: #f5f5f5; }
-    .header { background: #1a1a1a; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+    .header { background: #1a1a1a; padding: 1rem 2rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem; border-bottom: 1px solid #333; position: sticky; top: 0; z-index: 40; }
     .logo { font-size: 1.5rem; font-weight: 700; color: #f5f5f5; cursor: pointer; }
     .logo span { color: #f39c12; }
-    .nav-links a { color: #ccc; text-decoration: none; margin-left: 2rem; font-size: 0.9rem; transition: color 0.2s; }
+    .nav-links { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .nav-links a { color: #ccc; text-decoration: none; margin-left: 0; padding: 0.5rem 0.75rem; font-size: 0.9rem; transition: color 0.2s; min-height: 44px; display: inline-flex; align-items: center; }
     .nav-links a:hover, .nav-links a.active { color: #f39c12; }
     .container { padding: 2rem; max-width: 1400px; margin: 0 auto; }
     
     /* Stats Grid */
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2rem; }
+    .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    @media (min-width: 768px) { .stats-grid { grid-template-columns: repeat(4, 1fr); gap: 1.5rem; } }
     .stat-card { background: #1a1a1a; border-radius: 16px; padding: 1.5rem; border: 1px solid #333; }
     .stat-label { font-size: 0.85rem; color: #888; margin-bottom: 0.5rem; }
     .stat-value { font-size: 2rem; font-weight: 700; color: #f5f5f5; }
@@ -32,12 +34,13 @@
     .stat-change { font-size: 0.8rem; color: #666; margin-top: 0.5rem; }
     
     /* Main Grid */
-    .main-grid { display: grid; grid-template-columns: 1fr 400px; gap: 2rem; }
+    .main-grid { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+    @media (min-width: 1024px) { .main-grid { grid-template-columns: 1fr 400px; } }
     .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
     .inventory-table { background: #1a1a1a; border-radius: 16px; overflow: hidden; border: 1px solid #333; }
     .inventory-header { display: grid; grid-template-columns: 2fr 1fr 1fr 120px; padding: 1rem 1.5rem; background: #222; font-size: 0.75rem; color: #888; }
     .inventory-row { display: grid; grid-template-columns: 2fr 1fr 1fr 120px; padding: 1rem 1.5rem; border-bottom: 1px solid #222; align-items: center; }
-    .stock-btn { width: 32px; height: 32px; border-radius: 8px; border: none; background: #333; color: #fff; cursor: pointer; }
+    .stock-btn { min-width: 48px; min-height: 48px; width: 48px; height: 48px; border-radius: 8px; border: none; background: #333; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; }
     .stock-btn:hover { background: #444; }
     
     .sidebar { display: flex; flex-direction: column; gap: 1.5rem; }
@@ -55,7 +58,7 @@
     .kds-item { padding: 0.25rem 0; border-bottom: 1px solid #2a2a2a; }
     .kds-item:last-child { border-bottom: none; }
     .kds-actions { padding: 0.75rem 1rem; background: #1a1a1a; display: flex; gap: 0.5rem; }
-    .kds-btn { flex: 1; padding: 0.5rem; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.75rem; }
+    .kds-btn { flex: 1; padding: 0.75rem; min-height: 48px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
     .kds-btn.start { background: #27ae60; color: #fff; }
     .kds-btn.ready { background: #f39c12; color: #fff; }
     .kds-btn.done { background: #3498db; color: #fff; }
@@ -117,11 +120,12 @@
     .catalog-card .cat-price { color: #27ae60; font-weight: 700; }
     .catalog-card .cat-badge { position: absolute; top: 12px; right: 12px; background: #333; color: #aaa; font-size: 0.65rem; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; font-weight: 700; }
     .catalog-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
-    .catalog-actions button { flex: 1; padding: 0.4rem; border-radius: 8px; border: 1px solid #444; background: #222; color: #ccc; font-size: 0.75rem; cursor: pointer; transition: background 0.2s; }
+    .catalog-actions button { flex: 1; padding: 0.75rem; min-height: 48px; border-radius: 8px; border: 1px solid #444; background: #222; color: #ccc; font-size: 0.85rem; cursor: pointer; transition: background 0.2s; }
     .catalog-actions button:hover { background: #333; }
     .catalog-actions button.cat-delete { border-color: #c0392b; color: #e74c3c; }
     .catalog-actions button.cat-delete:hover { background: #2c1010; }
-    #catalog-add-form { background: #1a1a1a; border-radius: 12px; border: 1px solid #333; padding: 1.5rem; margin-bottom: 1.5rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    #catalog-add-form { background: #1a1a1a; border-radius: 12px; border: 1px solid #333; padding: 1.5rem; margin-bottom: 1.5rem; display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
+    @media (min-width: 640px) { #catalog-add-form { grid-template-columns: 1fr 1fr; } }
     #catalog-add-form input, #catalog-add-form select { background: #222; border: 1px solid #444; color: #f5f5f5; padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.85rem; }
     #catalog-add-form button { grid-column: span 2; background: #27ae60; color: #fff; border: none; padding: 0.6rem; border-radius: 8px; cursor: pointer; font-weight: 600; }
 
@@ -137,11 +141,12 @@
     .price-field { display: flex; align-items: center; background: #222; border: 1px solid #444; border-radius: 8px; overflow: hidden; }
     .price-field .price-prefix { padding: 0.5rem 0.5rem 0.5rem 0.75rem; color: #27ae60; font-weight: 700; font-size: 0.9rem; }
     .price-field input { background: transparent; border: none; color: #f5f5f5; padding: 0.5rem 0.75rem 0.5rem 0; font-size: 0.85rem; flex: 1; outline: none; }
+    .price-field input:focus-visible { outline: 2px solid #f59e0b; outline-offset: 2px; }
     .cat-img-thumb { width: 100%; height: 120px; object-fit: cover; border-radius: 8px; margin-bottom: 0.5rem; border: 1px solid #333; }
     .cat-img-placeholder { width: 100%; height: 120px; border-radius: 8px; margin-bottom: 0.5rem; background: #222; display: flex; align-items: center; justify-content: center; color: #444; font-size: 2rem; border: 1px dashed #333; }
 
     /* ── Edit Modal ── */
-    .edit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+    .edit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 50; }
     .edit-modal { background: #1a1a1a; border-radius: 16px; border: 1px solid #444; padding: 1.5rem; width: 90%; max-width: 440px; max-height: 90vh; overflow-y: auto; }
     .edit-modal h3 { margin: 0 0 1rem; font-size: 1.1rem; }
     .edit-field { margin-bottom: 0.75rem; }
@@ -161,8 +166,8 @@
     .applicant-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.25rem; cursor: pointer; transition: background 0.2s; }
     .applicant-row:hover { background: #222; }
     .applicant-avatar { width: 36px; height: 36px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: #888; flex-shrink: 0; }
-    .applicant-name { font-weight: 600; }
-    .applicant-email { font-size: 0.75rem; color: #666; }
+    .applicant-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .applicant-email { font-size: 0.75rem; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .applicant-meta { display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
     .app-status { padding: 3px 10px; border-radius: 20px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; }
     .app-status.pending { background: rgba(243,156,18,0.15); color: #f39c12; }
@@ -178,7 +183,7 @@
     .detail-label { font-size: 0.7rem; color: #666; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
     .detail-value { font-size: 0.85rem; color: #ccc; }
     .status-btns { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
-    .status-btns button { padding: 0.35rem 0.75rem; border-radius: 6px; border: 1px solid #444; background: #222; color: #ccc; font-size: 0.7rem; cursor: pointer; font-weight: 600; transition: all 0.2s; }
+    .status-btns button { padding: 0.5rem 1rem; min-height: 44px; border-radius: 6px; border: 1px solid #444; background: #222; color: #ccc; font-size: 0.8rem; cursor: pointer; font-weight: 600; transition: all 0.2s; }
     .status-btns button:hover { background: #333; }
   </style>
 </head>
@@ -199,29 +204,33 @@
 
   <!-- ── Tab Bar ────────────────────────────────── -->
   <div class="tab-bar">
-    <button class="tab-btn active" data-tab="overview">📊 Overview</button>
-    <button class="tab-btn" data-tab="catalog">🍽️ Menu &amp; Catalog</button>
-    <button class="tab-btn" data-tab="hiring">📋 Hiring</button>
+    <button class="tab-btn active" data-tab="overview" role="tab" aria-selected="true">📊 Overview</button>
+    <button class="tab-btn" data-tab="catalog" role="tab" aria-selected="false">🍽️ Menu &amp; Catalog</button>
+    <button class="tab-btn" data-tab="hiring" role="tab" aria-selected="false">📋 Hiring</button>
   </div>
 
   <!-- ═══ TAB: OVERVIEW (existing dashboard) ═══ -->
   <main class="container tab-panel active" id="tab-overview">
+    <!-- ── Vital Signs Hero Row ─────────────────────── -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;margin-bottom:2rem;">
+      <div style="background:linear-gradient(135deg,#1a1a1a 60%,#1e3a2f);border-radius:20px;padding:2rem;border:1px solid #27ae60;">
+        <div style="font-size:0.75rem;color:#888;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.5rem;">💰 Net Sales <button id="refresh-sales-btn" style="background:none;border:none;cursor:pointer;font-size:0.8rem;" aria-label="Refresh sales data">🔄</button></div>
+        <div style="font-size:3rem;font-weight:800;color:#27ae60;line-height:1;" id="totalRevenue">$0.00</div>
+        <div style="font-size:0.8rem;color:#666;margin-top:0.5rem;" id="revenueChange">Syncing...</div>
+      </div>
+      <div style="background:linear-gradient(135deg,#1a1a1a 60%,#2a2040);border-radius:20px;padding:2rem;border:1px solid #9b59b6;">
+        <div style="font-size:0.75rem;color:#888;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.5rem;">👥 Active Shifts</div>
+        <div style="font-size:3rem;font-weight:800;color:#9b59b6;line-height:1;" id="activeStaff">0</div>
+        <div style="font-size:0.8rem;color:#666;margin-top:0.5rem;" id="staffList">No active shifts</div>
+      </div>
+      <div style="background:linear-gradient(135deg,#1a1a1a 60%,#2a2a10);border-radius:20px;padding:2rem;border:1px solid #f39c12;">
+        <div style="font-size:0.75rem;color:#888;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.5rem;">📦 Orders Today</div>
+        <div style="font-size:3rem;font-weight:800;color:#f39c12;line-height:1;" id="totalOrders">0</div>
+        <div style="font-size:0.8rem;color:#666;margin-top:0.5rem;" id="ordersChange">Live</div>
+      </div>
+    </div>
+
     <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-label">Today's Revenue <button id="refresh-sales-btn" style="background:none;border:none;cursor:pointer;font-size:0.8rem;">🔄</button></div>
-        <div class="stat-value revenue" id="totalRevenue">$0.00</div>
-        <div class="stat-change" id="revenueChange">Syncing...</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Orders Today</div>
-        <div class="stat-value orders" id="totalOrders">0</div>
-        <div class="stat-change" id="ordersChange">Live</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Staff Clocked In</div>
-        <div class="stat-value" id="activeStaff">0</div>
-        <div id="staffList" class="stat-change">No active shifts</div>
-      </div>
       <div class="stat-card">
         <div class="stat-label">Est. Daily Labor</div>
         <div class="stat-value" id="dailyLabor">$0.00</div>
@@ -233,7 +242,7 @@
       <section>
         <div class="section-header">
           <h2>📦 Inventory Status</h2>
-          <button class="refresh-btn" id="refresh-inventory-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;">↻ Refresh</button>
+          <button class="refresh-btn" id="refresh-inventory-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;" aria-label="Refresh inventory">↻ Refresh</button>
         </div>
         <div class="inventory-table">
           <div class="inventory-header">
@@ -260,7 +269,7 @@
     <section style="margin-top: 2rem;">
       <div class="section-header">
         <h2>☕ Active Orders (KDS)</h2>
-        <button id="refresh-kds-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;">↻ Refresh</button>
+        <button id="refresh-kds-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;" aria-label="Refresh orders">↻ Refresh</button>
       </div>
       <div class="kds-grid" id="kdsGrid">
         <div style="padding: 1rem; color: #666;">Loading orders...</div>
@@ -271,7 +280,7 @@
     <section class="printer-section">
       <div class="section-header">
         <h2>🖨️ Live Receipt Roll</h2>
-        <button id="refresh-receipts-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;">↻ Refresh</button>
+        <button id="refresh-receipts-btn" style="color:#888; background:none; border:1px solid #333; padding:5px 10px; cursor:pointer;" aria-label="Refresh receipts">↻ Refresh</button>
       </div>
       <div class="receipt-roll" id="receiptRoll">
         <div class="printer-empty">No receipts yet — they'll appear here in real time.</div>
@@ -282,7 +291,10 @@
     <section style="margin-top: 2rem;">
       <div class="section-header">
         <h2>💰 Payroll Tally</h2>
-        <span id="grand-total" style="color: #27ae60; font-size: 1.5rem; font-weight: 700;">$0.00</span>
+        <div style="display:flex;align-items:center;gap:0.75rem;">
+          <button id="payroll-csv-btn" onclick="downloadPayrollCsv()" disabled style="background:#1a6b35;color:#fff;border:none;padding:0.5rem 1rem;border-radius:8px;font-size:0.8rem;font-weight:600;cursor:pointer;opacity:0.4;transition:opacity 0.2s;">📥 Download Gusto/ADP CSV</button>
+          <span id="grand-total" style="color: #27ae60; font-size: 1.5rem; font-weight: 700;">$0.00</span>
+        </div>
       </div>
       <div class="inventory-table">
         <div class="inventory-header" style="grid-template-columns: 2fr 1fr 1fr 1fr 100px;">
@@ -303,7 +315,7 @@
   <div class="container tab-panel" id="tab-catalog">
     <div class="section-header">
       <h2>🍽️ Menu &amp; Catalog</h2>
-      <button id="refresh-catalog-btn" style="color:#888;background:none;border:1px solid #333;padding:5px 10px;cursor:pointer;">↻ Refresh</button>
+      <button id="refresh-catalog-btn" style="color:#888;background:none;border:1px solid #333;padding:5px 10px;cursor:pointer;" aria-label="Refresh catalog">↻ Refresh</button>
     </div>
 
     <form id="catalog-add-form" autocomplete="off">
@@ -346,7 +358,7 @@
   <div class="container tab-panel" id="tab-hiring">
     <div class="section-header">
       <h2>📋 Applicants</h2>
-      <button id="refresh-hiring-btn" style="color:#888;background:none;border:1px solid #333;padding:5px 10px;cursor:pointer;">↻ Refresh</button>
+      <button id="refresh-hiring-btn" style="color:#888;background:none;border:1px solid #333;padding:5px 10px;cursor:pointer;" aria-label="Refresh applicants">↻ Refresh</button>
     </div>
     <div class="hiring-filters" id="hiring-filters"></div>
     <div id="applicants-list">
@@ -376,8 +388,8 @@
           <div class="stock-level">${item.current} ${escapeHtml(item.unit)}</div>
           <div class="threshold">${item.threshold} ${escapeHtml(item.unit)}</div>
           <div class="stock-controls">
-            <button class="stock-btn" data-stock-index="${i}" data-stock-delta="-1">−</button>
-            <button class="stock-btn" data-stock-index="${i}" data-stock-delta="1">+</button>
+            <button class="stock-btn" data-stock-index="${i}" data-stock-delta="-1" aria-label="Decrease stock for ${escapeHtml(item.name)}">−</button>
+            <button class="stock-btn" data-stock-index="${i}" data-stock-delta="1" aria-label="Increase stock for ${escapeHtml(item.name)}">+</button>
           </div>
         </div>
       `).join('');
@@ -449,7 +461,8 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`
+            'Authorization': `Bearer ${session.access_token}`,
+            'X-BrewHub-Action': 'true'
           },
           body: JSON.stringify({ orderId, status: newStatus })
         });
@@ -522,6 +535,8 @@
         }
     }
 
+    var payrollExportData = [];
+
     async function loadPayroll() {
         try {
             const client = window.brewAuth.client;
@@ -529,6 +544,7 @@
 
             const list = document.getElementById('payroll-list');
             let grandTotal = 0;
+            payrollExportData = [];
 
             const [pRes, lRes] = await Promise.all([
                 client.from('staff_directory').select('*'),
@@ -550,6 +566,8 @@
 
             employees.forEach(emp => {
                 let totalHours = 0;
+                let regularHours = 0;
+                let overtimeHours = 0;
                 const empLogs = logs.filter(l => l.employee_email === emp.email);
                 
                 // Pair INs with OUTs
@@ -565,19 +583,42 @@
                     }
                 });
 
+                // Split at 40 h OT threshold
+                if (totalHours > 40) {
+                    regularHours = 40;
+                    overtimeHours = totalHours - 40;
+                } else {
+                    regularHours = totalHours;
+                }
+
                 const rate = parseFloat(emp.hourly_rate) || 0;
-                const earned = totalHours * rate;
+                const earned = regularHours * rate + overtimeHours * rate * 1.5;
                 grandTotal += earned;
 
                 const lastLog = empLogs[empLogs.length - 1];
                 const status = (lastLog?.action_type || 'OFF').toUpperCase();
                 const statusColor = status === 'IN' ? '#27ae60' : '#e74c3c';
 
+                payrollExportData.push({
+                    name: emp.full_name || emp.name || 'Staff',
+                    email: emp.email,
+                    rate: rate,
+                    regularHours: regularHours,
+                    overtimeHours: overtimeHours,
+                    totalHours: totalHours,
+                    earned: earned,
+                    status: status
+                });
+
+                var otLabel = overtimeHours > 0
+                    ? '<div style="font-size:0.7rem;color:#e67e22;">' + overtimeHours.toFixed(2) + ' hrs OT (1.5×)</div>'
+                    : '';
+
                 list.innerHTML += `
                     <div class="inventory-row" style="grid-template-columns: 2fr 1fr 1fr 1fr 100px;">
-                        <div><strong>${escapeHtml(emp.name) || 'Staff'}</strong><div style="font-size:0.75rem;color:#666;">${escapeHtml(emp.email)}</div></div>
+                        <div style="min-width:0;"><strong style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(emp.full_name || emp.name) || 'Staff'}</strong><div style="font-size:0.75rem;color:#666;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(emp.email)}</div></div>
                         <div>$${rate.toFixed(2)}/hr</div>
-                        <div>${totalHours.toFixed(2)} hrs</div>
+                        <div>${totalHours.toFixed(2)} hrs${otLabel}</div>
                         <div style="color: #27ae60; font-weight: 600;">$${earned.toFixed(2)}</div>
                         <div><span style="background:${statusColor}; padding:4px 10px; border-radius:12px; font-size:11px; font-weight:bold; color:white;">${escapeHtml(status)}</span></div>
                     </div>
@@ -586,10 +627,46 @@
 
             document.getElementById('grand-total').textContent = `$${grandTotal.toFixed(2)}`;
 
+            // Enable the CSV button now that data is loaded
+            var csvBtn = document.getElementById('payroll-csv-btn');
+            if (payrollExportData.length > 0) {
+                csvBtn.disabled = false;
+                csvBtn.style.opacity = '1';
+            } else {
+                csvBtn.disabled = true;
+                csvBtn.style.opacity = '0.4';
+            }
+
         } catch (e) {
             console.error("Payroll fetch failed", e);
             document.getElementById('payroll-list').innerHTML = '<div style="padding: 1rem 1.5rem; color: #e74c3c;">Failed to load payroll</div>';
         }
+    }
+
+    function downloadPayrollCsv() {
+        if (payrollExportData.length === 0) return;
+        var header = 'Employee Name,Email,Regular Hours (1x),Overtime Hours (1.5x),Hourly Rate,Gross Pay Estimate,Clock Status';
+        var lines = payrollExportData.map(function(r) {
+            return [
+                '"' + (r.name || '').replace(/"/g, '""') + '"',
+                '"' + (r.email || '') + '"',
+                r.regularHours.toFixed(2),
+                r.overtimeHours.toFixed(2),
+                r.rate.toFixed(2),
+                r.earned.toFixed(2),
+                r.status
+            ].join(',');
+        });
+        var csv = [header].concat(lines).join('\n');
+        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'brewhub-payroll-' + new Date().toISOString().slice(0, 10) + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     // --- Virtual Thermal Printer ---
@@ -679,6 +756,17 @@
         if (inventorySection) inventorySection.style.display = 'none';
         const inventoryLink = document.querySelector('a[href="scan.html"]');
         if (inventoryLink) inventoryLink.style.display = 'none';
+
+        // Staff: Hide Catalog + Hiring tabs (manager-only)
+        document.querySelectorAll('[data-tab="catalog"], [data-tab="hiring"]').forEach(function(t) { t.style.display = 'none'; });
+        var catalogPanel = document.getElementById('tab-catalog');
+        var hiringPanel = document.getElementById('tab-hiring');
+        if (catalogPanel) catalogPanel.remove();
+        if (hiringPanel) hiringPanel.remove();
+
+        // Staff: Hide payroll CSV export button
+        var csvBtn = document.getElementById('payroll-csv-btn');
+        if (csvBtn) csvBtn.style.display = 'none';
       }
 
       // 3. Populate Dashboard
@@ -740,9 +828,10 @@
       var btn = e.target.closest('.tab-btn');
       if (!btn) return;
       var tab = btn.getAttribute('data-tab');
-      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
       document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
       btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
       var panel = document.getElementById('tab-' + tab);
       if (panel) panel.classList.add('active');
       // Lazy-load tab data on first visit
@@ -788,13 +877,14 @@
         return '<div class="catalog-card' + (active ? '' : '" style="opacity:0.5') + '">' +
           imgHtml +
           '<div class="cat-badge">' + escapeHtml(cat) + '</div>' +
+          (active ? '' : '<div style="background:#7f1d1d;color:#fecaca;font-size:0.75rem;padding:4px 10px;border-radius:6px;margin-bottom:4px;display:inline-block;font-weight:700;letter-spacing:0.05em;">ARCHIVED</div>') +
           '<div class="cat-name">' + escapeHtml(p.name) + '</div>' +
           (p.description ? '<div style="font-size:0.8rem;color:#888;margin-bottom:0.5rem;">' + escapeHtml(p.description) + '</div>' : '') +
           '<div class="cat-price">$' + price.toFixed(2) + '</div>' +
           '<div class="catalog-actions">' +
-            '<button data-catalog-edit="' + escapeHtml(p.id) + '">✏️ Edit</button>' +
-            '<button data-catalog-toggle="' + escapeHtml(p.id) + '" data-active="' + active + '">' + (active ? '👁 Hide' : '👁 Show') + '</button>' +
-            '<button class="cat-delete" data-catalog-delete="' + escapeHtml(p.id) + '">🗑 Delete</button>' +
+            '<button data-catalog-edit="' + escapeHtml(p.id) + '" aria-label="Edit ' + escapeHtml(p.name) + '">✏️ Edit</button>' +
+            '<button data-catalog-toggle="' + escapeHtml(p.id) + '" data-active="' + active + '" aria-label="' + (active ? 'Hide' : 'Show') + ' ' + escapeHtml(p.name) + '">' + (active ? '👁 Hide' : '👁 Show') + '</button>' +
+            (active ? '<button class="cat-delete" data-catalog-delete="' + escapeHtml(p.id) + '" aria-label="Archive ' + escapeHtml(p.name) + '">🗑 Archive</button>' : '') +
           '</div>' +
         '</div>';
       }).join('');
@@ -917,8 +1007,8 @@
       }
       if (deleteBtn) {
         var did = deleteBtn.getAttribute('data-catalog-delete');
-        if (confirm('Delete this product?')) {
-          await client.from('merch_products').delete().eq('id', did);
+        if (confirm('Archive this product? It will be hidden from the public shop but preserved for order history.')) {
+          await client.from('merch_products').update({ is_active: false }).eq('id', did);
           loadCatalog();
         }
       }
@@ -936,8 +1026,14 @@
       if (!p) return;
       var price = (parseInt(p.price_cents) || 0) / 100;
 
+      // Store element that opened the modal so we can restore focus on close
+      var previouslyFocused = document.activeElement;
+
       var overlay = document.createElement('div');
       overlay.className = 'edit-overlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-label', 'Edit product: ' + (p.name || 'Item'));
       overlay.innerHTML =
         '<div class="edit-modal">' +
           '<h3>✏️ Edit Item</h3>' +
@@ -966,10 +1062,36 @@
       // Wire the drop zone inside the modal
       var editDZ = setupDropZone('edit-image-drop', 'edit-image-preview', 'edit-drop-prompt', 'edit-drop-uploading', 'edit-drop-error', 'edit-image-url', 'edit-image-file');
 
+      // ── Focus Trap: move focus into modal and trap Tab key ──
+      var firstInput = overlay.querySelector('#edit-name');
+      if (firstInput) firstInput.focus();
+
+      function trapFocus(e) {
+        if (e.key === 'Tab') {
+          var focusable = overlay.querySelectorAll('input, select, button, [tabindex]:not([tabindex="-1"])');
+          if (focusable.length === 0) return;
+          var first = focusable[0];
+          var last = focusable[focusable.length - 1];
+          if (e.shiftKey) {
+            if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+          } else {
+            if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+          }
+        }
+        if (e.key === 'Escape') { closeModal(); }
+      }
+      document.addEventListener('keydown', trapFocus);
+
+      function closeModal() {
+        document.removeEventListener('keydown', trapFocus);
+        overlay.remove();
+        if (previouslyFocused) previouslyFocused.focus();
+      }
+
       overlay.addEventListener('click', function(evt) {
-        if (evt.target === overlay) overlay.remove();
+        if (evt.target === overlay) closeModal();
       });
-      document.getElementById('edit-cancel').addEventListener('click', function() { overlay.remove(); });
+      document.getElementById('edit-cancel').addEventListener('click', function() { closeModal(); });
       document.getElementById('edit-save').addEventListener('click', async function() {
         var btn = this;
         btn.disabled = true;
@@ -986,7 +1108,7 @@
             image_url: document.getElementById('edit-image-url').value || null
           }).eq('id', productId);
           if (error) throw error;
-          overlay.remove();
+          closeModal();
           loadCatalog();
         } catch (err) {
           alert('Save failed: ' + err.message);

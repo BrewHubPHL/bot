@@ -2,6 +2,7 @@ const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
 const { randomUUID } = require('crypto');
 const { checkQuota } = require('./_usage');
+const { requireCsrfHeader } = require('./_csrf');
 
 const square = new SquareClient({
   token: process.env.SQUARE_PRODUCTION_TOKEN,
@@ -17,7 +18,7 @@ exports.handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-BrewHub-Action',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   };
 
@@ -29,6 +30,10 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
   }
+
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
 
   // Rate limiting
   const isUnderLimit = await checkQuota('square_checkout');

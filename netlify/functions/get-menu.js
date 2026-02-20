@@ -50,12 +50,26 @@ const FALLBACK_MENU = [
   { name: 'Wrap', price_cents: 600, description: 'Grilled chicken Caesar wrap' },
 ];
 
+// --- Strict CORS allowlist ---
+const ALLOWED_ORIGINS = [
+  process.env.URL,                   // Netlify deploy URL
+  'https://brewhubphl.com',
+  'https://www.brewhubphl.com',
+].filter(Boolean);
+
+function corsOrigin(event) {
+  const requestOrigin = (event.headers || {}).origin || (event.headers || {}).Origin;
+  if (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin)) return requestOrigin;
+  return 'https://brewhubphl.com'; // strict default
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': corsOrigin(event),
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Vary': 'Origin',
   };
 
   // Handle CORS preflight

@@ -6,14 +6,19 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 exports.handler = async (event) => {
-  // 1. Secure: Manager Only (contains resident PII)
-  // High-sensitivity: Require token issued within last 15 minutes
-  const auth = await authorize(event, { requireManager: true, maxTokenAgeMinutes: 15 });
-  if (!auth.ok) return auth.response;
-
+  // CORS preflight must be handled BEFORE auth (OPTIONS carries no Authorization)
   if (event.httpMethod === 'OPTIONS') {
     const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
-    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }, body: '' };
+    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action' }, body: '' };
+  }
+
+  // 1. Staff auth (contains resident PII - parcels workflow)
+  // High-sensitivity: Require token issued within last 15 minutes
+  const auth = await authorize(event, { maxTokenAgeMinutes: 15 });
+  if (!auth.ok) return auth.response;
+
+  if (event.httpMethod !== 'GET') {
+    return json(405, { error: 'Method not allowed' });
   }
 
   try {

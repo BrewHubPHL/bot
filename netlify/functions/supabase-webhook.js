@@ -43,7 +43,13 @@ exports.handler = async (event) => {
   console.log(`[WEBHOOK] Authenticated from IP: ${ipCheck.ip}`);
 
   // 2. Parse the payload from Supabase
-  const payload = JSON.parse(event.body || '{}');
+  let payload;
+  try {
+    payload = JSON.parse(event.body || '{}');
+  } catch {
+    console.error('[WEBHOOK] Invalid JSON body');
+    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON' }) };
+  }
   const { type, record } = payload;
   const eventId = payload.id || payload.event_id;
 

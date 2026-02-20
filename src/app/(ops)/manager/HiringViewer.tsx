@@ -47,7 +47,7 @@ export default function HiringViewer() {
     setLoading(true);
     const { data, error } = await supabase
       .from("job_applications")
-      .select("*")
+      .select("id, created_at, name, email, phone, availability, scenario_answer, resume_url, status")
       .order("created_at", { ascending: false });
 
     if (!error && data) setApplicants(data as Applicant[]);
@@ -60,14 +60,22 @@ export default function HiringViewer() {
 
   /* ── Status update ─────────────────────────────────────── */
   async function updateStatus(id: string, newStatus: string) {
+    /* FIX 3: save previous state for optimistic rollback */
+    const prevApplicants = [...applicants];
+
+    /* Optimistic update — instantly reflect in UI */
+    setApplicants((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
+    );
+
     const { error } = await supabase
       .from("job_applications")
       .update({ status: newStatus })
       .eq("id", id);
-    if (!error) {
-      setApplicants((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
-      );
+
+    if (error) {
+      alert("Failed to update status");
+      setApplicants(prevApplicants);
     }
   }
 
@@ -171,7 +179,7 @@ export default function HiringViewer() {
                   <div className="flex items-center gap-3 flex-shrink-0">
                     {a.resume_url && (
                       <a
-                        href={a.resume_url}
+                        href={a.resume_url.startsWith('http') ? a.resume_url : '#'}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
@@ -219,7 +227,8 @@ export default function HiringViewer() {
                           <MapPin size={12} /> Vibe Check
                         </div>
                         <p className="text-stone-300 text-sm italic">
-                          &ldquo;{a.scenario_answer}&rdquo;
+                          {/* Sanitize scenario_answer to prevent XSS */}
+                          {a.scenario_answer.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
                         </p>
                       </div>
                     </div>

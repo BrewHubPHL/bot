@@ -1,7 +1,7 @@
 🛡️ BrewHub PHL: Security & Integrity Manifest
 This document outlines the defense-in-depth architecture implemented to protect financial data, resident PII, and system integrity.
 
-*Last updated: 2026-02-18*
+*Last updated: 2026-02-20*
 
 1. Authentication & Session Management
 We utilize a Hybrid Auth Perimeter to ensure that "Fired is Fired" and sessions cannot be hijacked.
@@ -61,10 +61,16 @@ Service Role: Backend Netlify functions use the service role key for all INSERT/
 
 Customer Access: Supabase Auth scopes customers to their own profile, parcels, and vouchers.
 
+Merch Products (schema-24/28): Manager-only INSERT/UPDATE policies on `merch_products` enforce `price_cents > 0` in WITH CHECK as defense-in-depth alongside the column CHECK constraint.
+
+Storage Policies (schema-23/28): Staff upload/update/delete on `menu-images` bucket uses case-insensitive email matching (`lower(email) = lower(auth.email())`) against `staff_directory` to handle mixed-case signups.
+
+brew_nnn_summary: This is a VIEW, so RLS cannot be applied. Secured with `REVOKE SELECT FROM anon, authenticated` (belt-and-suspenders).
+
 6. Data Privacy & GDPR Compliance
 We follow the Tombstone Pattern for all data deletion requests to prevent "Zombie Data" from re-syncing from third-party tools like Google Sheets.
 
-Tombstones: A permanent record of the absence of a user is stored in deletion_tombstones.
+Tombstones: A permanent record of the absence of a user is stored in deletion_tombstones. The `is_tombstoned()` function uses case-insensitive matching on both `table_name` and `record_key` to prevent bypass via casing differences.
 
 Financial Anonymization: We do not delete orders (needed for taxes). Instead, we strip all PII (Name, Email, Phone) and replace it with GDPR_REDACTED.
 
@@ -86,4 +92,4 @@ RLS Check: Run the security_audit SQL script to ensure no table has public selec
 
 TTL: Netlify function timeouts are set to the minimum required (max 10s) to limit DoS surface area.
 
-Schema Migrations: Apply schema-1 through schema-11 in order. Each is idempotent (IF NOT EXISTS / DROP IF EXISTS).
+Schema Migrations: Apply schema-1 through schema-28 in order. Each is idempotent (IF NOT EXISTS / DROP IF EXISTS).

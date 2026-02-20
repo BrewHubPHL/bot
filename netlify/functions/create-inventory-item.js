@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -7,15 +8,24 @@ const supabase = createClient(
 );
 
 exports.handler = async (event) => {
-  // Auth check
-  const auth = await authorize(event);
+  // Auth check (Manager Only — baristas cannot create inventory items)
+  const auth = await authorize(event, { requireManager: true });
   if (!auth.ok) return auth.response;
 
   if (event.httpMethod !== 'POST') {
     return json(405, { error: 'Method not allowed' });
   }
 
-  const { barcode, name } = JSON.parse(event.body || '{}');
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
+
+  let barcode, name;
+  try {
+    ({ barcode, name } = JSON.parse(event.body || '{}'));
+  } catch {
+    return json(400, { error: 'Invalid JSON body' });
+  }
 
   if (!barcode || !name) {
     return json(400, { error: 'barcode and name are required' });

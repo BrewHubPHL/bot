@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 
 // HTML-escape user-supplied strings to prevent injection in emails
 const escapeHtml = (s) => String(s || '')
@@ -11,48 +12,23 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ⚠️ FALLBACK ONLY — keep in sync with merch_products table!
-// These are used only when DB is unreachable. Prices may drift.
-const FALLBACK_MENU = {
-  'Latte': 450,
-  'Espresso': 300,
-  'Cappuccino': 450,
-  'Americano': 350,
-  'Croissant': 350,
-  'Muffin': 300,
-  'Cold Brew': 500,
-  'Drip Coffee': 250,
-};
+// UUID v4 format check
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Load cafe menu from merch_products table
-async function getCafeMenu() {
-  const { data, error } = await supabase
-    .from('merch_products')
-    .select('name, price_cents')
-    .eq('is_active', true);
-  
-  if (error || !data || data.length === 0) {
-    console.warn('[CAFE] Using fallback menu - DB unavailable or empty');
-    return FALLBACK_MENU;
-  }
-  
-  const menu = {};
-  for (const item of data) {
-    menu[item.name] = item.price_cents;
-  }
-  return menu;
-}
+// Maximum items per cart to prevent abuse
+const MAX_CART_SIZE = 50;
+const MAX_QUANTITY = 20;
 
 exports.handler = async (event) => {
   const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
 
-  // CORS
+  // CORS — include X-BrewHub-Action in allowed headers for CSRF protection
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
       headers: {
         'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
       },
       body: '',
@@ -63,45 +39,142 @@ exports.handler = async (event) => {
     return json(405, { error: 'Method not allowed' });
   }
 
+  // ── CSRF protection ───────────────────────────────────────
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
+
   // Staff auth required
   const auth = await authorize(event);
   if (!auth.ok) return auth.response;
 
   try {
-    const { cart, terminal } = JSON.parse(event.body || '{}');
+    const body = JSON.parse(event.body || '{}');
 
-    if (!Array.isArray(cart) || cart.length === 0) {
-      return json(400, { error: 'Cart cannot be empty' });
+    // ── REJECT client-supplied totals / prices ──────────────
+    if ('total' in body || 'total_cents' in body || 'total_amount_cents' in body || 'price' in body) {
+      return json(400, { error: 'Client-supplied totals/prices are not accepted. Send items only.' });
     }
 
-    // Load menu from DB (with fallback)
-    const CAFE_MENU = await getCafeMenu();
+    const { terminal, user_id, customer_email: ce, customer_name: cn } = body;
 
-    // Validate and calculate total using SERVER-SIDE prices only
+    // Accept both 'items' and 'cart' keys (backwards compat with legacy UIs)
+    const rawItems = body.items || body.cart;
+
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
+      return json(400, { error: 'items[] cannot be empty. Send [{ product_id, quantity }] or [{ name, quantity }].' });
+    }
+    if (rawItems.length > MAX_CART_SIZE) {
+      return json(400, { error: `Cart cannot exceed ${MAX_CART_SIZE} line items.` });
+    }
+
+    // ── Normalize items: accept product_id (UUID) or name ───
+    // Both modes do server-side price lookup. Client prices are NEVER trusted.
+    const normalized = [];
+
+    for (const entry of rawItems) {
+      // Reject any sneaky per-item price/total fields
+      if (entry && typeof entry === 'object' && ('price' in entry || 'price_cents' in entry || 'total' in entry)) {
+        return json(400, { error: 'Per-item prices are not accepted. Server calculates pricing.' });
+      }
+
+      const pid = entry?.product_id;
+      const name = entry?.name;
+      const qty = Number(entry?.quantity) || 1;
+
+      if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QUANTITY) {
+        return json(400, { error: `Invalid quantity. Must be 1–${MAX_QUANTITY}.` });
+      }
+
+      if (pid && typeof pid === 'string' && UUID_RE.test(pid)) {
+        normalized.push({ product_id: pid, quantity: qty });
+      } else if (name && typeof name === 'string' && name.length > 0 && name.length <= 200) {
+        normalized.push({ name, quantity: qty });
+      } else {
+        return json(400, { error: 'Each item must have a valid product_id (UUID) or name (string).' });
+      }
+    }
+
+    // ── Fetch authoritative prices from DB ───────────────────
+    const byId = normalized.filter(i => i.product_id);
+    const byName = normalized.filter(i => i.name);
+
+    let productsById = [];
+    if (byId.length > 0) {
+      const uniqueIds = [...new Set(byId.map(i => i.product_id))];
+      const { data, error: prodErr } = await supabase
+        .from('merch_products')
+        .select('id, name, price_cents')
+        .in('id', uniqueIds)
+        .eq('is_active', true);
+      if (prodErr) {
+        console.error('[CAFE] Product ID lookup error:', prodErr);
+        return json(500, { error: 'Failed to verify product prices.' });
+      }
+      productsById = data || [];
+    }
+
+    let productsByName = [];
+    if (byName.length > 0) {
+      const uniqueNames = [...new Set(byName.map(i => i.name))];
+      const { data, error: prodErr } = await supabase
+        .from('merch_products')
+        .select('id, name, price_cents')
+        .in('name', uniqueNames)
+        .eq('is_active', true);
+      if (prodErr) {
+        console.error('[CAFE] Product name lookup error:', prodErr);
+        return json(500, { error: 'Failed to verify product prices.' });
+      }
+      productsByName = data || [];
+    }
+
+    // Build lookup maps
+    const foundById = {};
+    for (const p of productsById) foundById[p.id] = p;
+    const foundByName = {};
+    for (const p of productsByName) foundByName[p.name] = p;
+
+    // ── Server-side price calculation ────────────────────────
+    // Merge quantities per resolved product
+    const qtyMap = {};  // product DB id → { product, totalQty }
+
+    for (const item of normalized) {
+      const product = item.product_id ? foundById[item.product_id] : foundByName[item.name];
+      if (!product) {
+        return json(400, { error: `Unknown or inactive product: ${item.product_id || item.name}` });
+      }
+      if (!qtyMap[product.id]) {
+        qtyMap[product.id] = { product, totalQty: 0 };
+      }
+      qtyMap[product.id].totalQty += item.quantity;
+    }
+
     let totalCents = 0;
     const validatedItems = [];
 
-    for (const item of cart) {
-      const name = item?.name;
-      if (!name || !CAFE_MENU[name]) {
-        return json(400, { error: `Unknown menu item: ${name}` });
-      }
-
-      const priceCents = CAFE_MENU[name];
-      totalCents += priceCents;
+    for (const { product, totalQty } of Object.values(qtyMap)) {
+      const lineCents = product.price_cents * totalQty;
+      totalCents += lineCents;
       validatedItems.push({
-        drink_name: name,
-        price: priceCents / 100  // Store as decimal for coffee_orders
+        drink_name: product.name,
+        price: product.price_cents / 100,
+        quantity: totalQty,
       });
     }
 
-    // Create order with SERVER-calculated total
-    // POS terminal orders start as 'preparing' (shown on KDS, awaiting payment)
-    // Online/direct orders are marked 'paid' immediately
-    const orderStatus = terminal ? 'preparing' : 'paid';
+    // ── Strict $0.00 floor — prevent negative totals ────────
+    totalCents = Math.max(0, totalCents);
+    if (totalCents <= 0) {
+      return json(400, { error: 'Order total must be greater than $0.00.' });
+    }
 
-    // Accept optional loyalty customer fields from POS
-    const { user_id, customer_email: ce, customer_name: cn } = JSON.parse(event.body || '{}');
+    // ── Create order with SERVER-calculated total ────────────
+    // POS terminal orders start as 'pending' — the Square webhook will
+    // transition them to 'preparing' once payment is confirmed. This
+    // eliminates the "Limbo State" where unpaid orders pollute the KDS.
+    // Online/direct orders are marked 'paid' immediately.
+    const orderStatus = terminal ? 'pending' : 'paid';
+
     const orderRow = {
       status: orderStatus,
       total_amount_cents: totalCents,
@@ -122,12 +195,17 @@ exports.handler = async (event) => {
       return json(500, { error: 'Failed to create order' });
     }
 
-    // Insert coffee line items
-    const coffeeItems = validatedItems.map(item => ({
-      order_id: order.id,
-      drink_name: item.drink_name,
-      price: item.price
-    }));
+    // Insert coffee line items (one row per unit for KDS compatibility)
+    const coffeeItems = [];
+    for (const item of validatedItems) {
+      for (let i = 0; i < item.quantity; i++) {
+        coffeeItems.push({
+          order_id: order.id,
+          drink_name: item.drink_name,
+          price: item.price,
+        });
+      }
+    }
 
     const { error: itemErr } = await supabase
       .from('coffee_orders')

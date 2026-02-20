@@ -308,6 +308,7 @@ export default function ScannerPage() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${opsToken}`,
+          "X-BrewHub-Action": "true",
         },
         body: JSON.stringify({
           itemId: currentItem.id,

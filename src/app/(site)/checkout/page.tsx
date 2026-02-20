@@ -110,7 +110,7 @@ export default function CheckoutPage() {
       // Process payment
       const response = await fetch('/.netlify/functions/process-merch-payment', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-BrewHub-Action': 'true' },
         body: JSON.stringify({
           cart,
           sourceId: result.token,

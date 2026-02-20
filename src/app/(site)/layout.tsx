@@ -7,7 +7,7 @@ export default function SiteLayout({
     <div className="bg-gradient-to-br from-[#f8f4f0] via-[#fdfcfb] to-[#e9ded6] text-[var(--hub-espresso)] min-h-screen flex flex-col">
       <ScrollToTop />
       {/* Premium Glass Nav */}
-      <nav className="fixed top-0 w-full z-50 nav-glass shadow-lg">
+      <nav className="fixed top-0 w-full z-40 nav-glass shadow-lg">
         <div className="max-w-6xl mx-auto px-6 h-20 flex items-center justify-between">
           <a href="/" className="flex items-center gap-3">
             <img src="/logo.png" alt="BrewHub Logo" width={48} height={48} className="rounded-full border-2 border-[var(--hub-tan)] shadow-md bg-white" style={{boxShadow:'0 2px 12px 0 rgba(44,24,16,0.10)'}} />

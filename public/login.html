@@ -147,7 +147,7 @@
 
     // Validate redirect URL to prevent open redirect attacks
     function getSafeRedirect(url) {
-      const allowedPaths = ['/', '/shop', '/account', '/manager.html', '/staff-hub.html'];
+      const allowedPaths = ['/', '/shop', '/account', '/manager.html', '/staff-hub.html', '/cafe.html', '/kds.html', '/parcels.html', '/scan.html', '/admin.html'];
       if (!url) return '/staff-hub.html'; // Default to staff hub (clock in/out)
       // Strict whitelist: only allow specific safe paths
       if (allowedPaths.includes(url)) {

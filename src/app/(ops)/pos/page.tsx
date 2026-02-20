@@ -26,6 +26,7 @@ interface Modifier {
 
 interface CartItem {
   id: string; // unique cart-line id
+  productId: string; // merch_products UUID (for server-side price lookup)
   name: string;
   price_cents: number;
   modifiers: Modifier[];
@@ -161,7 +162,7 @@ export default function POSPage() {
     (item: MenuItem, mods: Modifier[]) => {
       setCart((prev) => [
         ...prev,
-        { id: uid(), name: item.name, price_cents: item.price_cents, modifiers: mods, quantity: 1 },
+        { id: uid(), productId: item.id, name: item.name, price_cents: item.price_cents, modifiers: mods, quantity: 1 },
       ]);
     },
     []
@@ -352,16 +353,15 @@ export default function POSPage() {
     try {
       const token = getAccessToken();
 
-      // Build cart payload — one entry per item * quantity
-      const payload: { name: string }[] = [];
-      for (const ci of cart) {
-        for (let i = 0; i < ci.quantity; i++) {
-          payload.push({ name: ci.name });
-        }
-      }
+      // Build cart payload — one entry per distinct item with quantity
+      // Uses product_id (UUID) for secure server-side price lookup
+      const payload: { product_id: string; quantity: number }[] = cart.map((ci) => ({
+        product_id: ci.productId,
+        quantity: ci.quantity,
+      }));
 
       // Attach loyalty customer fields when scanned
-      const checkoutBody: Record<string, unknown> = { cart: payload, terminal: true };
+      const checkoutBody: Record<string, unknown> = { items: payload, terminal: true };
       if (loyaltyCustomer) {
         checkoutBody.user_id = loyaltyCustomer.id;
         checkoutBody.customer_email = loyaltyCustomer.email;
@@ -375,6 +375,7 @@ export default function POSPage() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
         },
         body: JSON.stringify(checkoutBody),
       });
@@ -414,6 +415,7 @@ export default function POSPage() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
         },
         body: JSON.stringify({ orderId: createdOrderId }),
       });
@@ -459,6 +461,7 @@ export default function POSPage() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
         },
         body: JSON.stringify({
           orderId: createdOrderId,

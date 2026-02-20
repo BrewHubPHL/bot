@@ -1,5 +1,5 @@
 # BrewHub PHL — Architecture Overview
-*Last updated: 2026-02-18*
+*Last updated: 2026-02-20*
 
 ## Project Structure
 
@@ -22,7 +22,7 @@ brewhubbot/
 │   ├── components/
 │   │   └── OpsGate.tsx    # Fullscreen PIN pad + session context
 │   └── lib/               # Supabase client, utilities
-├── supabase/              # DB schemas (schema-1 through schema-14)
+├── supabase/              # DB schemas (schema-1 through schema-28)
 ├── scripts/               # Utility & test scripts
 └── tests/                 # Jest tests
 ```
@@ -205,13 +205,13 @@ All Square clients use `SquareEnvironment.Production` + `SQUARE_PRODUCTION_TOKEN
 
 ## Database (Supabase)
 
-### Schema migrations: `supabase/schema-1` through `schema-14`
+### Schema migrations: `supabase/schema-1` through `schema-28`
 
 Key tables:
 - `orders` — Cafe orders with status, payment_id, total_amount_cents, completed_at, paid_amount_cents
 - `coffee_orders` — Line items linked to orders
 - `menu_items` — Cafe menu with prices
-- `merch_products` — Shop products with price_cents, is_active
+- `merch_products` — Shop products with price_cents, is_active (RLS enforces `price_cents > 0` on INSERT/UPDATE)
 - `residents` — Parcel hub members
 - `parcels` — Package tracking
 - `inventory` — Stock levels
@@ -231,6 +231,7 @@ Key tables:
 - `record_pin_failure` — Atomic PIN attempt counter with auto-lockout
 - `check_pin_lockout` — Fast pre-check if IP is locked
 - `clear_pin_lockout` — Deletes lockout row on successful login
+- `is_tombstoned(table, key)` — Case-insensitive tombstone lookup for GDPR deletion guard
 
 ### Scheduled Functions
 - `cancel-stale-orders.js` — Runs every 5 minutes (`@every 5m`), calls `cancel_stale_orders` RPC
@@ -238,8 +239,10 @@ Key tables:
 ### RLS Strategy
 - **Default**: Deny-all (`USING(false)`) on all tables
 - **Staff SELECT**: Authenticated users whose email is in `staff_directory` can read operational tables (`orders`, `coffee_orders`, `staff_directory`, `time_logs`, `receipt_queue`)
-- **Catalog (schema-13)**: Staff-scoped SELECT/INSERT/UPDATE on `merch_products` + SELECT on `inventory` via `is_brewhub_staff()` SECURITY DEFINER
+- **Catalog (schema-13/24/28)**: Manager-only INSERT/UPDATE on `merch_products` via `is_brewhub_manager()`; WITH CHECK enforces `price_cents > 0` as defense-in-depth alongside the CHECK constraint
 - **Parcel Monitor (schema-14)**: Zero-PII `parcel_departure_board` VIEW (`security_invoker = false`); no anon policy on raw `parcels` table; staff SELECT via `is_brewhub_staff()`
+- **Storage (schema-23/28)**: Staff upload/update/delete on `menu-images` bucket; case-insensitive `lower(email) = lower(auth.email())` matching against `staff_directory`
+- **`brewhub_nnn_summary`**: VIEW secured by `REVOKE SELECT` from anon/authenticated (RLS not applicable to views)
 - **Service role**: Backend functions use service role key for INSERT/UPDATE/DELETE
 - **Customer**: Supabase Auth scopes reads to own profile/parcels/vouchers
 

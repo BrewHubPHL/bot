@@ -7,6 +7,14 @@ const supabase = createClient(
 );
 
 exports.handler = async (event, context) => {
+  // Only allow GET
+  if (event.httpMethod === 'OPTIONS') {
+    return json(200, {});
+  }
+  if (event.httpMethod !== 'GET') {
+    return json(405, { error: 'Method not allowed' });
+  }
+
   // Always require manager auth — no header-based bypass
   const auth = await authorize(event, { requireManager: true });
   if (!auth.ok) return auth.response;

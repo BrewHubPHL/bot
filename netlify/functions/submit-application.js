@@ -2,6 +2,7 @@
 // No external captcha dependency. All validation is local.
 
 const { createClient } = require('@supabase/supabase-js');
+const { requireCsrfHeader } = require('./_csrf');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -10,7 +11,7 @@ const supabase = createClient(
 
 const headers = {
   'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, X-BrewHub-Action',
   'Content-Type': 'application/json',
 };
 
@@ -25,6 +26,10 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return respond(405, { error: 'Method Not Allowed' });
   }
+
+  // ── CSRF protection ───────────────────────────────────────
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
 
   let body;
   try {
@@ -85,6 +90,60 @@ exports.handler = async (event) => {
     return respond(422, { error: 'Please provide a valid email address' });
   }
 
+  // ── SSRF Guard: Validate resume_url ───────────────────────
+  // Only allow URLs pointing to our own Supabase Storage resumes bucket.
+  // This prevents attackers from injecting internal/private network URLs
+  // (e.g. http://169.254.169.254/...) that the server might later fetch.
+  let safeResumeUrl = null;
+  if (resume_url) {
+    const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+    const allowedPrefix = `${supabaseUrl}/storage/v1/object/public/resumes/`;
+
+    let parsed;
+    try {
+      parsed = new URL(resume_url);
+    } catch {
+      return respond(422, { error: 'Invalid resume URL format.' });
+    }
+
+    // Enforce HTTPS only
+    if (parsed.protocol !== 'https:') {
+      return respond(422, { error: 'Resume URL must use HTTPS.' });
+    }
+
+    // Block credentials in URL (user:pass@host)
+    if (parsed.username || parsed.password) {
+      return respond(422, { error: 'Resume URL must not contain credentials.' });
+    }
+
+    // Strict prefix match against our Supabase storage bucket
+    if (!resume_url.startsWith(allowedPrefix)) {
+      console.warn(`[SSRF] Blocked resume_url: ${resume_url}`);
+      return respond(422, { error: 'Resume URL must point to the BrewHub Supabase resumes bucket.' });
+    }
+
+    // Reject path traversal attempts
+    if (resume_url.includes('..') || resume_url.includes('%2e%2e') || resume_url.includes('%2E%2E')) {
+      return respond(422, { error: 'Invalid resume URL path.' });
+    }
+
+    // ── File Upload Guard: Validate file extension ─────────────
+    const allowedExtensions = ['.pdf', '.doc', '.docx'];
+    const fileName = parsed.pathname.split('/').pop();
+    const fileExtension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+
+    if (!allowedExtensions.includes(fileExtension)) {
+      return respond(422, { error: 'Resume must be a PDF or Word document.' });
+    }
+
+    // Ensure filename does not contain path traversal patterns
+    if (fileName.includes('..') || /[\\/:*?"<>|]/.test(fileName)) {
+      return respond(422, { error: 'Invalid characters in resume filename.' });
+    }
+
+    safeResumeUrl = resume_url;
+  }
+
   // ── Insert into Supabase ──────────────────────────────────
   const { error: insertError } = await supabase
     .from('job_applications')
@@ -94,7 +153,7 @@ exports.handler = async (event) => {
       phone: phone ? String(phone).trim() : null,
       availability: availability || null,
       scenario_answer: scenario_answer.trim(),
-      resume_url: resume_url || null,
+      resume_url: safeResumeUrl,
       status: 'pending',
     });
 

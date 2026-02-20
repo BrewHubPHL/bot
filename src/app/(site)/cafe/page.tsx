@@ -3,25 +3,46 @@ import Link from "next/link";;
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+interface MenuItem {
+  id: string;
+  name: string;
+  price_cents: number;
+}
+
+interface CartEntry {
+  product_id: string;
+  name: string;
+  price_cents: number;
+  quantity: number;
+}
+
 export default function CafePage() {
-  const [menu, setMenu] = useState<any[]>([]);
-  const [cart, setCart] = useState<any[]>([]);
+  const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [cart, setCart] = useState<CartEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [orderStatus, setOrderStatus] = useState("");
 
   useEffect(() => {
     async function fetchMenu() {
       setLoading(true);
-      // Use inventory as menu for now
-      const { data, error } = await supabase.from("inventory").select("id, item_name, category, current_stock, unit");
+      const { data, error } = await supabase
+        .from("merch_products")
+        .select("id, name, price_cents")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true });
       if (!error && data) setMenu(data);
       setLoading(false);
     }
     fetchMenu();
   }, []);
 
-  function addToCart(item: any) {
-    setCart((c) => [...c, item]);
+  function addToCart(item: MenuItem) {
+    setCart((c) => {
+      const existing = c.find((e) => e.product_id === item.id);
+      if (existing) return c.map((e) => e.product_id === item.id ? { ...e, quantity: e.quantity + 1 } : e);
+      return [...c, { product_id: item.id, name: item.name, price_cents: item.price_cents, quantity: 1 }];
+    });
   }
   function removeFromCart(idx: number) {
     setCart((c) => c.filter((_, i) => i !== idx));
@@ -37,8 +58,13 @@ export default function CafePage() {
     try {
       const resp = await fetch("/.netlify/functions/cafe-checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: cart.map(i => i.item_name) })
+        headers: {
+          "Content-Type": "application/json",
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({
+          items: cart.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+        }),
       });
       const result = await resp.json();
       if (!resp.ok) throw new Error(result.error || "Order failed");
@@ -76,8 +102,8 @@ export default function CafePage() {
             {menu.map((item) => (
               <div key={item.id} className="flex items-center justify-between bg-stone-50 border border-stone-200 rounded p-3">
                 <div>
-                  <div className="font-semibold">{item.item_name}</div>
-                  <div className="text-xs text-stone-500">{item.category}</div>
+                  <div className="font-semibold">{item.name}</div>
+                  <div className="text-xs text-stone-500">${(item.price_cents / 100).toFixed(2)}</div>
                 </div>
                 <button className="bg-stone-900 text-white px-3 py-1 rounded text-xs font-bold" onClick={() => addToCart(item)}>
                   Add
@@ -95,7 +121,7 @@ export default function CafePage() {
           <ul className="mb-2">
             {cart.map((item, idx) => (
               <li key={idx} className="flex items-center justify-between border-b border-stone-100 py-1">
-                <span>{item.name}</span>
+                <span>{item.name} x{item.quantity} — ${((item.price_cents * item.quantity) / 100).toFixed(2)}</span>
                 <button className="text-red-500 text-xs ml-2" onClick={() => removeFromCart(idx)}>
                   Remove
                 </button>

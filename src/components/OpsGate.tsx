@@ -131,7 +131,8 @@ export default function OpsGate({ children }: { children: ReactNode }) {
     try {
       const res = await fetch(`${API_BASE}/pin-login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-BrewHub-Action": "true" },
+        credentials: "include",  // Required: accept Set-Cookie from pin-login
         body: JSON.stringify({ pin }),
       });
 
@@ -173,6 +174,7 @@ export default function OpsGate({ children }: { children: ReactNode }) {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.token}`,
+          "X-BrewHub-Action": "true",
         },
         body: JSON.stringify({ action }),
       });
@@ -210,6 +212,9 @@ export default function OpsGate({ children }: { children: ReactNode }) {
     setError("");
     setClockMsg("");
     sessionStorage.removeItem("ops_session");
+
+    // Clear the HttpOnly session cookie via a logout endpoint
+    fetch(`${API_BASE}/pin-logout`, { method: "POST", headers: { "X-BrewHub-Action": "true" }, credentials: "include" }).catch(() => {});
   }, []);
 
   /* ─── SSR / pre-mount: show blank black screen to avoid hydration mismatch ─── */
@@ -226,7 +231,7 @@ export default function OpsGate({ children }: { children: ReactNode }) {
     return (
       <OpsSessionContext.Provider value={session}>
         {/* Persistent header bar */}
-        <div className="fixed top-0 left-0 right-0 z-50 bg-zinc-900 border-b border-zinc-700 px-4 py-2 flex items-center justify-between text-sm">
+        <div className="fixed top-0 left-0 right-0 z-40 bg-zinc-900 border-b border-zinc-700 px-4 py-2 flex items-center justify-between text-sm">
           <div className="flex items-center gap-3">
             <User className="w-4 h-4 text-amber-400" />
             <span className="font-medium text-white">{session.staff.name}</span>

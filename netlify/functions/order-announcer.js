@@ -10,7 +10,12 @@ exports.handler = async (event) => {
   const serviceAuth = verifyServiceSecret(event);
   if (!serviceAuth.valid) return serviceAuth.response;
 
-  const { record } = JSON.parse(event.body || '{}');
+  let record;
+  try {
+    ({ record } = JSON.parse(event.body || '{}'));
+  } catch {
+    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body' }) };
+  }
 
   try {
     // Get the customer's name for logging

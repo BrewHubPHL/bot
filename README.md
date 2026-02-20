@@ -37,7 +37,7 @@ brewhubbot/
 │   └── layout.tsx         #   Root layout
 ├── public/                # Legacy HTML pages (kds, manager, cafe, parcels)
 ├── netlify/functions/     # Serverless API endpoints (50+ functions)
-├── supabase/              # DB schemas (1–11), RPC functions, RLS policies
+├── supabase/              # DB schemas (1–28), RPC functions, RLS policies
 ├── scripts/               # Utilities (Apple Pay, secret rotation, AI tests)
 └── tests/                 # Jest test suite
 ```
@@ -128,10 +128,10 @@ brewhubbot/
 
 **POS flow:** Staff builds order → "Send to KDS" (creates Supabase order, KDS sees it instantly via realtime) → "Pay on Terminal" (calls `collect-payment` → Square Terminal) or "Cash/Comp".
 
-**Database triggers:** `sync_coffee_order_status` syncs status to line items · `handle_order_completion` decrements inventory on completion.
+**Database triggers:** `sync_coffee_order_status` syncs status to line items · `handle_order_completion` decrements inventory on completion (exact `'12oz Cups'` match).
 
 ### Supabase Schema Migrations
-The database is managed through sequential migration files (`schema-1` through `schema-11`):
+The database is managed through sequential migration files (`schema-1` through `schema-28`):
 
 | Schema | Purpose |
 |---|---|
@@ -141,6 +141,23 @@ The database is managed through sequential migration files (`schema-1` through `
 | `schema-9-receipts` | `receipt_queue` table + `orders.completed_at` column |
 | `schema-10-payment-hardening` | `cancel_stale_orders` RPC + `orders.paid_amount_cents` column |
 | `schema-11-medium-fixes` | DB-backed PIN lockout (`pin_attempts`) + staff-scoped RLS SELECT policies |
+| `schema-12-rls-bootstrap-fix` | Fix RLS bootstrap deadlock with `SECURITY DEFINER` staff helper |
+| `schema-13-catalog-rls` | Staff-scoped RLS for catalog manager and inventory |
+| `schema-14-parcel-monitor-rls` | PII-masking VIEW for parcel departure board + staff RLS |
+| `schema-15-job-applications` | Job applications table with anon INSERT, staff SELECT/UPDATE RLS |
+| `schema-16-cleanup` | Reconciliation cleanup: missing columns, FKs, policies |
+| `schema-17-product-category` | Add `category` column (menu/merch) to `merch_products` |
+| `schema-18-ground-truth-reconciliation` | Missing columns from CSV-vs-code cross-reference audit |
+| `schema-19-fix-duplicate-fk` | Drop duplicate unnamed FK on `coffee_orders.order_id` |
+| `schema-20-catalog-delete-rls` | Missing DELETE RLS policy for `merch_products` |
+| `schema-21-resume-url-rls` | Strict `WITH CHECK` on `resume_url` to prevent injection |
+| `schema-22-security-hardening` | Atomic loyalty with `SELECT … FOR UPDATE` locking |
+| `schema-23-security-hardening` | Storage bucket upload lockdown + `price_cents > 0` constraint |
+| `schema-24-rbac-idor-hardening` | Manager-only write policies + parcels IDOR fix for residents |
+| `schema-25-order-timeout-cleanup` | Abandon stale pending orders after 15 min + prune webhooks |
+| `schema-26-soft-delete-payroll-refund` | Soft-delete guard, payroll validation, refund inventory restore |
+| `schema-27-audit-fixes` | Revoke dangerous RPCs from anon, fix triggers, add indexes/RLS |
+| `schema-28-audit-fixes-2` | Restore price guard, fix completion trigger, harden storage & summary |
 | `schema-free-coffee` | Loyalty voucher auto-generation |
 
 ---

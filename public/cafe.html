@@ -84,22 +84,32 @@
 
     // 2. POS FUNCTIONS (Available immediately)
     function addToCart(item) {
-      cart.push(item);
+      // Merge into existing cart entry or add new
+      const existing = cart.find(c => c.product_id === item.product_id);
+      if (existing) {
+        existing.quantity += 1;
+      } else {
+        cart.push({ product_id: item.product_id, name: item.name, display_price: item.display_price, quantity: 1 });
+      }
       renderCart();
     }
 
     function renderCart() {
       const list = document.getElementById('cartItems');
-      list.innerHTML = cart.map(item => `<div>${escapeHtml(item.name)} - $${item.price.toFixed(2)}</div>`).join('');
-      const total = cart.reduce((s, i) => s + i.price, 0);
+      list.innerHTML = cart.map(item => `<div>${escapeHtml(item.name)} x${item.quantity} - $${(item.display_price * item.quantity).toFixed(2)}</div>`).join('');
+      const total = cart.reduce((s, i) => s + i.display_price * i.quantity, 0);
       document.getElementById('cartTotal').textContent = `$${total.toFixed(2)}`;
       document.getElementById('checkoutBtn').disabled = cart.length === 0;
     }
 
     async function checkout() {
   const client = window.brewAuth.client;
+  const btn = document.getElementById('checkoutBtn');
   
   try {
+    btn.disabled = true;
+    btn.textContent = 'Processing…';
+
     // Get the session for Authorization header
     const { data: { session } } = await client.auth.getSession();
     if (!session) {
@@ -108,15 +118,32 @@
       return;
     }
 
+    // 15-second timeout via AbortController
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
     // Call server-side checkout API (validates prices server-side)
-    const response = await fetch('/.netlify/functions/cafe-checkout', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`
-      },
-      body: JSON.stringify({ cart })
-    });
+    let response;
+    try {
+      response = await fetch('/.netlify/functions/cafe-checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'X-BrewHub-Action': 'true'
+        },
+        body: JSON.stringify({ items: cart.map(i => ({ product_id: i.product_id, quantity: i.quantity })) }),
+        signal: controller.signal
+      });
+    } catch (fetchErr) {
+      if (fetchErr.name === 'AbortError') {
+        throw new Error('Request timed out. Please check your connection and try again.');
+      }
+      // TypeError: Failed to fetch — network drop
+      throw new Error('Network disconnected. Please check your connection and try again.');
+    } finally {
+      clearTimeout(timeout);
+    }
 
     const result = await response.json();
 
@@ -130,6 +157,9 @@
   } catch (err) {
     console.error(err);
     alert('Checkout Failed: ' + err.message);
+  } finally {
+    btn.disabled = cart.length === 0;
+    btn.textContent = 'Pay →';
   }
 }
 
@@ -158,7 +188,7 @@
       if (!menuErr && menuData && menuData.length > 0) {
         grid.innerHTML = menuData.map(item => {
           const priceDollars = (item.price_cents / 100).toFixed(2);
-          return `<button onclick="addToCart({name:'${escapeHtml(item.name).replace(/'/g, "\\'")}',price:${priceDollars}})" style="padding:10px 14px;border-radius:8px;border:none;background:#3498db;color:white;cursor:pointer;font-size:0.85rem;white-space:nowrap;">+ ${escapeHtml(item.name)} $${priceDollars}</button>`;
+          return `<button onclick="addToCart({product_id:'${item.id}',name:'${escapeHtml(item.name).replace(/'/g, "\\'")},display_price:${priceDollars}})" style="padding:10px 14px;border-radius:8px;border:none;background:#3498db;color:white;cursor:pointer;font-size:0.85rem;white-space:nowrap;">+ ${escapeHtml(item.name)} $${priceDollars}</button>`;
         }).join('');
       } else {
         grid.innerHTML = '<span style="color:#e74c3c;">Could not load menu</span>';

@@ -1,4 +1,5 @@
 const { checkQuota } = require('./_usage');
+const { requireCsrfHeader } = require('./_csrf');
 const { createClient } = require('@supabase/supabase-js');
 
 // Lightweight JWT user extraction (token is validated by Supabase, not us)
@@ -541,13 +542,17 @@ exports.handler = async (event) => {
     const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
     const headers = {
         'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
         'Content-Type': 'application/json'
     };
 
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };
     }
+
+    // CSRF protection — prevents cross-origin abuse of chat/quota
+    const csrfBlock = requireCsrfHeader(event);
+    if (csrfBlock) return csrfBlock;
 
     // Rate limit to prevent Denial-of-Wallet attacks
     const hasQuota = await checkQuota('claude_chat');

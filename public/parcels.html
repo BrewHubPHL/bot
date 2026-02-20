@@ -149,6 +149,10 @@
       outline: none;
       border-color: #3498db;
     }
+    .tracking-input:focus-visible {
+      outline: 2px solid #f59e0b;
+      outline-offset: 2px;
+    }
     .scan-btn {
       background: #3498db;
       border: none;
@@ -187,6 +191,7 @@
       font-size: 0.95rem;
     }
     .search-box input:focus { outline: none; }
+    .search-box input:focus-visible { outline: 2px solid #f59e0b; outline-offset: 2px; }
     .search-box input::placeholder { color: rgba(255,255,255,0.4); }
     .search-icon { color: rgba(255,255,255,0.4); }
     
@@ -227,11 +232,16 @@
     .parcel-recipient {
       font-weight: 600;
       margin-bottom: 0.25rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .parcel-tracking {
       font-size: 0.8rem;
       color: rgba(255,255,255,0.5);
       font-family: 'Courier New', monospace;
+      overflow-wrap: break-word;
+      word-break: break-all;
     }
     .parcel-time {
       font-size: 0.75rem;
@@ -407,7 +417,8 @@
       if (!session) throw new Error('Not signed in');
       return {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`
+        'Authorization': `Bearer ${session.access_token}`,
+        'X-BrewHub-Action': 'true'
       };
     }
 
@@ -606,7 +617,10 @@
       }
 
       try {
-        const res = await fetch(`/.netlify/functions/search-residents?prefix=${encodeURIComponent(prefix)}`);
+        const hdrs = await authHeaders();
+        const res = await fetch(`/.netlify/functions/search-residents?prefix=${encodeURIComponent(prefix)}`, {
+          headers: hdrs
+        });
         const data = await res.json();
 
         const container = document.getElementById('residentResults');

@@ -141,7 +141,8 @@
             if (!session) throw new Error('Not signed in');
             return {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`
+                'Authorization': `Bearer ${session.access_token}`,
+                'X-BrewHub-Action': 'true'
             };
         }
 

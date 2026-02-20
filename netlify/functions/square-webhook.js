@@ -36,7 +36,14 @@ exports.handler = async (event) => {
   // ---------------------------------------------------------------------------
   const signatureKey = process.env.SQUARE_WEBHOOK_SIGNATURE;
   const signatureHeader = event.headers['x-square-signature'];
-  const rawBody = event.body || '';
+  
+  // ── RAW BODY PRESERVATION ─────────────────────────────────
+  // CRITICAL: Netlify may base64-encode the body. We MUST use the original
+  // raw bytes for HMAC verification — parsing then re-serializing can alter
+  // whitespace/key order and invalidate the signature.
+  const rawBody = event.isBase64Encoded
+    ? Buffer.from(event.body || '', 'base64').toString('utf8')
+    : (event.body || '');
 
   // Critical: Fail if signature key is missing
   if (!signatureKey) {
@@ -101,7 +108,12 @@ exports.handler = async (event) => {
   }
 
   // ---------------------------------------------------------------------------
-  // PHASE 2: EVENT ROUTING
+  // PHASE 2: ATOMIC IDEMPOTENCY LOCK  (First DB action after HMAC)
+  // ---------------------------------------------------------------------------
+  // Square sends `event_id` on every webhook. By inserting it into
+  // processed_webhooks BEFORE doing ANY work, we guarantee at-most-once
+  // execution without Redis. A unique-constraint violation (23505) means
+  // this exact event was already handled — ack Square and bail.
   // ---------------------------------------------------------------------------
   let body;
   try {
@@ -111,7 +123,40 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: 'Invalid JSON' };
   }
 
-  console.log(`[WEBHOOK] Received event type: ${body.type}`);
+  const squareEventId = body.event_id; // Square's globally-unique event identifier
+  if (!squareEventId || typeof squareEventId !== 'string') {
+    console.error('[SECURITY] Webhook body missing event_id. Rejecting.');
+    return { statusCode: 400, body: JSON.stringify({ error: 'Missing event_id' }) };
+  }
+
+  // ── TOP-LEVEL IDEMPOTENCY GATE ────────────────────────────
+  const globalEventKey = `square:${squareEventId}`;
+  const { error: idempotencyGateError } = await supabase
+    .from('processed_webhooks')
+    .insert({
+      event_key: globalEventKey,
+      event_type: body.type || 'unknown',
+      source: 'square',
+      payload: { event_id: squareEventId }
+    });
+
+  if (idempotencyGateError) {
+    if (idempotencyGateError.code === '23505') { // Postgres unique_violation
+      console.warn(`[IDEMPOTENCY] Event ${squareEventId} already processed. Acking Square.`);
+      return { statusCode: 200, body: 'Duplicate event ignored' };
+    }
+    // Transient DB error — tell Square to retry later
+    console.error('[IDEMPOTENCY] Gate insert failed:', idempotencyGateError);
+    return { statusCode: 500, body: 'Idempotency check failed' };
+  }
+
+  console.log(`[WEBHOOK] Locked event ${squareEventId}, type: ${body.type}`);
+
+  // ---------------------------------------------------------------------------
+  // PHASE 3: EVENT ROUTING  (only reached after idempotency lock is secured)
+  // Heavy work (loyalty, KDS, receipts) happens inside these handlers —
+  // guaranteed to execute at most once per event_id.
+  // ---------------------------------------------------------------------------
 
   // ROUTE A: REFUNDS (The "Loyalty Loophole" Fix)
   if (body.type === 'refund.created') {
@@ -141,7 +186,7 @@ async function handleRefund(body, supabase) {
     return { statusCode: 200, body: "No payment ID in refund event" };
   }
 
-  // Idempotency: Prevent duplicate refund processing (matches payment handler pattern)
+  // Defense-in-depth: per-resource idempotency (top-level gate already blocked duplicates)
   const eventKey = `square:refund.created:${refundId || paymentId}`;
   const { error: idempotencyError } = await supabase
     .from('processed_webhooks')
@@ -165,7 +210,7 @@ async function handleRefund(body, supabase) {
     // 1. Find the original order
     const { data: order, error: findError } = await supabase
       .from('orders')
-      .select('id, user_id, status')
+      .select('id, user_id, status, inventory_decremented')
       .eq('payment_id', paymentId)
       .single();
 
@@ -219,10 +264,24 @@ async function handleRefund(body, supabase) {
        }
     }
 
-    // 6. Release Lock
+    // 6. RESTORE INVENTORY (The "Ghost Stock" fix)
+    // If the order was completed and inventory was decremented, put it back.
+    if (order.inventory_decremented) {
+      const { data: restoreResult, error: restoreErr } = await supabase.rpc(
+        'restore_inventory_on_refund',
+        { p_order_id: order.id }
+      );
+      if (restoreErr) {
+        console.error('[REFUND] Inventory restore RPC failed:', restoreErr);
+      } else {
+        console.log('[REFUND] Inventory restored:', JSON.stringify(restoreResult));
+      }
+    }
+
+    // 7. Release Lock
     await supabase.from('refund_locks').delete().eq('payment_id', paymentId);
     
-    return { statusCode: 200, body: "Refund processed: Points & Voucher revoked." };
+    return { statusCode: 200, body: "Refund processed: Points revoked, inventory restored." };
 
   } catch (err) {
     console.error('[REFUND ERROR]', err);
@@ -252,8 +311,9 @@ async function handlePaymentUpdate(body, supabase) {
 
   console.log(`[PAYMENT] Processing Order: ${orderId}`);
 
-  // 2. ATOMIC IDEMPOTENCY: The "First Writer Wins" Lock
-  // We try to insert into 'processed_webhooks'. If it fails (duplicate), we stop.
+  // 2. DEFENSE-IN-DEPTH: Per-payment idempotency guard
+  // The top-level event_id gate already prevents duplicates, but this guards
+  // against edge cases (manual retries with a fresh event_id for the same payment).
   const eventKey = `square:payment.updated:${payment.id}`;
   
   const { error: idempotencyError } = await supabase
@@ -329,20 +389,21 @@ async function handlePaymentUpdate(body, supabase) {
   }
 
   // 5. Update Order Status
-  // Self-healing: the .neq('status', 'paid') guard ensures that if the function
-  // crashed after idempotency insert but before this update on a previous attempt,
-  // a manual retry won't double-process. The idempotency record can be cleared and
-  // the webhook re-sent safely — this guard is the second line of defense.
+  // Transition: pending → preparing (payment confirmed, show on KDS)
+  // The .neq('status','paid') guard is defense-in-depth for crash recovery.
+  // We set status to 'preparing' so the KDS picks it up; only a final
+  // fulfillment action (staff mark-done) moves it to 'completed'.
   const { data: updatedRows, error: updateError } = await supabase
     .from('orders')
     .update({ 
-      status: 'paid',
+      status: 'preparing',
       payment_id: payment.id,
       paid_at: new Date().toISOString(),
       paid_amount_cents: paidAmount  // Persisted for increment_loyalty re-entry guard
     })
     .eq('id', orderId)
     .neq('status', 'paid')
+    .neq('status', 'preparing')
     .select('id');
 
   // If no rows matched, the order was already paid (concurrent/crash recovery)

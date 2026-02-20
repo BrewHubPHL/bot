@@ -34,14 +34,30 @@ const SITE_PAGES = {
   'terms': { url: 'https://brewhubphl.com/terms', description: 'Read our terms of service' },
 };
 
-function json(status, data) {
+// --- Strict CORS allowlist ---
+const ALLOWED_ORIGINS = [
+  process.env.URL,                   // Netlify deploy URL
+  'https://brewhubphl.com',
+  'https://www.brewhubphl.com',
+].filter(Boolean);
+
+function corsOrigin(requestOrigin) {
+  if (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin)) return requestOrigin;
+  return 'https://brewhubphl.com'; // strict default
+}
+
+function json(status, data, event) {
+  const origin = (event && event.headers)
+    ? (event.headers.origin || event.headers.Origin)
+    : undefined;
   return {
     statusCode: status,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': corsOrigin(origin),
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
+      'Vary': 'Origin',
     },
     body: JSON.stringify(data),
   };
@@ -49,7 +65,7 @@ function json(status, data) {
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
-    return json(200, {});
+    return json(200, {}, event);
   }
 
   // Parse destination from query string or body
@@ -72,7 +88,7 @@ exports.handler = async (event) => {
         return a.findIndex(k => SITE_PAGES[k].url === url) === i;
       }),
       message: 'Provide a destination parameter to get the link. Available: menu, shop, checkout, loyalty, parcels, waitlist, contact, home'
-    });
+    }, event);
   }
 
   const dest = destination.toLowerCase().trim();
@@ -85,7 +101,7 @@ exports.handler = async (event) => {
       url: page.url,
       description: page.description,
       message: `${page.description}: ${page.url}`
-    });
+    }, event);
   }
 
   // Destination not found
@@ -94,5 +110,5 @@ exports.handler = async (event) => {
     error: `Unknown destination: ${dest}`,
     available_pages: ['menu', 'shop', 'checkout', 'loyalty', 'parcels', 'waitlist', 'contact', 'home'],
     message: 'I can help you find: menu, shop, checkout, loyalty portal, parcels, waitlist, contact, or home.'
-  });
+  }, event);
 };

@@ -12,6 +12,7 @@
     
     <style>
         body { background-color: #0f172a; color: #f8fafc; overflow-x: hidden; font-family: sans-serif; }
+        .kds-order-grid { scrollbar-gutter: stable; }
         .stale-pulse { 
             animation: pulse 2s infinite; 
             border-color: #ef4444 !important; 
@@ -65,7 +66,8 @@
             const { data: { session } } = await sbClient.auth.getSession();
             return {
                 'Content-Type': 'application/json',
-                'Authorization': session ? `Bearer ${session.access_token}` : ''
+                'Authorization': session ? `Bearer ${session.access_token}` : '',
+                'X-BrewHub-Action': 'true'
             };
         }
 
@@ -86,13 +88,20 @@
             } catch(e) { return ""; }
         }
 
-        // --- DATA FETCHING (debounced + abortable) ---
+        // --- DATA FETCHING (debounced + abortable + merge-aware) ---
         function debouncedFetchOrders() {
             clearTimeout(fetchDebounceTimer);
             fetchDebounceTimer = setTimeout(fetchOrders, 500);
         }
 
-        async function fetchOrders() {
+        /**
+         * Fetches open orders from the database.
+         * @param {Object} opts
+         * @param {boolean} opts.silent - When true (used by the poller), only
+         *   re-renders if the data actually changed, preventing UI flashes.
+         */
+        async function fetchOrders(opts) {
+            var silent = opts && opts.silent;
             if (isFetching) return; // skip if already in-flight
             isFetching = true;
 
@@ -109,7 +118,13 @@
                     .abortSignal(fetchAbortController.signal);
 
                 if (error) throw error;
-                orders = data || [];
+
+                var incoming = data || [];
+
+                // Silent mode: only re-render when the dataset actually changed
+                if (silent && ordersEqual(orders, incoming)) return;
+
+                orders = incoming;
                 lastUpdated = new Date();
                 render();
             } catch (err) {
@@ -118,6 +133,15 @@
             } finally {
                 isFetching = false;
             }
+        }
+
+        /** Shallow compare two order arrays by id + status to detect real changes */
+        function ordersEqual(a, b) {
+            if (a.length !== b.length) return false;
+            for (var i = 0; i < a.length; i++) {
+                if (a[i].id !== b[i].id || a[i].status !== b[i].status) return false;
+            }
+            return true;
         }
 
         // --- STATUS UPDATE ---
@@ -160,25 +184,41 @@
                 ready: 'border-blue-500 bg-blue-500/10 text-blue-400'
             };
 
+            /* WCAG 1.4.1 — non-color status cues */
+            var statusIcons = {
+                pending: '⚠️',
+                unpaid:  '⚠️',
+                paid:    '✅',
+                preparing: '🔥',
+                ready:   '🔔'
+            };
+            var statusLabels = {
+                pending: 'Needs Payment',
+                unpaid:  'Needs Payment',
+                paid:    'Paid',
+                preparing: 'Preparing',
+                ready:   'Ready for Pickup'
+            };
+
             app.innerHTML = `
                 <div class="p-10">
-                    <header class="flex justify-between items-end mb-12 border-b-2 border-slate-700 pb-8">
+                    <header class="flex flex-wrap justify-between items-end mb-12 border-b-2 border-slate-700 pb-8 gap-4">
                         <div>
-                            <h1 class="text-6xl font-black text-amber-500 tracking-tighter uppercase">BrewHub <span class="text-white">KDS</span></h1>
-                            <p class="text-2xl text-slate-500 mt-2 font-mono italic">SYSTEM ONLINE</p>
+                            <h1 class="text-4xl md:text-6xl font-black text-amber-500 tracking-tighter uppercase">BrewHub <span class="text-white">KDS</span></h1>
+                            <p class="text-xl md:text-2xl text-slate-500 mt-2 font-mono italic">SYSTEM ONLINE</p>
                         </div>
                         <div class="text-right flex flex-col items-end gap-3">
-                            <nav class="flex gap-4 text-lg">
-                                <a href="staff-hub.html" class="text-slate-400 hover:text-amber-400 transition-colors">Staff Hub</a>
-                                <a href="cafe.html" class="text-slate-400 hover:text-amber-400 transition-colors">Cafe POS</a>
-                                <a href="manager.html" class="text-slate-400 hover:text-amber-400 transition-colors">Dashboard</a>
+                            <nav class="flex flex-wrap gap-2 text-lg">
+                                <a href="staff-hub.html" class="text-slate-400 hover:text-amber-400 transition-colors min-h-[48px] min-w-[48px] px-3 py-2 inline-flex items-center">Staff Hub</a>
+                                <a href="cafe.html" class="text-slate-400 hover:text-amber-400 transition-colors min-h-[48px] min-w-[48px] px-3 py-2 inline-flex items-center">Cafe POS</a>
+                                <a href="manager.html" class="text-slate-400 hover:text-amber-400 transition-colors min-h-[48px] min-w-[48px] px-3 py-2 inline-flex items-center">Dashboard</a>
                             </nav>
                             <p class="text-2xl text-slate-400 font-mono">${lastUpdated.toLocaleTimeString()}</p>
-                            <button id="kds-sync-btn" class="bg-slate-800 px-6 py-2 rounded-xl text-2xl hover:bg-slate-700">🔄 SYNC</button>
+                            <button id="kds-sync-btn" class="bg-slate-800 px-6 py-2 rounded-xl text-2xl hover:bg-slate-700" aria-label="Sync orders">🔄 SYNC</button>
                         </div>
                     </header>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-10">
+                    <div class="kds-order-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-10">
                         ${orders.length === 0 ? `
                             <div class="col-span-full text-center py-60 opacity-20">
                                 <h2 class="text-6xl font-black italic">NO ORDERS IN QUEUE</h2>
@@ -195,7 +235,7 @@
                                             <h3 class="text-4xl font-black text-white leading-none">${escapeHtml(order.customer_name) || 'Guest'}</h3>
                                             <p class="text-2xl font-mono text-slate-400 mt-3">${timeAgo(order.created_at)} ago</p>
                                         </div>
-                                        <span class="text-lg font-bold uppercase px-4 py-1 rounded-lg ${style}">${escapeHtml(order.status)}</span>
+                                        <span class="text-lg font-bold uppercase px-4 py-1 rounded-lg ${style}" role="status" aria-label="${statusLabels[order.status] || order.status}">${statusIcons[order.status] || ''} ${escapeHtml(statusLabels[order.status] || order.status)}</span>
                                     </div>
                                     <div class="p-8 flex-grow space-y-6">
                                         ${(order.coffee_orders || []).map(item => `
@@ -207,10 +247,10 @@
                                     </div>
                                     <div class="p-8 bg-slate-900/40 rounded-b-[2rem]">
                                         ${(order.status === 'paid' || order.status === 'unpaid' || order.status === 'pending') ? 
-                                            `<button data-order-id="${escapeHtml(order.id)}" data-next-status="preparing" class="kds-status-btn w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black shadow-lg">START PREPARING</button>` : 
+                                            `<button data-order-id="${escapeHtml(order.id)}" data-next-status="preparing" class="kds-status-btn w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black shadow-lg" aria-label="Start preparing order for ${escapeHtml(order.customer_name) || 'Guest'}">▶ START PREPARING</button>` : 
                                           order.status === 'preparing' ? 
-                                            `<button data-order-id="${escapeHtml(order.id)}" data-next-status="ready" class="kds-status-btn w-full bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black shadow-lg">ORDER UP!</button>` : 
-                                            `<button data-order-id="${escapeHtml(order.id)}" data-next-status="completed" class="kds-status-btn w-full bg-slate-600 hover:bg-slate-500 text-white rounded-2xl font-black">COMPLETED</button>`
+                                            `<button data-order-id="${escapeHtml(order.id)}" data-next-status="ready" class="kds-status-btn w-full bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-black shadow-lg" aria-label="Mark order ready for ${escapeHtml(order.customer_name) || 'Guest'}">🔔 ORDER UP!</button>` : 
+                                            `<button data-order-id="${escapeHtml(order.id)}" data-next-status="completed" class="kds-status-btn w-full bg-slate-600 hover:bg-slate-500 text-white rounded-2xl font-black" aria-label="Mark order completed for ${escapeHtml(order.customer_name) || 'Guest'}">✓ COMPLETED</button>`
                                         }
                                     </div>
                                 </div>
@@ -244,11 +284,30 @@
 
             fetchOrders();
 
-            // Realtime subscriptions — debounced so bursts collapse into one fetch
+            // ── LAYER 1: Realtime subscription with reconnect reconciliation ──
+            // When the channel reaches SUBSCRIBED (including after a reconnect),
+            // we re-fetch all open orders so nothing is missed during downtime.
             sbClient.channel('kds-realtime')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => debouncedFetchOrders())
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'coffee_orders' }, () => debouncedFetchOrders())
-                .subscribe();
+                .subscribe(function (status) {
+                    console.log('KDS: Realtime channel status →', status);
+                    if (status === 'SUBSCRIBED') {
+                        fetchOrders(); // reconcile on every (re)subscribe
+                    }
+                });
+
+            // ── LAYER 2: Browser online event – instant recovery after Wi-Fi drop ──
+            window.addEventListener('online', function () {
+                console.log('KDS: Network restored — reconciling orders…');
+                fetchOrders();
+            });
+
+            // ── LAYER 3: Failsafe background poller (every 60 s) ──
+            // Silent mode merges data without flashing/resetting the UI.
+            setInterval(function () {
+                fetchOrders({ silent: true });
+            }, 60000);
 
             // Gentle UI refresh for "time ago" labels (no network call)
             setInterval(render, 30000);

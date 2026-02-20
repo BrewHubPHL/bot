@@ -3,10 +3,24 @@ const { createClient } = require('@supabase/supabase-js');
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY);
 
+// --- Strict CORS allowlist ---
+const ALLOWED_ORIGINS = [
+  process.env.URL,                   // Netlify deploy URL
+  'https://brewhubphl.com',
+  'https://www.brewhubphl.com',
+].filter(Boolean);
+
+function corsOrigin(event) {
+  const requestOrigin = (event.headers || {}).origin || (event.headers || {}).Origin;
+  if (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin)) return requestOrigin;
+  return 'https://brewhubphl.com'; // strict default
+}
+
 exports.handler = async (event) => {
     const headers = {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': corsOrigin(event),
+        'Vary': 'Origin',
     };
 
     // Handle CORS preflight

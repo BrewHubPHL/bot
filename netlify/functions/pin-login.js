@@ -100,8 +100,9 @@ exports.handler = async (event) => {
       return json(429, { error: 'Too many attempts. Try again shortly.', retryAfter: lockRow.retry_after_seconds });
     }
   } catch (dbErr) {
-    // If DB check fails, fall through to in-memory only (fail-open for availability)
-    console.warn('[PIN-LOGIN] DB lockout check failed, relying on in-memory:', dbErr.message);
+    // FAIL CLOSED: If DB is unreachable, deny access — never grant access on error
+    console.error('[PIN-LOGIN] DB lockout check failed — failing secure (deny):', dbErr.message);
+    return json(503, { error: 'Authentication service unavailable. Try again shortly.' });
   }
 
   try {
@@ -174,17 +175,45 @@ exports.handler = async (event) => {
 
     console.log(`[PIN-LOGIN] ${matchedStaff.name || matchedStaff.email} logged in via PIN`);
 
-    return json(200, {
-      success: true,
-      token,
-      staff: {
-        id: matchedStaff.id,
-        name: matchedStaff.full_name || matchedStaff.name,
-        email: matchedStaff.email,
-        role: matchedStaff.role,
-        is_working: matchedStaff.is_working,
+    // ═══════════════════════════════════════════════════════════
+    // SECURE SESSION COOKIE: HttpOnly + Secure + SameSite=Strict
+    // Client-side JS cannot read or forge this cookie.
+    // The Next.js middleware verifies it on every ops page load.
+    // ═══════════════════════════════════════════════════════════
+    const isProduction = !['localhost', '127.0.0.1'].includes(
+      (event.headers?.host || '').split(':')[0]
+    );
+    const cookieFlags = [
+      `hub_staff_session=${token}`,
+      'HttpOnly',
+      `SameSite=Strict`,
+      'Path=/',
+      `Max-Age=${8 * 60 * 60}`, // 8-hour shift
+      isProduction ? 'Secure' : '',
+    ].filter(Boolean).join('; ');
+
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Credentials': 'true',
+        'Set-Cookie': cookieFlags,
       },
-    });
+      body: JSON.stringify({
+        success: true,
+        token,
+        staff: {
+          id: matchedStaff.id,
+          name: matchedStaff.full_name || matchedStaff.name,
+          email: matchedStaff.email,
+          role: matchedStaff.role,
+          is_working: matchedStaff.is_working,
+        },
+      }),
+    };
   } catch (err) {
     console.error('[PIN-LOGIN] Error:', err);
     return json(500, { error: 'Login failed' });

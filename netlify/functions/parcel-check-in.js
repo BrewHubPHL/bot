@@ -1,5 +1,6 @@
 ﻿const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -16,6 +17,19 @@ function triggerWorker() {
   }).catch(() => {}); // Swallow errors - cron is backup
 }
 
+// Fire-and-forget: bust Next.js cache so portal shows updated parcels
+function triggerCacheRevalidation() {
+  const siteUrl = process.env.SITE_URL || 'https://brewhubphl.com';
+  fetch(`${siteUrl}/api/revalidate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-brewhub-secret': process.env.INTERNAL_SYNC_SECRET || '',
+    },
+    body: JSON.stringify({ paths: ['/portal', '/parcels'] }),
+  }).catch(() => {}); // Best-effort; cron is backup
+}
+
 // Auto-detect carrier from tracking number format
 function identifyCarrier(tracking) {
   if (/^1Z[A-Z0-9]{16}$/i.test(tracking)) return 'UPS';
@@ -30,10 +44,14 @@ exports.handler = async (event) => {
   const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
 
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }, body: '' };
+    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action' }, body: '' };
   }
 
   const auth = await authorize(event);
+  if (auth.ok) {
+    const csrfBlock = requireCsrfHeader(event);
+    if (csrfBlock) return csrfBlock;
+  }
   if (!auth.ok) {
     return {
       statusCode: auth.response.statusCode,
@@ -129,6 +147,7 @@ exports.handler = async (event) => {
 
       // Fire-and-forget: Immediately trigger worker (cron is backup)
       triggerWorker();
+      triggerCacheRevalidation();
 
       return {
         statusCode: 200,
@@ -249,6 +268,7 @@ exports.handler = async (event) => {
 
     // Fire-and-forget: Immediately trigger worker (cron is backup)
     triggerWorker();
+    triggerCacheRevalidation();
 
     return {
       statusCode: 200,

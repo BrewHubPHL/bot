@@ -92,6 +92,7 @@ export default function ResidentPortal() {
   const [parcels, setParcels] = useState<ParcelRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loyalty, setLoyalty] = useState({ points: 0 });
+  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
 
   /* ── Auth bootstrap ────────────────────────────────────── */
   useEffect(() => {
@@ -119,29 +120,42 @@ export default function ResidentPortal() {
   /* ── Data loader ───────────────────────────────────────── */
   async function loadData(userId: string, userEmail: string) {
     setDataLoading(true);
-    const [parcelRes, orderRes, loyaltyRes] = await Promise.all([
-      supabase
-        .from("parcels")
-        .select("id, tracking_number, carrier, status, received_at, unit_number")
-        .eq("recipient_email", userEmail)
-        .neq("status", "picked_up")
-        .order("received_at", { ascending: false }),
-      supabase
-        .from("orders")
-        .select("id, status, total_amount_cents, created_at")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(5),
-      supabase
-        .from("customers")
-        .select("loyalty_points")
-        .eq("email", userEmail)
-        .maybeSingle(),
-    ]);
+    try {
+      const [parcelRes, orderRes, loyaltyRes] = await Promise.all([
+        supabase
+          .from("parcels")
+          .select("id, tracking_number, carrier, status, received_at, unit_number")
+          .eq("recipient_email", userEmail)
+          .neq("status", "picked_up")
+          .order("received_at", { ascending: false }),
+        supabase
+          .from("orders")
+          .select("id, status, total_amount_cents, created_at")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(5),
+        supabase
+          .from("customers")
+          .select("loyalty_points")
+          .eq("email", userEmail)
+          .maybeSingle(),
+      ]);
 
-    if (parcelRes.data) setParcels(parcelRes.data);
-    if (orderRes.data) setOrders(orderRes.data);
-    if (loyaltyRes.data) setLoyalty({ points: loyaltyRes.data.loyalty_points });
+      // If any query returned an error, surface maintenance mode
+      if (parcelRes.error || orderRes.error || loyaltyRes.error) {
+        console.error("Portal data load errors:", parcelRes.error, orderRes.error, loyaltyRes.error);
+        setIsMaintenanceMode(true);
+        setDataLoading(false);
+        return;
+      }
+
+      if (parcelRes.data) setParcels(parcelRes.data);
+      if (orderRes.data) setOrders(orderRes.data);
+      if (loyaltyRes.data) setLoyalty({ points: loyaltyRes.data.loyalty_points });
+    } catch (err) {
+      console.error("Portal data load failed:", err);
+      setIsMaintenanceMode(true);
+    }
     setDataLoading(false);
   }
 
@@ -241,7 +255,7 @@ export default function ResidentPortal() {
                 <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Full Name</label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={18} />
-                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Jane Doe" required className="w-full pl-10 pr-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50" />
+                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Jane Doe" required className="w-full pl-10 pr-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2" />
                 </div>
               </div>
             )}
@@ -250,7 +264,7 @@ export default function ResidentPortal() {
               <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Email</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={18} />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required className="w-full pl-10 pr-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50" />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required className="w-full pl-10 pr-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2" />
               </div>
             </div>
 
@@ -259,7 +273,7 @@ export default function ResidentPortal() {
                 <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Phone Number</label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={18} />
-                  <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(555) 123-4567" required className="w-full pl-10 pr-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50" />
+                  <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(555) 123-4567" required className="w-full pl-10 pr-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2" />
                 </div>
               </div>
             )}
@@ -268,7 +282,7 @@ export default function ResidentPortal() {
               <label className="block text-xs uppercase tracking-wider text-stone-500 mb-2">Password</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={18} />
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} className="w-full pl-10 pr-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50" />
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} className="w-full pl-10 pr-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2" />
               </div>
             </div>
 
@@ -278,8 +292,13 @@ export default function ResidentPortal() {
               </div>
             )}
 
-            <button type="submit" disabled={authLoading} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors disabled:opacity-50">
-              {authLoading ? "Please wait…" : authMode === "login" ? "Sign In" : "Create Account"}
+            <button type="submit" disabled={authLoading} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+              {authLoading ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  Please wait…
+                </>
+              ) : authMode === "login" ? "Sign In" : "Create Account"}
             </button>
           </form>
 
@@ -297,6 +316,31 @@ export default function ResidentPortal() {
               </div>
             )}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     RENDER — Maintenance Mode Fallback
+     ═══════════════════════════════════════════════════════════ */
+  if (isMaintenanceMode) {
+    return (
+      <div className="min-h-screen bg-stone-950 flex items-center justify-center pt-24 px-4">
+        <div className="flex flex-col items-center justify-center p-8 text-center bg-gray-900 border border-gray-800 rounded-lg shadow-xl max-w-md w-full">
+          <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-5">
+            <Coffee size={28} className="text-amber-400" />
+          </div>
+          <h1 className="font-playfair text-3xl text-white mb-3">Systems Under Maintenance</h1>
+          <p className="text-stone-400 mb-6 leading-relaxed">
+            BrewHub systems are currently undergoing maintenance. Please order at the counter — we&apos;ll be back online shortly.
+          </p>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-500 transition-colors"
+          >
+            Return Home
+          </Link>
         </div>
       </div>
     );
