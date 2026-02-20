@@ -1,25 +1,36 @@
 "use client";
-import React, { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import React, { useEffect, useState, useCallback } from "react";
+import { useOpsSessionOptional } from "@/components/OpsGate";
+
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8888/.netlify/functions"
+    : "/.netlify/functions";
 
 export default function KdsSection() {
+  const token = useOpsSessionOptional()?.token;
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function fetchKdsOrders() {
+  const fetchKdsOrders = useCallback(async () => {
+    if (!token) { setLoading(false); return; }
     setLoading(true);
-    const { data, error } = await supabase
-      .from("orders")
-      .select("id, customer_name, status, created_at, coffee_orders(drink_name)")
-      .in("status", ["paid", "preparing", "ready"])
-      .order("created_at", { ascending: true });
-    if (!error && data) setOrders(data);
+    try {
+      const res = await fetch(`${API_BASE}/get-kds-orders`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("KDS orders fetch failed");
+      const data = await res.json();
+      setOrders(data.orders ?? []);
+    } catch (err) {
+      console.error("KDS orders fetch failed:", err);
+    }
     setLoading(false);
-  }
+  }, [token]);
 
   useEffect(() => {
     fetchKdsOrders();
-  }, []);
+  }, [fetchKdsOrders]);
 
   return (
     <section className="mb-8">

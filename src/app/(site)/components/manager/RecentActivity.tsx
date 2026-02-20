@@ -1,43 +1,51 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useOpsSessionOptional } from "@/components/OpsGate";
+
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8888/.netlify/functions"
+    : "/.netlify/functions";
 
 export default function RecentActivity() {
+  const token = useOpsSessionOptional()?.token;
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!token) { setLoading(false); return; }
     async function fetchActivity() {
       setLoading(true);
-      // Show recent orders and inventory changes (last 10)
-      const { data: orders } = await supabase
-        .from("orders")
-        .select("id, customer_name, status, created_at")
-        .order("created_at", { ascending: false })
-        .limit(5);
-      const { data: inventory } = await supabase
-        .from("inventory")
-        .select("id, item_name, current_stock, updated_at")
-        .order("updated_at", { ascending: false })
-        .limit(5);
-      const orderEvents = (orders || []).map((o: any) => ({
-        type: "order",
-        id: o.id,
-        label: `Order: ${o.customer_name || 'Guest'} (${o.status})`,
-        time: o.created_at,
-      }));
-      const inventoryEvents = (inventory || []).map((i: any) => ({
-        type: "inventory",
-        id: i.id,
-        label: `Inventory: ${i.item_name} (${i.current_stock})`,
-        time: i.updated_at,
-      }));
-      const all = [...orderEvents, ...inventoryEvents].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 10);
-      setEvents(all);
+      try {
+        const res = await fetch(`${API_BASE}/get-recent-activity`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("Activity fetch failed");
+        const data = await res.json();
+
+        const orderEvents = (data.orders || []).map((o: any) => ({
+          type: "order",
+          id: o.id,
+          label: `Order: ${o.customer_name || 'Guest'} (${o.status})`,
+          time: o.created_at,
+        }));
+        const inventoryEvents = (data.inventory || []).map((i: any) => ({
+          type: "inventory",
+          id: i.id,
+          label: `Inventory: ${i.item_name} (${i.current_stock})`,
+          time: i.updated_at,
+        }));
+        const all = [...orderEvents, ...inventoryEvents]
+          .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+          .slice(0, 10);
+        setEvents(all);
+      } catch (err) {
+        console.error("Activity fetch failed:", err);
+      }
       setLoading(false);
     }
     fetchActivity();
-  }, []);
+  }, [token]);
 
   return (
     <div className="bg-[#1a1a1a] rounded-lg p-6 border border-[#333] mb-8">

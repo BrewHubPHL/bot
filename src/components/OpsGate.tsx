@@ -28,6 +28,11 @@ export function useOpsSession(): OpsSession {
   return ctx;
 }
 
+/** Safe variant – returns null when rendered outside <OpsGate> (e.g. (site) route) */
+export function useOpsSessionOptional(): OpsSession | null {
+  return useContext(OpsSessionContext);
+}
+
 /* ─── Helpers ──────────────────────────────────────────── */
 const API_BASE = (typeof window !== 'undefined' && window.location.hostname === 'localhost')
   ? 'http://localhost:8888/.netlify/functions'

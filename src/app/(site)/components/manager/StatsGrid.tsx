@@ -1,16 +1,14 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useOpsSessionOptional } from "@/components/OpsGate";
 
-function getTodayRange() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const end = new Date(start);
-  end.setDate(start.getDate() + 1);
-  return { start: start.toISOString(), end: end.toISOString() };
-}
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8888/.netlify/functions"
+    : "/.netlify/functions";
 
 export default function StatsGrid() {
+  const token = useOpsSessionOptional()?.token;
   const [revenue, setRevenue] = useState<number>(0);
   const [orders, setOrders] = useState<number>(0);
   const [staffCount, setStaffCount] = useState<number>(0);
@@ -18,53 +16,26 @@ export default function StatsGrid() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!token) { setLoading(false); return; }
     async function fetchStats() {
       setLoading(true);
-      // Orders: revenue and count for today
-      const { start, end } = getTodayRange();
-      const { data: orderData, error: orderErr } = await supabase
-        .from("orders")
-        .select("total_amount_cents, created_at")
-        .gte("created_at", start)
-        .lt("created_at", end);
-      let totalRevenue = 0;
-      let orderCount = 0;
-      if (orderData && !orderErr) {
-        orderCount = orderData.length;
-        totalRevenue = orderData.reduce((sum: number, o: any) => sum + (o.total_amount_cents || 0), 0) / 100;
-      }
-
-      // Staff clocked in and labor
-      const { data: staffData, error: staffErr } = await supabase
-        .from("staff_directory")
-        .select("email, full_name, hourly_rate, role");
-      const { data: logsData, error: logsErr } = await supabase
-        .from("time_logs")
-        .select("employee_email, action_type, clock_in, clock_out")
-        .gte("created_at", start)
-        .lt("created_at", end);
-
-      let activeStaff = 0;
-      let totalLabor = 0;
-      if (staffData && logsData && !staffErr && !logsErr) {
-        // Find staff with an IN but no OUT today
-        const working = staffData.filter((staff: any) => {
-          const logs = logsData.filter((l: any) => l.employee_email === staff.email);
-          const lastLog = logs[logs.length - 1];
-          return lastLog && (lastLog.action_type || '').toLowerCase() === 'in' && !lastLog.clock_out;
+      try {
+        const res = await fetch(`${API_BASE}/get-manager-stats`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-        activeStaff = working.length;
-        totalLabor = working.reduce((sum: number, s: any) => sum + (parseFloat(s.hourly_rate) || 0), 0);
+        if (!res.ok) throw new Error("Stats fetch failed");
+        const data = await res.json();
+        setRevenue(data.revenue ?? 0);
+        setOrders(data.orders ?? 0);
+        setStaffCount(data.staffCount ?? 0);
+        setLabor(data.labor ?? 0);
+      } catch (err) {
+        console.error("Stats fetch failed:", err);
       }
-
-      setRevenue(totalRevenue);
-      setOrders(orderCount);
-      setStaffCount(activeStaff);
-      setLabor(totalLabor);
       setLoading(false);
     }
     fetchStats();
-  }, []);
+  }, [token]);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">

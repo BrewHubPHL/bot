@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useOpsSession } from "@/components/OpsGate";
 import {
   FileText,
   RefreshCw,
@@ -36,31 +36,49 @@ const STATUS_STYLE: Record<string, string> = {
   rejected:  "bg-red-500/15   text-red-400   border-red-500/30",
 };
 
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8888/.netlify/functions"
+    : "/.netlify/functions";
+
+/* Polling interval: check for new applications every 30 seconds */
+const POLL_INTERVAL_MS = 30_000;
+
 /* ─── Main Component ─────────────────────────────────────── */
 export default function HiringViewer() {
+  const { token } = useOpsSession();
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchApplicants = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("job_applications")
-      .select("id, created_at, name, email, phone, availability, scenario_answer, resume_url, status")
-      .order("created_at", { ascending: false });
-
-    if (!error && data) setApplicants(data as Applicant[]);
+    try {
+      const res = await fetch(`${API_BASE}/get-applications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to fetch applications");
+      const json = await res.json();
+      setApplicants(json.applications ?? []);
+    } catch (err) {
+      console.error("Hiring fetch failed:", err);
+    }
     setLoading(false);
-  }, []);
+  }, [token]);
 
+  /* Initial fetch + polling for new applications */
   useEffect(() => {
     fetchApplicants();
+    pollRef.current = setInterval(fetchApplicants, POLL_INTERVAL_MS);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [fetchApplicants]);
 
   /* ── Status update ─────────────────────────────────────── */
   async function updateStatus(id: string, newStatus: string) {
-    /* FIX 3: save previous state for optimistic rollback */
     const prevApplicants = [...applicants];
 
     /* Optimistic update — instantly reflect in UI */
@@ -68,12 +86,17 @@ export default function HiringViewer() {
       prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
     );
 
-    const { error } = await supabase
-      .from("job_applications")
-      .update({ status: newStatus })
-      .eq("id", id);
-
-    if (error) {
+    try {
+      const res = await fetch(`${API_BASE}/update-application-status`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ id, status: newStatus }),
+      });
+      if (!res.ok) throw new Error("Status update failed");
+    } catch {
       alert("Failed to update status");
       setApplicants(prevApplicants);
     }

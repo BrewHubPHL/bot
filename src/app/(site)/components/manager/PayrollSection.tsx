@@ -1,6 +1,11 @@
 "use client";
 import React, { useCallback, useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useOpsSessionOptional } from "@/components/OpsGate";
+
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8888/.netlify/functions"
+    : "/.netlify/functions";
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
@@ -194,6 +199,7 @@ function downloadCsv(rows: PayrollRow[]): void {
 /* Component                                                           */
 /* ------------------------------------------------------------------ */
 export default function PayrollSection() {
+  const token = useOpsSessionOptional()?.token;
   // ---- Date range: default to last 14 days ----------------------
   const today = new Date();
   const defaultEnd = toDateInput(today);
@@ -207,33 +213,21 @@ export default function PayrollSection() {
 
   // ---- Fetch + compute ------------------------------------------
   const fetchPayroll = useCallback(async () => {
+    if (!token) { setLoading(false); return; }
     setLoading(true);
 
-    // Convert date-picker strings to ISO range (inclusive of full end day)
-    const startIso = new Date(startDate + "T00:00:00").toISOString();
-    const endIso = new Date(endDate + "T23:59:59").toISOString();
+    try {
+      const res = await fetch(
+        `${API_BASE}/get-payroll?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error("Payroll fetch failed");
+      const data = await res.json();
 
-    const [{ data: staffData }, { data: logsData }] = await Promise.all([
-      supabase
-        .from("staff_directory")
-        .select("id, full_name, email, hourly_rate")
-        .order("full_name"),
-      supabase
-        .from("time_logs")
-        .select("employee_email, action_type, clock_in, clock_out, created_at")
-        .gte("created_at", startIso)
-        .lte("created_at", endIso),
-    ]);
+      const staffData = (data.staff ?? []) as StaffRow[];
+      const logs = (data.logs ?? []) as TimeLog[];
 
-    if (!staffData) {
-      setPayroll([]);
-      setLoading(false);
-      return;
-    }
-
-    const logs = (logsData ?? []) as TimeLog[];
-
-    const rows: PayrollRow[] = (staffData as StaffRow[]).map((emp) => {
+      const rows: PayrollRow[] = staffData.map((emp) => {
       const empLogs = logs.filter((l) => l.employee_email === emp.email);
       const { shifts, missedPunch } = buildShifts(empLogs);
       const { regularHours, overtimeHours, doubleTimeHours } = calcHours(shifts);
@@ -263,8 +257,12 @@ export default function PayrollSection() {
     });
 
     setPayroll(rows);
+    } catch (err) {
+      console.error("Payroll fetch failed:", err);
+      setPayroll([]);
+    }
     setLoading(false);
-  }, [startDate, endDate]);
+  }, [startDate, endDate, token]);
 
   useEffect(() => {
     fetchPayroll();

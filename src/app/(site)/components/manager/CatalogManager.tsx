@@ -1,6 +1,11 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useOpsSessionOptional } from "@/components/OpsGate";
+
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8888/.netlify/functions"
+    : "/.netlify/functions";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -39,7 +44,6 @@ const EMPTY_FORM: FormState = {
   category: "menu",
 };
 
-const BUCKET = "menu-images";
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -54,10 +58,6 @@ function dollarsToCents(dollars: string): number {
   const parsed = parseFloat(dollars);
   if (Number.isNaN(parsed) || parsed < 0) return 0;
   return Math.round(parsed * 100);
-}
-
-function sanitizeFileName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_").toLowerCase();
 }
 
 /* ------------------------------------------------------------------ */
@@ -171,11 +171,13 @@ function ImageDropZone({
   onUploaded,
   uploading,
   setUploading,
+  token,
 }: {
   currentUrl: string;
   onUploaded: (url: string) => void;
   uploading: boolean;
   setUploading: (v: boolean) => void;
+  token: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -197,20 +199,32 @@ function ImageDropZone({
 
       setUploading(true);
       try {
-        const ext = file.name.split(".").pop() ?? "png";
-        const safeName = sanitizeFileName(
-          `${Date.now()}_${file.name.replace(`.${ext}`, "")}`
+        // Convert file to base64 for JSON transport
+        const arrayBuffer = await file.arrayBuffer();
+        const base64 = btoa(
+          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
         );
-        const path = `catalog/${safeName}.${ext}`;
 
-        const { error: uploadErr } = await supabase.storage
-          .from(BUCKET)
-          .upload(path, file, { cacheControl: "3600", upsert: false });
+        const res = await fetch(`${API_BASE}/upload-menu-image`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            fileBase64: base64,
+            contentType: file.type,
+            fileName: file.name,
+          }),
+        });
 
-        if (uploadErr) throw uploadErr;
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "Upload failed");
+        }
 
-        const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
-        onUploaded(urlData.publicUrl);
+        const data = await res.json();
+        onUploaded(data.url);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Upload failed";
         setError(msg);
@@ -289,6 +303,7 @@ function ImageDropZone({
 /* Main component                                                      */
 /* ------------------------------------------------------------------ */
 export default function CatalogManager() {
+  const token = useOpsSessionOptional()?.token ?? "";
   const [products, setProducts] = useState<MerchProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -299,15 +314,20 @@ export default function CatalogManager() {
 
   /* --- Fetch products -------------------------------------------- */
   const fetchProducts = useCallback(async () => {
+    if (!token) { setLoading(false); return; }
     setLoading(true);
-    const { data, error } = await supabase
-      .from("merch_products")
-      .select("*")
-      .order("sort_order", { ascending: true });
-
-    if (!error && data) setProducts(data as MerchProduct[]);
+    try {
+      const res = await fetch(`${API_BASE}/manage-catalog`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Catalog fetch failed");
+      const data = await res.json();
+      setProducts(data.products ?? []);
+    } catch (err) {
+      console.error("Catalog fetch failed:", err);
+    }
     setLoading(false);
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     fetchProducts();
@@ -316,33 +336,51 @@ export default function CatalogManager() {
   /* --- Delete product -------------------------------------------- */
   const handleDelete = async (productId: string) => {
     if (!confirm("Delete this product? This cannot be undone.")) return;
-    const { error } = await supabase
-      .from("merch_products")
-      .delete()
-      .eq("id", productId);
-    if (error) {
-      alert("Failed to delete: " + error.message);
-      return;
+    try {
+      const res = await fetch(`${API_BASE}/manage-catalog`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ id: productId }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Delete failed");
+      }
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Delete failed";
+      alert("Failed to delete: " + msg);
     }
-    setProducts((prev) => prev.filter((p) => p.id !== productId));
   };
 
   /* --- Toggle active/hidden -------------------------------------- */
   const handleToggleActive = async (productId: string, currentlyActive: boolean) => {
     const newStatus = !currentlyActive;
-    const { error } = await supabase
-      .from("merch_products")
-      .update({ is_active: newStatus })
-      .eq("id", productId);
-    if (error) {
-      alert("Failed to update: " + error.message);
-      return;
+    try {
+      const res = await fetch(`${API_BASE}/manage-catalog`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ id: productId, is_active: newStatus }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Update failed");
+      }
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id === productId ? { ...p, is_active: newStatus } : p
+        )
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Update failed";
+      alert("Failed to update: " + msg);
     }
-    setProducts((prev) =>
-      prev.map((p) =>
-        p.id === productId ? { ...p, is_active: newStatus } : p
-      )
-    );
   };
 
   /* --- Drawer open / close --------------------------------------- */
@@ -388,29 +426,42 @@ export default function CatalogManager() {
 
     setSaving(true);
     try {
-      const row = {
+      const row: Record<string, unknown> = {
         name: trimmedName,
         description: form.description.trim() || null,
         price_cents: cents,
         image_url: form.image_url || null,
         is_active: form.is_active,
         category: form.category,
-        updated_at: new Date().toISOString(),
       };
 
-      let result;
+      let res: Response;
       if (form.id) {
         // Update
-        result = await supabase
-          .from("merch_products")
-          .update(row)
-          .eq("id", form.id);
+        res = await fetch(`${API_BASE}/manage-catalog`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ id: form.id, ...row }),
+        });
       } else {
-        // Insert
-        result = await supabase.from("merch_products").insert(row);
+        // Create
+        res = await fetch(`${API_BASE}/manage-catalog`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(row),
+        });
       }
 
-      if (result.error) throw result.error;
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Save failed");
+      }
 
       await fetchProducts();
       closeDrawer();
@@ -517,6 +568,7 @@ export default function CatalogManager() {
             onUploaded={(url) => setField("image_url", url)}
             uploading={uploading}
             setUploading={setUploading}
+            token={token}
           />
 
           {/* Name */}

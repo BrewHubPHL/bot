@@ -1,21 +1,36 @@
 "use client";
-import React, { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import React, { useEffect, useState, useCallback } from "react";
+import { useOpsSessionOptional } from "@/components/OpsGate";
+
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8888/.netlify/functions"
+    : "/.netlify/functions";
 
 export default function InventoryTable() {
+  const token = useOpsSessionOptional()?.token;
   const [inventory, setInventory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function fetchInventory() {
+  const fetchInventory = useCallback(async () => {
+    if (!token) { setLoading(false); return; }
     setLoading(true);
-    const { data, error } = await supabase.from("inventory").select("id, item_name, category, current_stock, min_threshold, unit");
-    if (!error && data) setInventory(data);
+    try {
+      const res = await fetch(`${API_BASE}/get-inventory`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Inventory fetch failed");
+      const data = await res.json();
+      setInventory(data.inventory ?? []);
+    } catch (err) {
+      console.error("Inventory fetch failed:", err);
+    }
     setLoading(false);
-  }
+  }, [token]);
 
   useEffect(() => {
     fetchInventory();
-  }, []);
+  }, [fetchInventory]);
 
   return (
     <section className="mb-8">
