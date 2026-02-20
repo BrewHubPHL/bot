@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useOpsSession } from "@/components/OpsGate";
 import {
   Coffee, CupSoda, Croissant, ShoppingCart, Plus, Minus, Trash2, X,
   ChevronRight, Clock, CheckCircle2, Loader2, CreditCard, Monitor,
-  AlertTriangle, RotateCcw
+  AlertTriangle, RotateCcw, ScanLine, UserCheck, Ticket, Video, VideoOff
 } from "lucide-react";
 
 /* ─── Types ────────────────────────────────────────────────────── */
@@ -32,7 +32,24 @@ interface CartItem {
   quantity: number;
 }
 
+interface LoyaltyCustomer {
+  id: string;
+  email: string;
+  name: string | null;
+  points: number;
+  vouchers: { id: string; code: string }[];
+}
+
 type TicketPhase = "building" | "confirm" | "paying" | "paid" | "error";
+
+/* ─── Haptic helper ────────────────────────────────────────────── */
+function haptic(pattern: "tap" | "success" | "error") {
+  if (typeof navigator === "undefined" || !navigator.vibrate) return;
+  const p: Record<string, number | number[]> = {
+    tap: 15, success: [15, 80, 15], error: [50, 30, 50, 30, 50],
+  };
+  try { navigator.vibrate(p[pattern]); } catch {}
+}
 
 /* ─── Constants ────────────────────────────────────────────────── */
 
@@ -100,6 +117,16 @@ export default function POSPage() {
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [orderSuccess, setOrderSuccess] = useState<string | null>(null);
 
+  // Loyalty scanner
+  const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomer | null>(null);
+  const [loyaltyModalOpen, setLoyaltyModalOpen] = useState(false);
+  const [loyaltyScanning, setLoyaltyScanning] = useState(false);
+  const [loyaltyCamError, setLoyaltyCamError] = useState<string | null>(null);
+  const loyaltyVideoRef = useRef<HTMLVideoElement>(null);
+  const loyaltyStreamRef = useRef<MediaStream | null>(null);
+  const loyaltyAnimRef = useRef<number>(0);
+  const loyaltyScanLock = useRef(false);
+
   /* ─── Clock ──────────────────────────────────────────────────── */
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000);
@@ -158,6 +185,7 @@ export default function POSPage() {
     setCreatedOrderId(null);
     setTerminalStatus("");
     setErrorMsg("");
+    setLoyaltyCustomer(null);
   }, []);
 
   /* ─── Builder panel ──────────────────────────────────────────── */
@@ -191,6 +219,131 @@ export default function POSPage() {
   const opsSession = useOpsSession();
   const getAccessToken = () => opsSession.token;
 
+  /* ─── Loyalty Camera Scanning ─────────────────────────────── */
+  const openLoyaltyScanner = () => {
+    setLoyaltyModalOpen(true);
+    setLoyaltyCamError(null);
+    loyaltyScanLock.current = false;
+  };
+
+  const closeLoyaltyScanner = useCallback(() => {
+    // Stop camera tracks
+    if (loyaltyStreamRef.current) {
+      loyaltyStreamRef.current.getTracks().forEach(t => t.stop());
+      loyaltyStreamRef.current = null;
+    }
+    if (loyaltyAnimRef.current) cancelAnimationFrame(loyaltyAnimRef.current);
+    setLoyaltyScanning(false);
+    setLoyaltyModalOpen(false);
+    setLoyaltyCamError(null);
+  }, []);
+
+  const startLoyaltyCamera = useCallback(async () => {
+    setLoyaltyCamError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      loyaltyStreamRef.current = stream;
+      if (loyaltyVideoRef.current) {
+        loyaltyVideoRef.current.srcObject = stream;
+        await loyaltyVideoRef.current.play();
+      }
+      setLoyaltyScanning(true);
+      startLoyaltyDetection();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Camera access denied";
+      setLoyaltyCamError(msg);
+      haptic("error");
+    }
+  }, []);
+
+  // Use native BarcodeDetector (Safari/iOS 17+) with no-op fallback
+  const startLoyaltyDetection = useCallback(() => {
+    if (!("BarcodeDetector" in window)) {
+      setLoyaltyCamError("BarcodeDetector not available — use Safari on iOS 16.4+");
+      return;
+    }
+    const detector = new (window as any).BarcodeDetector({ formats: ["qr_code"] });
+    const detect = async () => {
+      if (!loyaltyVideoRef.current || !loyaltyStreamRef.current) return;
+      try {
+        const barcodes = await detector.detect(loyaltyVideoRef.current);
+        if (barcodes.length > 0 && !loyaltyScanLock.current) {
+          loyaltyScanLock.current = true;
+          haptic("tap");
+          await handleLoyaltyScan(barcodes[0].rawValue);
+        }
+      } catch {}
+      loyaltyAnimRef.current = requestAnimationFrame(detect);
+    };
+    loyaltyAnimRef.current = requestAnimationFrame(detect);
+  }, []);
+
+  // Auto-start camera when modal opens
+  useEffect(() => {
+    if (loyaltyModalOpen) {
+      // Small delay to let the <video> element mount
+      const t = setTimeout(() => startLoyaltyCamera(), 150);
+      return () => clearTimeout(t);
+    }
+  }, [loyaltyModalOpen, startLoyaltyCamera]);
+
+  // Cleanup camera on unmount
+  useEffect(() => () => closeLoyaltyScanner(), [closeLoyaltyScanner]);
+
+  /* ─── Loyalty Lookup ──────────────────────────────────────── */
+  const handleLoyaltyScan = async (rawValue: string) => {
+    const email = rawValue.trim().toLowerCase();
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!EMAIL_RE.test(email)) {
+      haptic("error");
+      setLoyaltyCamError("QR does not contain a valid email");
+      loyaltyScanLock.current = false;
+      return;
+    }
+
+    try {
+      // Look up profile by email
+      const { data: profile, error: pErr } = await supabase
+        .from("profiles")
+        .select("id, full_name, loyalty_points")
+        .eq("email", email)
+        .maybeSingle();
+
+      if (pErr) throw pErr;
+      if (!profile) {
+        haptic("error");
+        setLoyaltyCamError(`No account found for ${email}`);
+        loyaltyScanLock.current = false;
+        return;
+      }
+
+      // Fetch unredeemed vouchers
+      const { data: vouchers } = await supabase
+        .from("vouchers")
+        .select("id, code")
+        .eq("user_id", profile.id)
+        .eq("is_redeemed", false);
+
+      setLoyaltyCustomer({
+        id: profile.id,
+        email,
+        name: profile.full_name,
+        points: profile.loyalty_points ?? 0,
+        vouchers: vouchers ?? [],
+      });
+      haptic("success");
+      closeLoyaltyScanner();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Lookup failed";
+      setLoyaltyCamError(msg);
+      haptic("error");
+      loyaltyScanLock.current = false;
+    }
+  };
+
   /* ─── Step 1: Send to KDS (create Supabase order immediately) ─ */
   const handleSendToKDS = async () => {
     if (cart.length === 0) return;
@@ -207,6 +360,14 @@ export default function POSPage() {
         }
       }
 
+      // Attach loyalty customer fields when scanned
+      const checkoutBody: Record<string, unknown> = { cart: payload, terminal: true };
+      if (loyaltyCustomer) {
+        checkoutBody.user_id = loyaltyCustomer.id;
+        checkoutBody.customer_email = loyaltyCustomer.email;
+        checkoutBody.customer_name = loyaltyCustomer.name;
+      }
+
       // Call cafe-checkout to create the order in Supabase
       // This creates both the orders row AND coffee_orders line items
       const resp = await fetch("/.netlify/functions/cafe-checkout", {
@@ -215,7 +376,7 @@ export default function POSPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ cart: payload, terminal: true }),
+        body: JSON.stringify(checkoutBody),
       });
 
       if (!resp.ok) {
@@ -521,6 +682,46 @@ export default function POSPage() {
           )}
         </div>
 
+        {/* ── Loyalty Badge / Scan Button ── */}
+        <div className="px-5 py-3 border-b border-stone-800/60">
+          {loyaltyCustomer ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold">
+                  <UserCheck size={14} />
+                  <span>👤 Linked: {loyaltyCustomer.name ?? loyaltyCustomer.email}</span>
+                </div>
+                <button
+                  onClick={() => setLoyaltyCustomer(null)}
+                  className="text-stone-600 hover:text-red-400 transition-colors"
+                  title="Unlink customer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <p className="text-[11px] text-stone-500">
+                {loyaltyCustomer.points} pts
+              </p>
+              {loyaltyCustomer.vouchers.length > 0 && (
+                <div className="flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/30 rounded-lg px-3 py-2">
+                  <Ticket size={14} className="text-amber-400" />
+                  <span className="text-amber-300 text-xs font-bold">
+                    🎟️ Free Drink Available!
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={openLoyaltyScanner}
+              disabled={ticketPhase !== "building"}
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-stone-800 hover:bg-stone-700 disabled:opacity-40 disabled:pointer-events-none border border-stone-700 rounded-lg text-xs font-semibold text-stone-300 uppercase tracking-[0.1em] transition-all"
+            >
+              <ScanLine size={14} /> Scan Loyalty
+            </button>
+          )}
+        </div>
+
         {/* Cart Items */}
         <div className="flex-1 overflow-y-auto">
           {cart.length === 0 && ticketPhase === "building" ? (
@@ -680,6 +881,62 @@ export default function POSPage() {
           <div>
             <p className="font-bold text-sm">Order on KDS!</p>
             <p className="text-emerald-200 text-xs font-mono">#{orderSuccess}</p>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════ Loyalty QR Camera Modal ═══════ */}
+      {loyaltyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 animate-in fade-in duration-200">
+          <div className="bg-stone-900 border border-stone-700 rounded-2xl w-full max-w-md mx-4 overflow-hidden shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-stone-800">
+              <div className="flex items-center gap-2">
+                <ScanLine size={16} className="text-amber-400" />
+                <h3 className="font-bold text-sm uppercase tracking-[0.15em] text-stone-300">Scan Loyalty QR</h3>
+              </div>
+              <button onClick={closeLoyaltyScanner} className="p-2 hover:bg-stone-800 rounded-lg transition-colors">
+                <X size={18} className="text-stone-400" />
+              </button>
+            </div>
+
+            {/* Camera Viewfinder */}
+            <div className="relative bg-black aspect-[4/3]">
+              <video
+                ref={loyaltyVideoRef}
+                className="w-full h-full object-cover"
+                playsInline
+                muted
+              />
+              {/* Scan overlay crosshair */}
+              {loyaltyScanning && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-48 h-48 border-2 border-amber-400/60 rounded-2xl" />
+                </div>
+              )}
+              {!loyaltyScanning && !loyaltyCamError && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Loader2 size={32} className="animate-spin text-stone-600" />
+                </div>
+              )}
+            </div>
+
+            {/* Error / Status */}
+            {loyaltyCamError && (
+              <div className="px-5 py-3 bg-red-500/10 border-t border-red-500/30">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={14} className="text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-300">{loyaltyCamError}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Footer hint */}
+            <div className="px-5 py-3 border-t border-stone-800 text-center">
+              <p className="text-[11px] text-stone-500">
+                Point camera at the customer&apos;s QR code in the BrewHub app
+              </p>
+            </div>
           </div>
         </div>
       )}

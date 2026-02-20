@@ -12,6 +12,7 @@
   <meta property="og:description" content="Secure parcel holding, delivery acceptance, and mailbox rentals in Point Breeze, Philadelphia.">
   <meta property="og:image" content="https://brewhubphl.com/logo.png">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.95.3"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
   <script src="/js/auth.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -260,6 +261,63 @@
     .resident-option:last-child {
       border-bottom: none;
     }
+
+    /* Camera Scanner */
+    #reader {
+      width: 100%;
+      max-width: 500px;
+      border-radius: 20px;
+      overflow: hidden;
+      display: none;
+    }
+    #reader video { border-radius: 20px; }
+    /* Hide Html5Qrcode branding */
+    #reader__dashboard_section { display: none !important; }
+    #reader__scan_region img { display: none !important; }
+
+    .camera-controls {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      width: 100%;
+      max-width: 500px;
+    }
+    .cam-btn {
+      flex: 1;
+      border: none;
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .cam-btn:hover { opacity: 0.85; }
+    .cam-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .cam-btn-start { background: #27ae60; color: #fff; }
+    .cam-btn-stop  { background: #e74c3c; color: #fff; }
+
+    .cam-error {
+      margin-top: 0.75rem;
+      padding: 0.75rem 1rem;
+      background: rgba(231,76,60,0.15);
+      border: 1px solid rgba(231,76,60,0.4);
+      border-radius: 12px;
+      color: #e74c3c;
+      font-size: 0.85rem;
+      text-align: center;
+      display: none;
+      max-width: 500px;
+      width: 100%;
+    }
+
+    /* Mobile-first: stack layout on small screens */
+    @media (max-width: 900px) {
+      .container {
+        grid-template-columns: 1fr;
+      }
+      .scan-section { min-height: auto; padding-bottom: 1rem; }
+    }
   </style>
 </head>
 <body>
@@ -278,12 +336,25 @@
   
   <main class="container" id="main-content">
     <section class="scan-section" aria-label="Package scanning">
+      <!-- Camera viewfinder -->
+      <div id="reader"></div>
+
+      <!-- Status overlay (shown between scans / on success / error) -->
       <div class="scan-box" id="scanBox" role="status" aria-live="polite">
-        <div class="scan-icon" id="scanIcon" aria-hidden="true">📦</div>
-        <div class="scan-text" id="scanText">Ready to Scan</div>
-        <div class="scan-subtext" id="scanSubtext">Point scanner at package barcode</div>
+        <div class="scan-icon" id="scanIcon" aria-hidden="true">📷</div>
+        <div class="scan-text" id="scanText">Tap to Start Camera</div>
+        <div class="scan-subtext" id="scanSubtext">Use your iPhone camera to scan package barcodes</div>
       </div>
-      
+
+      <!-- Camera controls -->
+      <div class="camera-controls">
+        <button class="cam-btn cam-btn-start" id="btnStartCam" onclick="startCamera()">📷 Start Camera</button>
+        <button class="cam-btn cam-btn-stop" id="btnStopCam" onclick="stopCamera()" disabled>⏹ Stop Camera</button>
+      </div>
+
+      <!-- Permission / camera error -->
+      <div class="cam-error" id="camError"></div>
+
       <div class="manual-entry">
         <label for="trackingInput" class="visually-hidden">Enter tracking number</label>
         <input type="text" class="tracking-input" id="trackingInput" placeholder="Enter tracking number..." autocomplete="off">
@@ -341,31 +412,107 @@
     }
 
     let parcels = [];
-    let scanBuffer = '';
-    let scanTimeout = null;
 
-    // ===== HONEYWELL SCANNER CAPTURE =====
-    // Barcode scanners type fast (< 50ms between chars) and end with Enter
-    document.addEventListener('keydown', (e) => {
-      // If focused on manual input, let it handle normally
-      if (document.activeElement === document.getElementById('trackingInput')) return;
-      if (document.activeElement === document.getElementById('searchInput')) return;
-      if (document.activeElement === document.getElementById('residentSearch')) return;
+    // ===== CAMERA BARCODE SCANNER (Html5Qrcode) =====
+    let html5QrCode = null;
+    let cameraRunning = false;
 
-      // Clear buffer if typing is slow (human typing vs scanner)
-      clearTimeout(scanTimeout);
-      scanTimeout = setTimeout(() => { scanBuffer = ''; }, 100);
+    async function startCamera() {
+      const readerEl = document.getElementById('reader');
+      const scanBox  = document.getElementById('scanBox');
+      const camError = document.getElementById('camError');
+      camError.style.display = 'none';
 
-      if (e.key === 'Enter' && scanBuffer.length > 5) {
-        // Scanner finished - process the barcode
-        processBarcode(scanBuffer.trim());
-        scanBuffer = '';
-        e.preventDefault();
-      } else if (e.key.length === 1) {
-        // Accumulate characters
-        scanBuffer += e.key;
+      if (!html5QrCode) {
+        html5QrCode = new Html5Qrcode('reader');
       }
-    });
+
+      // Show viewfinder, hide status box
+      readerEl.style.display = 'block';
+      scanBox.style.display = 'none';
+
+      try {
+        await html5QrCode.start(
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: { width: 300, height: 150 },
+            aspectRatio: 1.0,
+            formatsToSupport: [
+              Html5QrcodeSupportedFormats.CODE_128,
+              Html5QrcodeSupportedFormats.CODE_39,
+              Html5QrcodeSupportedFormats.EAN_13,
+              Html5QrcodeSupportedFormats.EAN_8,
+              Html5QrcodeSupportedFormats.UPC_A,
+              Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.ITF,
+              Html5QrcodeSupportedFormats.QR_CODE,
+              Html5QrcodeSupportedFormats.DATA_MATRIX
+            ]
+          },
+          onCameraScanSuccess,
+          () => {} // ignore scan failures (noisy)
+        );
+        cameraRunning = true;
+        document.getElementById('btnStartCam').disabled = true;
+        document.getElementById('btnStopCam').disabled = false;
+      } catch (err) {
+        console.error('[CAMERA]', err);
+        readerEl.style.display = 'none';
+        scanBox.style.display = 'flex';
+        camError.style.display = 'block';
+
+        if (String(err).includes('NotAllowedError') || String(err).includes('Permission')) {
+          camError.textContent = 'Camera access denied. Please allow camera access in Safari Settings → brewhubphl.com → Camera to scan packages.';
+        } else if (String(err).includes('NotFoundError')) {
+          camError.textContent = 'No camera found on this device. Use the manual entry field below.';
+        } else {
+          camError.textContent = 'Could not start camera: ' + String(err);
+        }
+      }
+    }
+
+    async function stopCamera() {
+      if (html5QrCode && cameraRunning) {
+        try { await html5QrCode.stop(); } catch (_) {}
+        cameraRunning = false;
+      }
+      document.getElementById('reader').style.display = 'none';
+      document.getElementById('scanBox').style.display = 'flex';
+      document.getElementById('btnStartCam').disabled = false;
+      document.getElementById('btnStopCam').disabled = true;
+    }
+
+    async function onCameraScanSuccess(decodedText) {
+      if (!decodedText || decodedText.length < 4) return;
+
+      // Haptic feedback (supported on Android; iOS Safari ignores but no-op)
+      try { navigator.vibrate(50); } catch (_) {}
+
+      // Pause the camera while we process
+      if (html5QrCode && cameraRunning) {
+        try { await html5QrCode.pause(true); } catch (_) {}
+      }
+
+      // Show status overlay on top of paused camera
+      document.getElementById('scanBox').style.display = 'flex';
+
+      // Hand off to existing processBarcode flow
+      await processBarcode(decodedText.trim());
+    }
+
+    // Extend resetScanUI to optionally resume camera
+    const _originalResetScanUI = function(delay) {
+      setTimeout(async () => {
+        document.getElementById('scanBox').style.display = cameraRunning ? 'none' : 'flex';
+        updateScanUI('', '📷', 'Scanning…', 'Point camera at package barcode');
+        document.getElementById('trackingInput').value = '';
+        // Resume camera if it was paused
+        if (html5QrCode && cameraRunning) {
+          try { await html5QrCode.resume(); } catch (_) {}
+        }
+      }, delay);
+    };
 
     // ===== PROCESS SCANNED BARCODE =====
     async function processBarcode(tracking) {
@@ -539,10 +686,7 @@
     }
 
     function resetScanUI(delay) {
-      setTimeout(() => {
-        updateScanUI('', '📦', 'Ready to Scan', 'Point scanner at package barcode');
-        document.getElementById('trackingInput').value = '';
-      }, delay);
+      _originalResetScanUI(delay);
     }
 
     // ===== LOAD PARCELS FROM DB =====
@@ -649,20 +793,15 @@
           .subscribe();
     }
     initAuth();
-    
-    // Focus trap: keep input ready for scanner
-    document.getElementById('trackingInput').addEventListener('blur', () => {
-      // Re-focus after short delay unless user clicked something else
-      setTimeout(() => {
-        if (!document.activeElement || document.activeElement === document.body) {
-          // Let the global keydown handler capture scanner input
-        }
-      }, 100);
-    });
 
     // Enter key on manual input
     document.getElementById('trackingInput').addEventListener('keypress', (e) => {
       if (e.key === 'Enter') logParcel();
+    });
+
+    // Stop camera when page is hidden (save battery)
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && cameraRunning) stopCamera();
     });
   </script>
 </body>

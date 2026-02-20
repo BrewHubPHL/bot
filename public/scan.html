@@ -74,7 +74,7 @@
     
     <div class="container">
         <h2>📦 Inventory Scanner</h2>
-        <p id="status">Scan with S740 or tap Start for camera</p>
+        <p id="status">Tap Start Scanner to use camera</p>
         
         <div id="reader"></div>
         
@@ -145,35 +145,7 @@
             };
         }
 
-        // ===== HARDWARE SCANNER SUPPORT (Socket Mobile S740) =====
-        // Bluetooth scanners type fast (<50ms between chars) and end with Enter
-        let scanBuffer = '';
-        let lastKeyTime = 0;
-        const SCAN_TIMEOUT = 100; // Max ms between keystrokes for scanner input
-
-        document.addEventListener('keydown', (e) => {
-            // Skip if typing in an input field
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-            
-            const now = Date.now();
-            
-            // Reset buffer if too much time passed
-            if (now - lastKeyTime > SCAN_TIMEOUT && scanBuffer.length > 0) {
-                scanBuffer = '';
-            }
-            lastKeyTime = now;
-            
-            if (e.key === 'Enter' && scanBuffer.length >= 4) {
-                // Scanner finished - process the barcode
-                e.preventDefault();
-                const barcode = scanBuffer.trim();
-                scanBuffer = '';
-                lookupBarcode(barcode);
-            } else if (e.key.length === 1) {
-                // Single character - add to buffer
-                scanBuffer += e.key;
-            }
-        });
+        // Hardware scanner support removed — iOS camera only (Feb 2026)
 
         // Initialize camera scanner
         function initScanner() {
@@ -330,7 +302,7 @@
                             await createItem(barcode, name);
                         }
                     } else {
-                        document.getElementById('status').innerText = 'Ready - scan with S740 or camera';
+                        document.getElementById('status').innerText = 'Ready — tap Start Scanner to scan';
                     }
                     return;
                 }
@@ -440,7 +412,7 @@
             currentItem = null;
             pendingStock = 0;
             document.getElementById('item-card').classList.remove('visible');
-            document.getElementById('status').innerText = 'Ready - scan with S740 or camera';
+            document.getElementById('status').innerText = 'Ready — tap Start Scanner to scan';
         }
 
         function renderHistory() {

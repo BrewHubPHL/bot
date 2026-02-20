@@ -97,7 +97,7 @@ export default function ScannerPage() {
 
   // UI
   const [manualInput, setManualInput] = useState("");
-  const [statusMsg, setStatusMsg] = useState("Scan with camera or hardware scanner");
+  const [statusMsg, setStatusMsg] = useState("Tap Start Camera to scan");
   const [history, setHistory] = useState<ScanHistoryEntry[]>([]);
   const [clock, setClock] = useState(new Date());
 
@@ -114,32 +114,7 @@ export default function ScannerPage() {
     return () => clearInterval(t);
   }, []);
 
-  /* ─── Hardware scanner support (Socket Mobile S740 / BT scanners) */
-  useEffect(() => {
-    let scanBuffer = "";
-    let lastKeyTime = 0;
-    const SCAN_TIMEOUT = 100;
-
-    const handleKeydown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
-
-      const now = Date.now();
-      if (now - lastKeyTime > SCAN_TIMEOUT && scanBuffer.length > 0) scanBuffer = "";
-      lastKeyTime = now;
-
-      if (e.key === "Enter" && scanBuffer.length >= 4) {
-        e.preventDefault();
-        handleScan(scanBuffer.trim());
-        scanBuffer = "";
-      } else if (e.key.length === 1) {
-        scanBuffer += e.key;
-      }
-    };
-
-    window.addEventListener("keydown", handleKeydown);
-    return () => window.removeEventListener("keydown", handleKeydown);
-  }, [scanMode]);
+  /* Hardware scanner support removed — iOS camera only (Feb 2026) */
 
   /* ─── Camera lifecycle ───────────────────────────────────────── */
   const startCamera = useCallback(async () => {
@@ -204,8 +179,8 @@ export default function ScannerPage() {
       };
       animFrameRef.current = requestAnimationFrame(detect);
     } else {
-      // Fallback: manual frame capture (for browsers without BarcodeDetector)
-      setStatusMsg("Camera active — use hardware scanner for best results");
+      // Fallback: BarcodeDetector not available in this browser
+      setStatusMsg("Camera active — try Safari for best barcode detection");
     }
   }, []);
 

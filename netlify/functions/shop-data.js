@@ -38,7 +38,7 @@ exports.handler = async (event) => {
         // Fetch active products
         const { data: products, error } = await supabase
             .from('merch_products')
-            .select('name, price_cents, description, image_url, checkout_url, sort_order')
+            .select('name, price_cents, description, image_url, checkout_url, sort_order, category')
             .eq('is_active', true)
             .order('sort_order', { ascending: true })
             .order('name', { ascending: true });

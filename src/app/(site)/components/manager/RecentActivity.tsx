@@ -17,7 +17,7 @@ export default function RecentActivity() {
         .limit(5);
       const { data: inventory } = await supabase
         .from("inventory")
-        .select("id, name, current, updated_at")
+        .select("id, item_name, current_stock, updated_at")
         .order("updated_at", { ascending: false })
         .limit(5);
       const orderEvents = (orders || []).map((o: any) => ({
@@ -29,7 +29,7 @@ export default function RecentActivity() {
       const inventoryEvents = (inventory || []).map((i: any) => ({
         type: "inventory",
         id: i.id,
-        label: `Inventory: ${i.name} (${i.current})`,
+        label: `Inventory: ${i.item_name} (${i.current_stock})`,
         time: i.updated_at,
       }));
       const all = [...orderEvents, ...inventoryEvents].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 10);

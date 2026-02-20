@@ -22,7 +22,7 @@ export default function ParcelsPage() {
     const { data, error: fetchError } = await supabase
       .from("parcels")
       .select("id, tracking_number, carrier, recipient_name, unit_number, status, received_at, picked_up_at")
-      .or(`recipient_phone.ilike.%${query}%,recipient_name.ilike.%${query}%,unit_number.ilike.%${query}%,recipient_email.ilike.%${query}%`)
+      .or(`recipient_phone.ilike.%${query}%,recipient_name.ilike.%${query}%,unit_number.ilike.%${query}%,recipient_email.ilike.%${query}%,tracking_number.ilike.%${query}%`)
       .order("received_at", { ascending: false });
     if (fetchError) {
       setError(fetchError.message);

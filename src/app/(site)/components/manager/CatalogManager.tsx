@@ -14,6 +14,7 @@ interface MerchProduct {
   checkout_url: string | null;
   is_active: boolean;
   sort_order: number;
+  category: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +26,7 @@ interface FormState {
   price: string; // dollars string e.g. "4.50"
   image_url: string;
   is_active: boolean;
+  category: "menu" | "merch";
 }
 
 const EMPTY_FORM: FormState = {
@@ -34,6 +36,7 @@ const EMPTY_FORM: FormState = {
   price: "",
   image_url: "",
   is_active: true,
+  category: "menu",
 };
 
 const BUCKET = "menu-images";
@@ -104,7 +107,18 @@ function ProductCard({
       </div>
 
       <div className="p-4">
-        <h3 className="font-semibold text-[#f5f5f5] truncate">{product.name}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold text-[#f5f5f5] truncate">{product.name}</h3>
+          <span
+            className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+              product.category === "merch"
+                ? "bg-purple-500/20 text-purple-300"
+                : "bg-amber-500/20 text-amber-300"
+            }`}
+          >
+            {product.category === "merch" ? "Merch" : "Menu"}
+          </span>
+        </div>
         <p className="text-green-400 text-sm mt-1">
           ${centsToDollars(product.price_cents)}
         </p>
@@ -276,6 +290,7 @@ export default function CatalogManager() {
       price: centsToDollars(p.price_cents),
       image_url: p.image_url ?? "",
       is_active: p.is_active,
+      category: (p.category === "merch" ? "merch" : "menu") as "menu" | "merch",
     });
     setSaveError(null);
     setDrawerOpen(true);
@@ -309,6 +324,7 @@ export default function CatalogManager() {
         price_cents: cents,
         image_url: form.image_url || null,
         is_active: form.is_active,
+        category: form.category,
         updated_at: new Date().toISOString(),
       };
 
@@ -482,6 +498,24 @@ export default function CatalogManager() {
                          text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="4.50"
             />
+          </div>
+
+          {/* Category */}
+          <div>
+            <label htmlFor="catalog-category" className="block text-sm text-gray-400 mb-1">
+              Category
+            </label>
+            <select
+              id="catalog-category"
+              value={form.category}
+              onChange={(e) => setField("category", e.target.value as "menu" | "merch")}
+              className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-2 text-sm
+                         text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-blue-500
+                         appearance-none cursor-pointer"
+            >
+              <option value="menu">☕ Cafe Menu</option>
+              <option value="merch">🛍 Merch &amp; Beans</option>
+            </select>
           </div>
 
           {/* Active toggle */}

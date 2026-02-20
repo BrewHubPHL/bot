@@ -99,12 +99,21 @@ exports.handler = async (event) => {
     // POS terminal orders start as 'preparing' (shown on KDS, awaiting payment)
     // Online/direct orders are marked 'paid' immediately
     const orderStatus = terminal ? 'preparing' : 'paid';
+
+    // Accept optional loyalty customer fields from POS
+    const { user_id, customer_email: ce, customer_name: cn } = JSON.parse(event.body || '{}');
+    const orderRow = {
+      status: orderStatus,
+      total_amount_cents: totalCents,
+    };
+    // Only attach user_id / customer fields if provided (prevents null FK issues)
+    if (user_id && typeof user_id === 'string' && user_id.length > 0) orderRow.user_id = user_id;
+    if (ce && typeof ce === 'string') orderRow.customer_email = ce;
+    if (cn && typeof cn === 'string') orderRow.customer_name = cn;
+
     const { data: order, error: orderErr } = await supabase
       .from('orders')
-      .insert({
-        status: orderStatus,
-        total_amount_cents: totalCents
-      })
+      .insert(orderRow)
       .select()
       .single();
 

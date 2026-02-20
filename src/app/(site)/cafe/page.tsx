@@ -13,7 +13,7 @@ export default function CafePage() {
     async function fetchMenu() {
       setLoading(true);
       // Use inventory as menu for now
-      const { data, error } = await supabase.from("inventory").select("id, name, category, current, unit");
+      const { data, error } = await supabase.from("inventory").select("id, item_name, category, current_stock, unit");
       if (!error && data) setMenu(data);
       setLoading(false);
     }
@@ -38,7 +38,7 @@ export default function CafePage() {
       const resp = await fetch("/.netlify/functions/cafe-checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: cart.map(i => i.name) })
+        body: JSON.stringify({ items: cart.map(i => i.item_name) })
       });
       const result = await resp.json();
       if (!resp.ok) throw new Error(result.error || "Order failed");
@@ -76,7 +76,7 @@ export default function CafePage() {
             {menu.map((item) => (
               <div key={item.id} className="flex items-center justify-between bg-stone-50 border border-stone-200 rounded p-3">
                 <div>
-                  <div className="font-semibold">{item.name}</div>
+                  <div className="font-semibold">{item.item_name}</div>
                   <div className="text-xs text-stone-500">{item.category}</div>
                 </div>
                 <button className="bg-stone-900 text-white px-3 py-1 rounded text-xs font-bold" onClick={() => addToCart(item)}>

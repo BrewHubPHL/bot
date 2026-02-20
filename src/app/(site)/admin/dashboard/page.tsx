@@ -121,11 +121,11 @@ export default function ManagerDashboard() {
               <tbody>
                 {inventory.map((item, idx) => (
                   <tr key={idx}>
-                    <td className="px-6 py-2 font-bold">{item.name}</td>
-                    <td className="px-6 py-2">{item.stock}</td>
-                    <td className="px-6 py-2">{item.threshold}</td>
+                    <td className="px-6 py-2 font-bold">{item.item_name}</td>
+                    <td className="px-6 py-2">{item.current_stock}</td>
+                    <td className="px-6 py-2">{item.min_threshold}</td>
                     <td className="px-6 py-2">
-                      {item.stock <= item.threshold ? (
+                      {item.current_stock <= item.min_threshold ? (
                         <span className="text-red-500 font-bold">Low</span>
                       ) : (
                         <span className="text-green-600">OK</span>

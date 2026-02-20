@@ -1,36 +1,15 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Barcode, Package, Save, Trash2 } from 'lucide-react';
 
 export default function InventoryScanner() {
   const [item, setItem] = useState<any>(null);
   const [pendingStock, setPendingStock] = useState(0);
-  const [status, setStatus] = useState("Scan with S740 to begin");
+  const [status, setStatus] = useState("Open the Scanner page to scan items");
 
-  // hardware scanner support
-  useEffect(() => {
-    let scanBuffer = '';
-    let lastKeyTime = Date.now();
-
-    const handleKeydown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
-      const now = Date.now();
-      if (now - lastKeyTime > 100) scanBuffer = '';
-      lastKeyTime = now;
-
-      if (e.key === 'Enter' && scanBuffer.length >= 4) {
-        lookupBarcode(scanBuffer.trim());
-        scanBuffer = '';
-      } else if (e.key.length === 1) {
-        scanBuffer += e.key;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeydown);
-    return () => window.removeEventListener('keydown', handleKeydown);
-  }, []);
+  /* Hardware scanner support removed — use /scanner camera page (Feb 2026) */
 
   async function lookupBarcode(barcode: string) {
     setStatus(`Looking up ${barcode}...`);

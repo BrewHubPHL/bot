@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { ShoppingCart, X, Plus, Minus, Trash2 } from 'lucide-react';
+import { ShoppingCart, X, Plus, Minus, Trash2, Coffee, ShoppingBag } from 'lucide-react';
 import Link from 'next/link';
+
+type ShopTab = 'menu' | 'merch';
 
 interface Product {
   name: string;
@@ -11,6 +13,9 @@ interface Product {
   image_url: string;
   checkout_url: string;
   sort_order: number;
+  // TODO: Add `category` column to merch_products table and select it in shop-data.js
+  // Once the DB column exists, filtering will use product.category directly.
+  category?: string;
 }
 
 interface CartItem {
@@ -26,6 +31,7 @@ export default function ShopPage() {
   const [loading, setLoading] = useState(true);
   const [shopEnabled, setShopEnabled] = useState(true);
   const [addedProduct, setAddedProduct] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ShopTab>('menu');
 
   // Load cart from localStorage
   useEffect(() => {
@@ -63,6 +69,23 @@ export default function ShopPage() {
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
   const totalCents = cart.reduce((sum, item) => sum + (item.price_cents * item.quantity), 0);
+
+  /* ── Product filtering: Menu vs Merch ───────────────────────── */
+  // Once merch_products has a `category` column, swap this for:
+  //   product.category === 'drink' || product.category === 'food'  →  menu
+  //   product.category === 'apparel' || product.category === 'retail' || product.category === 'beans'  →  merch
+  const MENU_PATTERN = /latte|espresso|americano|cappuccino|drip|mocha|macchiato|cortado|coffee|cold brew|iced|lemonade|smoothie|frappe|croissant|muffin|scone|bagel|sandwich|toast|cookie|cake|pastry|wrap/i;
+
+  function classifyProduct(p: Product): ShopTab {
+    if (p.category) {
+      return ['drink', 'food', 'beverage'].includes(p.category.toLowerCase()) ? 'menu' : 'merch';
+    }
+    return MENU_PATTERN.test(p.name) ? 'menu' : 'merch';
+  }
+
+  const filteredProducts = products.filter(p => classifyProduct(p) === activeTab);
+  const menuCount = products.filter(p => classifyProduct(p) === 'menu').length;
+  const merchCount = products.filter(p => classifyProduct(p) === 'merch').length;
 
   function addToCart(product: Product) {
     setCart(prev => {
@@ -163,10 +186,43 @@ export default function ShopPage() {
         )}
       </button>
 
+      {/* ═══ Segmented Control ═══ */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 mb-8">
+        <div className="inline-flex w-full sm:w-auto bg-stone-200/70 rounded-xl p-1 gap-1">
+          {([
+            { key: 'menu' as ShopTab, label: 'Cafe Menu', icon: <Coffee size={16} />, count: menuCount },
+            { key: 'merch' as ShopTab, label: 'Merch & Beans', icon: <ShoppingBag size={16} />, count: merchCount },
+          ]).map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold transition-all duration-200 ${
+                activeTab === tab.key
+                  ? 'bg-[var(--hub-brown)] text-white shadow-md'
+                  : 'text-stone-500 hover:text-[var(--hub-espresso)] hover:bg-white/60'
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+              {tab.count > 0 && (
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
+                  activeTab === tab.key ? 'bg-white/20 text-white' : 'bg-stone-300/60 text-stone-500'
+                }`}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Products Grid */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {products.map((product) => (
+        <div
+          key={activeTab}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-fade-in-up"
+        >
+          {filteredProducts.map((product) => (
             <div
               key={product.name}
               className="bg-white rounded-2xl border border-stone-200 shadow-sm hover:shadow-lg transition-shadow overflow-hidden flex flex-col"
@@ -212,10 +268,14 @@ export default function ShopPage() {
           ))}
         </div>
 
-        {products.length === 0 && (
-          <div className="text-center py-20">
-            <div className="text-6xl mb-4">📦</div>
-            <p className="text-stone-500">No products available right now. Check back soon!</p>
+        {filteredProducts.length === 0 && (
+          <div className="text-center py-20 animate-fade-in-up">
+            <div className="text-6xl mb-4">{activeTab === 'menu' ? '☕' : '📦'}</div>
+            <p className="text-stone-500">
+              {activeTab === 'menu'
+                ? 'No cafe items available right now. Check out our merch!'
+                : 'No merch available right now. Grab a coffee instead!'}
+            </p>
           </div>
         )}
       </div>

@@ -8,7 +8,7 @@ export default function InventoryTable() {
 
   async function fetchInventory() {
     setLoading(true);
-    const { data, error } = await supabase.from("inventory").select("id, name, category, current, threshold, unit");
+    const { data, error } = await supabase.from("inventory").select("id, item_name, category, current_stock, min_threshold, unit");
     if (!error && data) setInventory(data);
     setLoading(false);
   }
@@ -38,11 +38,11 @@ export default function InventoryTable() {
           inventory.map((item) => (
             <div key={item.id} className="grid grid-cols-4 gap-2 px-6 py-3 border-t border-[#222] items-center">
               <div>
-                <div className="font-semibold">{item.name}</div>
+                <div className="font-semibold">{item.item_name}</div>
                 <div className="text-xs text-gray-500">{item.category}</div>
               </div>
-              <div>{item.current} {item.unit}</div>
-              <div>{item.threshold} {item.unit}</div>
+              <div>{item.current_stock} {item.unit}</div>
+              <div>{item.min_threshold} {item.unit}</div>
               <div className="flex gap-2">
                 {/* TODO: Add adjust stock buttons */}
                 <button className="bg-[#333] text-white rounded px-2 py-1" disabled>-</button>

@@ -11,6 +11,7 @@ netlify-debug.log
 # Next.js
 .next/
 out/
+tsconfig.tsbuildinfo
 
 # Temp files
 supabase/.temp/
@@ -63,3 +64,4 @@ Thumbs.db
 
 BRAIN_PART_01.md
 SITE-SNAPSHOT.md
+supabase_snippet.csv
