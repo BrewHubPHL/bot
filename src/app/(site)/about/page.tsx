@@ -22,6 +22,18 @@ export default function AboutPage() {
             At BrewHub, we know modern life is busy. That's why we're also a Parcel Hub—a secure, reliable space for your deliveries. Come for your package, stay for the community, and leave with the best cold brew in South Philly.
           </p>
         </div>
+        <div className="mt-8 p-5 rounded-xl border border-[var(--hub-tan)] bg-[#faf7f4] text-center">
+          <h2 className="text-lg font-bold text-[var(--hub-espresso)] mb-1">Join the Team</h2>
+          <p className="text-[var(--hub-brown)] text-sm mb-4">
+            We're hiring baristas, parcel associates, and more. Come be part of the Point Breeze community from day one.
+          </p>
+          <a
+            href="/careers"
+            className="inline-block px-6 py-2.5 rounded-lg bg-[var(--hub-espresso)] text-white font-semibold text-sm hover:opacity-90 transition"
+          >
+            View Employment Opportunities →
+          </a>
+        </div>
         <a href="/" className="about-back-link">← Back to Home</a>
       </div>
     </div>

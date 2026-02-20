@@ -103,7 +103,7 @@
             try {
                 var { data, error } = await sbClient
                     .from('orders')
-                    .select('*, coffee_orders (*)')
+                    .select('*, coffee_orders!order_id (*)')
                     .in('status', ['pending', 'unpaid', 'paid', 'preparing', 'ready'])
                     .order('created_at', { ascending: true })
                     .abortSignal(fetchAbortController.signal);

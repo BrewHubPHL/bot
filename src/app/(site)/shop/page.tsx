@@ -77,8 +77,8 @@ export default function ShopPage() {
   const MENU_PATTERN = /latte|espresso|americano|cappuccino|drip|mocha|macchiato|cortado|coffee|cold brew|iced|lemonade|smoothie|frappe|croissant|muffin|scone|bagel|sandwich|toast|cookie|cake|pastry|wrap/i;
 
   function classifyProduct(p: Product): ShopTab {
-    if (p.category) {
-      return ['drink', 'food', 'beverage'].includes(p.category.toLowerCase()) ? 'menu' : 'merch';
+    if (p.category === 'menu' || p.category === 'merch') {
+      return p.category;
     }
     return MENU_PATTERN.test(p.name) ? 'menu' : 'merch';
   }

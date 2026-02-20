@@ -15,7 +15,7 @@ export default function KDS() {
     try {
       const { data } = await supabase
         .from('orders')
-        .select('*, coffee_orders (*)')
+        .select('*, coffee_orders!order_id (*)')
         .in('status', ['pending', 'unpaid', 'paid', 'preparing', 'ready'])
         .order('created_at', { ascending: true });
       setOrders(data || []);
