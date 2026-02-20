@@ -67,63 +67,101 @@ function sanitizeFileName(name: string): string {
 /** Responsive product card shown in the grid */
 function ProductCard({
   product,
-  onClick,
+  onEdit,
+  onToggleActive,
+  onDelete,
 }: {
   product: MerchProduct;
-  onClick: () => void;
+  onEdit: () => void;
+  onToggleActive: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden text-left
-                 hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/10
-                 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+    <div
+      className={`bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden
+                 transition-all duration-200 ${
+                   product.is_active ? "" : "opacity-50"
+                 }`}
     >
-      {/* Image / emoji fallback */}
-      <div className="relative w-full aspect-square bg-[#222] flex items-center justify-center overflow-hidden">
-        {product.image_url ? (
-          <img
-            src={product.image_url}
-            alt={product.name}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <span className="text-5xl select-none" aria-hidden>
-            ☕
-          </span>
-        )}
-        {/* Status badge */}
-        <span
-          className={`absolute top-2 right-2 text-xs font-semibold px-2 py-0.5 rounded-full ${
-            product.is_active
-              ? "bg-green-500/20 text-green-400"
-              : "bg-red-500/20 text-red-400"
-          }`}
-        >
-          {product.is_active ? "Active" : "Inactive"}
-        </span>
-      </div>
-
-      <div className="p-4">
-        <div className="flex items-center gap-2">
-          <h3 className="font-semibold text-[#f5f5f5] truncate">{product.name}</h3>
+      {/* Image / emoji fallback — click opens edit */}
+      <button
+        type="button"
+        onClick={onEdit}
+        className="w-full text-left focus:outline-none focus:ring-2 focus:ring-blue-500
+                   hover:brightness-110 transition-all"
+      >
+        <div className="relative w-full aspect-square bg-[#222] flex items-center justify-center overflow-hidden">
+          {product.image_url ? (
+            <img
+              src={product.image_url}
+              alt={product.name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <span className="text-5xl select-none" aria-hidden>
+              ☕
+            </span>
+          )}
+          {/* Status badge */}
           <span
-            className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-              product.category === "merch"
-                ? "bg-purple-500/20 text-purple-300"
-                : "bg-amber-500/20 text-amber-300"
+            className={`absolute top-2 right-2 text-xs font-semibold px-2 py-0.5 rounded-full ${
+              product.is_active
+                ? "bg-green-500/20 text-green-400"
+                : "bg-red-500/20 text-red-400"
             }`}
           >
-            {product.category === "merch" ? "Merch" : "Menu"}
+            {product.is_active ? "Active" : "Hidden"}
           </span>
         </div>
-        <p className="text-green-400 text-sm mt-1">
-          ${centsToDollars(product.price_cents)}
-        </p>
+
+        <div className="p-4 pb-2">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-[#f5f5f5] truncate">{product.name}</h3>
+            <span
+              className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                product.category === "merch"
+                  ? "bg-purple-500/20 text-purple-300"
+                  : "bg-amber-500/20 text-amber-300"
+              }`}
+            >
+              {product.category === "merch" ? "Merch" : "Menu"}
+            </span>
+          </div>
+          <p className="text-green-400 text-sm mt-1">
+            ${centsToDollars(product.price_cents)}
+          </p>
+        </div>
+      </button>
+
+      {/* Action buttons */}
+      <div className="flex border-t border-[#333]">
+        <button
+          type="button"
+          onClick={onEdit}
+          className="flex-1 py-2 text-xs font-medium text-gray-400 hover:text-white
+                     hover:bg-[#222] transition-colors"
+        >
+          ✏️ Edit
+        </button>
+        <button
+          type="button"
+          onClick={onToggleActive}
+          className="flex-1 py-2 text-xs font-medium text-gray-400 hover:text-white
+                     hover:bg-[#222] transition-colors border-x border-[#333]"
+        >
+          {product.is_active ? "👁 Hide" : "👁 Show"}
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="flex-1 py-2 text-xs font-medium text-red-400 hover:text-red-300
+                     hover:bg-red-500/10 transition-colors"
+        >
+          🗑 Delete
+        </button>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -275,6 +313,38 @@ export default function CatalogManager() {
     fetchProducts();
   }, [fetchProducts]);
 
+  /* --- Delete product -------------------------------------------- */
+  const handleDelete = async (productId: string) => {
+    if (!confirm("Delete this product? This cannot be undone.")) return;
+    const { error } = await supabase
+      .from("merch_products")
+      .delete()
+      .eq("id", productId);
+    if (error) {
+      alert("Failed to delete: " + error.message);
+      return;
+    }
+    setProducts((prev) => prev.filter((p) => p.id !== productId));
+  };
+
+  /* --- Toggle active/hidden -------------------------------------- */
+  const handleToggleActive = async (productId: string, currentlyActive: boolean) => {
+    const newStatus = !currentlyActive;
+    const { error } = await supabase
+      .from("merch_products")
+      .update({ is_active: newStatus })
+      .eq("id", productId);
+    if (error) {
+      alert("Failed to update: " + error.message);
+      return;
+    }
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId ? { ...p, is_active: newStatus } : p
+      )
+    );
+  };
+
   /* --- Drawer open / close --------------------------------------- */
   const openNew = () => {
     setForm(EMPTY_FORM);
@@ -398,7 +468,13 @@ export default function CatalogManager() {
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {products.map((p) => (
-            <ProductCard key={p.id} product={p} onClick={() => openEdit(p)} />
+            <ProductCard
+              key={p.id}
+              product={p}
+              onEdit={() => openEdit(p)}
+              onToggleActive={() => handleToggleActive(p.id, p.is_active)}
+              onDelete={() => handleDelete(p.id)}
+            />
           ))}
         </div>
       )}

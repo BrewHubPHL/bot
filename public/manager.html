@@ -781,7 +781,7 @@
       grid.innerHTML = catalogItems.map(function(p) {
         var price = (parseInt(p.price_cents) || 0) / 100;
         var cat = (p.category || 'menu').toUpperCase();
-        var active = p.active !== false;
+        var active = p.is_active !== false;
         var imgHtml = p.image_url
           ? '<img class="cat-img-thumb" src="' + escapeHtml(p.image_url) + '" alt="' + escapeHtml(p.name) + '" onerror="this.outerHTML=\'<div class=cat-img-placeholder>☕</div>\'" />'
           : '<div class="cat-img-placeholder">☕</div>';
@@ -892,7 +892,7 @@
           description: fd.get('description') || null,
           category: fd.get('category') || 'menu',
           image_url: fd.get('image_url') || null,
-          active: fd.get('active') === 'true'
+          is_active: fd.get('active') === 'true'
         });
         if (error) throw error;
         e.target.reset();
@@ -912,7 +912,7 @@
       if (toggleBtn) {
         var id = toggleBtn.getAttribute('data-catalog-toggle');
         var isActive = toggleBtn.getAttribute('data-active') === 'true';
-        await client.from('merch_products').update({ active: !isActive }).eq('id', id);
+        await client.from('merch_products').update({ is_active: !isActive }).eq('id', id);
         loadCatalog();
       }
       if (deleteBtn) {
