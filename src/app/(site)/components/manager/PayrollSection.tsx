@@ -255,6 +255,7 @@ export default function PayrollSection() {
         rate,
         regularHours,
         overtimeHours,
+        doubleTimeHours,
         grossPay,
         currentStatus,
         missedPunch,
