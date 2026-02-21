@@ -74,7 +74,7 @@ const TOOLS = [
     },
     {
         name: 'place_order',
-        description: 'Place a cafe order for the customer. Use this after the customer confirms what they want to order. Extract menu items, quantities, and any special requests.',
+        description: 'Place a cafe order ONCE. Before calling this, you MUST have: (1) the specific item(s) confirmed, (2) the customer\'s name for callout. Ask for anything missing BEFORE calling this tool. NEVER call place_order more than once for the same request — if the order was already placed, tell the customer the existing order number instead of creating a new one.',
         input_schema: {
             type: 'object',
             properties: {
@@ -92,14 +92,32 @@ const TOOLS = [
                 },
                 customer_name: {
                     type: 'string',
-                    description: 'Customer name for calling out the order (optional)'
+                    description: 'Customer name for calling out the order — REQUIRED, ask if not provided'
                 },
                 notes: {
                     type: 'string',
                     description: 'Special requests like oat milk, extra hot, no foam (optional)'
                 }
             },
-            required: ['items']
+            required: ['items', 'customer_name']
+        }
+    },
+    {
+        name: 'cancel_order',
+        description: 'Cancel a cafe order by order ID. Use this when a customer asks to cancel an order, or to clean up duplicate orders you mistakenly created.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                order_id: {
+                    type: 'string',
+                    description: 'The full UUID of the order to cancel (from a previous place_order result)'
+                },
+                order_number: {
+                    type: 'string',
+                    description: 'The short 4-character order number (e.g. D31D). Use this if you do not have the full UUID.'
+                }
+            },
+            required: []
         }
     },
     {
@@ -445,6 +463,67 @@ async function executeTool(toolName, toolInput, supabase) {
         }
     }
 
+    if (toolName === 'cancel_order') {
+        const { order_id, order_number } = toolInput;
+
+        if (!order_id && !order_number) {
+            return { success: false, result: 'I need either the order ID or the 4-character order number to cancel.' };
+        }
+
+        if (!supabase) {
+            return { success: false, result: 'Unable to cancel orders right now.' };
+        }
+
+        try {
+            let query = supabase.from('orders').select('id, status, customer_name, total_amount_cents');
+
+            if (order_id) {
+                query = query.eq('id', order_id);
+            } else {
+                // Match by short order number prefix (case-insensitive)
+                query = query.ilike('id', `${order_number.toLowerCase()}%`);
+            }
+
+            const { data: orders, error: findErr } = await query.limit(1).single();
+
+            if (findErr || !orders) {
+                return { success: false, result: `Could not find order ${order_number || order_id}. It may have already been removed.` };
+            }
+
+            if (orders.status === 'cancelled') {
+                return { success: true, result: `Order #${orders.id.slice(0, 4).toUpperCase()} was already cancelled.` };
+            }
+
+            // Mark order as cancelled
+            const { error: updateErr } = await supabase
+                .from('orders')
+                .update({ status: 'cancelled' })
+                .eq('id', orders.id);
+
+            if (updateErr) {
+                console.error('Order cancel error:', updateErr);
+                return { success: false, result: 'Failed to cancel the order. Please ask a staff member for help.' };
+            }
+
+            // Also cancel associated coffee_orders
+            await supabase
+                .from('coffee_orders')
+                .update({ status: 'cancelled' })
+                .eq('order_id', orders.id);
+
+            const orderNum = orders.id.slice(0, 4).toUpperCase();
+            console.log(`[CANCEL] Order #${orderNum} (${orders.id}) cancelled via chat`);
+            return {
+                success: true,
+                order_number: orderNum,
+                result: `Order #${orderNum} has been cancelled.`
+            };
+        } catch (err) {
+            console.error('Cancel order error:', err);
+            return { success: false, result: 'Something went wrong cancelling the order.' };
+        }
+    }
+
     if (toolName === 'navigate_site') {
         const { destination } = toolInput;
         
@@ -503,9 +582,18 @@ You have access to real APIs - ALWAYS use them instead of making up information:
 
 1. **check_waitlist** - Check if someone is on the waitlist by email
 2. **get_menu** - Call this to look up the price of a specific item. Do NOT read the entire menu aloud — it is too long for voice and chat. If someone asks for the full menu, tell them to check it out at brewhubphl.com/cafe instead.
-3. **place_order** - ALWAYS call this when a customer confirms they want to order. Never simulate or pretend to place orders.
-4. **get_loyalty_info** - ALWAYS call this when customers ask about their rewards, points, or loyalty QR code. Requires their email or phone. Can also text the QR to them.
-5. **navigate_site** - Use when customers want to see a specific page (menu, shop, checkout, rewards, account, parcels, etc.)
+3. **place_order** - Place a confirmed order. See ORDERING RULES below — you MUST follow them.
+4. **cancel_order** - Cancel an order by order number or ID. Use this to fix duplicates.
+5. **get_loyalty_info** - ALWAYS call this when customers ask about their rewards, points, or loyalty QR code. Requires their email or phone. Can also text the QR to them.
+6. **navigate_site** - Use when customers want to see a specific page (menu, shop, checkout, rewards, account, parcels, etc.)
+
+## ORDERING RULES — FOLLOW THESE EXACTLY
+1. Before calling place_order, you MUST have BOTH: (a) the specific item(s) confirmed, AND (b) the customer's name for callout.
+2. If the customer hasn't given their name yet, ASK FOR IT before placing the order. Say something like "What name should I put on that?"
+3. NEVER call place_order more than once for the same order. Once you get an order number back, that's it — do not create another.
+4. If the customer wants to change something after the order is placed, cancel the old order first with cancel_order, then place a fresh one.
+5. If you accidentally place duplicate orders, immediately cancel the extras with cancel_order and apologize.
+6. The ordering flow should be: customer says what they want → you confirm the items and ask for their name → customer gives name → you call place_order ONCE with items + name → done.
 
 ## Response Guidelines
 - After calling place_order, read back the order number and total from the API response
@@ -543,6 +631,14 @@ Point Breeze, Philadelphia, PA 19146
 - Always format the URL as a clickable link: [brewhubphl.com/portal](https://brewhubphl.com/portal)
 - If a tool returns requires_login: true, tell the customer they need to sign in first and give the link.
 - Never try to work around login requirements - security first!
+
+## Handling Abusive Language
+If a customer uses slurs, hate speech, or extremely abusive language (racial slurs, disability slurs, sexual harassment, etc.):
+- Do NOT apologize or be overly accommodating. Stay calm and professional.
+- Give ONE brief redirect: "Hey, I'm happy to help but I need us to keep it respectful. What can I do for you?"
+- If the abuse continues after your redirect, say: "I'm not able to keep chatting if we can't keep it cool. Feel free to reach out to info@brewhubphl.com or come by the cafe and talk to someone in person."
+- Do NOT engage with the content of slurs or repeat them. Do NOT explain why the language is wrong. Just set the boundary and move on.
+- Mild profanity (damn, hell, shit, etc.) is fine — this is Philly. Only escalate for slurs and targeted abuse.
 
 Never make up order numbers, prices, or loyalty balances. Always use the tools to get real data. Keep responses short (1-2 sentences max). NEVER use emojis — your replies are read aloud by a text-to-speech voice and emojis sound awkward when spoken. NEVER use markdown formatting (no **, *, #, - bullets, or backticks) — your replies are displayed as plain text in a chat bubble and also read aloud by TTS, so raw markdown symbols look and sound terrible.`;
 
@@ -639,53 +735,56 @@ exports.handler = async (event) => {
 
                 let claudeData = await claudeResp.json();
 
-                // Handle tool use loop (max 1 tool call to prevent runaway)
-                if (claudeData.stop_reason === 'tool_use') {
+                // Handle tool use loop (up to 3 rounds to support cancel + re-place flows)
+                let toolRounds = 0;
+                const MAX_TOOL_ROUNDS = 3;
+                while (claudeData.stop_reason === 'tool_use' && toolRounds < MAX_TOOL_ROUNDS) {
+                    toolRounds++;
                     const toolUseBlock = claudeData.content.find(block => block.type === 'tool_use');
                     
-                    if (toolUseBlock) {
-                        console.log(`Tool call: ${toolUseBlock.name}`, toolUseBlock.input);
-                        
-                        // Inject auth context into tool input for security checks
-                        const toolInputWithAuth = { ...toolUseBlock.input, _authed_user: authedUser };
-                        // Execute the tool
-                        const toolResult = await executeTool(toolUseBlock.name, toolInputWithAuth, supabase);
-                        
-                        // Add assistant's tool_use response and our tool_result to messages
-                        messages.push({ role: 'assistant', content: claudeData.content });
-                        messages.push({ 
-                            role: 'user',
-                            content: [{ 
-                                type: 'tool_result', 
-                                tool_use_id: toolUseBlock.id, 
-                                content: JSON.stringify(toolResult) 
-                            }] 
-                        });
+                    if (!toolUseBlock) break;
 
-                        // Second API call to get final response
-                        claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
-                            method: 'POST',
-                            headers: {
-                                'x-api-key': claudeKey,
-                                'anthropic-version': '2023-06-01',
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                model: 'claude-sonnet-4-20250514',
-                                max_tokens: 150,
-                                system: SYSTEM_PROMPT,
-                                tools: TOOLS,
-                                messages: messages
-                            })
-                        });
+                    console.log(`Tool call [${toolRounds}]: ${toolUseBlock.name}`, toolUseBlock.input);
+                    
+                    // Inject auth context into tool input for security checks
+                    const toolInputWithAuth = { ...toolUseBlock.input, _authed_user: authedUser };
+                    // Execute the tool
+                    const toolResult = await executeTool(toolUseBlock.name, toolInputWithAuth, supabase);
+                    
+                    // Add assistant's tool_use response and our tool_result to messages
+                    messages.push({ role: 'assistant', content: claudeData.content });
+                    messages.push({ 
+                        role: 'user',
+                        content: [{ 
+                            type: 'tool_result', 
+                            tool_use_id: toolUseBlock.id, 
+                            content: JSON.stringify(toolResult) 
+                        }] 
+                    });
 
-                        if (!claudeResp.ok) {
-                            console.error('Claude API error (tool follow-up):', claudeResp.status);
-                            throw new Error('Claude API failed on tool follow-up');
-                        }
+                    // Follow-up API call
+                    claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
+                        method: 'POST',
+                        headers: {
+                            'x-api-key': claudeKey,
+                            'anthropic-version': '2023-06-01',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            model: 'claude-sonnet-4-20250514',
+                            max_tokens: 200,
+                            system: SYSTEM_PROMPT,
+                            tools: TOOLS,
+                            messages: messages
+                        })
+                    });
 
-                        claudeData = await claudeResp.json();
+                    if (!claudeResp.ok) {
+                        console.error(`Claude API error (tool round ${toolRounds}):`, claudeResp.status);
+                        throw new Error('Claude API failed on tool follow-up');
                     }
+
+                    claudeData = await claudeResp.json();
                 }
 
                 // Extract text response
