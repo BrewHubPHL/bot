@@ -211,6 +211,13 @@ export default function PayrollSection() {
   const [payroll, setPayroll] = useState<PayrollRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // ---- Fix clock-out state --------------------------------------
+  const [fixingEmail, setFixingEmail] = useState<string | null>(null);
+  const [fixTime, setFixTime] = useState("");
+  const [fixBusy, setFixBusy] = useState(false);
+  const [fixError, setFixError] = useState("");
+  const [fixSuccess, setFixSuccess] = useState("");
+
   // ---- Fetch + compute ------------------------------------------
   const fetchPayroll = useCallback(async () => {
     if (!token) { setLoading(false); return; }
@@ -274,6 +281,44 @@ export default function PayrollSection() {
   const totalDoubleTime = payroll.reduce((s, r) => s + r.doubleTimeHours, 0);
   const totalGross = payroll.reduce((s, r) => s + r.grossPay, 0);
   const hasMissed = payroll.some((r) => r.missedPunch);
+
+  // ---- Fix clock-out handler ------------------------------------
+  const handleFixClockOut = async (email: string) => {
+    if (!token || !fixTime) return;
+    setFixBusy(true);
+    setFixError("");
+    setFixSuccess("");
+
+    try {
+      const res = await fetch(`${API_BASE}/fix-clock`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({
+          employee_email: email,
+          clock_out_time: new Date(fixTime).toISOString(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fix failed");
+
+      setFixSuccess(`Clock-out fixed for ${email}`);
+      setFixingEmail(null);
+      setFixTime("");
+      setTimeout(() => setFixSuccess(""), 4000);
+
+      // Refresh payroll data
+      fetchPayroll();
+    } catch (err: unknown) {
+      setFixError(err instanceof Error ? err.message : "Failed to fix clock-out");
+    } finally {
+      setFixBusy(false);
+    }
+  };
 
   // ---- Render ---------------------------------------------------
   return (
@@ -353,7 +398,19 @@ export default function PayrollSection() {
       {hasMissed && !loading && (
         <div className="mb-3 flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2 text-red-400 text-sm">
           <span className="font-bold">⚠</span>
-          One or more staff members have a missing clock-out. Hours are excluded from pay until resolved.
+          One or more staff members have a missing clock-out. Use the Fix button below to set the correct clock-out time.
+        </div>
+      )}
+
+      {/* ── Fix success / error banners ── */}
+      {fixSuccess && (
+        <div className="mb-3 flex items-center gap-2 bg-green-500/10 border border-green-500/30 rounded-lg px-4 py-2 text-green-400 text-sm">
+          ✓ {fixSuccess}
+        </div>
+      )}
+      {fixError && (
+        <div className="mb-3 flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2 text-red-400 text-sm">
+          ✕ {fixError}
         </div>
       )}
 
@@ -383,10 +440,53 @@ export default function PayrollSection() {
                 <div className="font-semibold truncate">{row.name}</div>
                 <div className="text-xs text-gray-500 truncate">{row.email}</div>
                 {row.missedPunch && (
-                  <span className="inline-block mt-1 text-[10px] font-bold uppercase tracking-wide
-                                   bg-red-500/20 text-red-400 border border-red-500/30 rounded px-2 py-0.5">
-                    Missing Clock-Out
-                  </span>
+                  <div className="mt-1">
+                    <span className="inline-block text-[10px] font-bold uppercase tracking-wide
+                                     bg-red-500/20 text-red-400 border border-red-500/30 rounded px-2 py-0.5">
+                      Missing Clock-Out
+                    </span>
+
+                    {fixingEmail === row.email ? (
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        <label className="text-[10px] text-gray-400">When did they clock out?</label>
+                        <input
+                          type="datetime-local"
+                          value={fixTime}
+                          onChange={(e) => setFixTime(e.target.value)}
+                          className="bg-[#111] border border-[#444] rounded px-2 py-1 text-xs text-white
+                                     focus:outline-none focus:ring-1 focus:ring-amber-500 w-full max-w-[220px]"
+                        />
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            disabled={!fixTime || fixBusy}
+                            onClick={() => handleFixClockOut(row.email)}
+                            className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40
+                                       text-white text-[10px] font-bold px-3 py-1 rounded transition-colors"
+                          >
+                            {fixBusy ? "Saving…" : "Save Clock-Out"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setFixingEmail(null); setFixTime(""); setFixError(""); }}
+                            className="text-gray-500 hover:text-white text-[10px] px-2 py-1 rounded
+                                       border border-[#333] transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { setFixingEmail(row.email); setFixError(""); }}
+                        className="mt-1 block text-[10px] font-semibold text-amber-400 hover:text-amber-300
+                                   underline underline-offset-2 transition-colors"
+                      >
+                        Fix Clock-Out →
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 

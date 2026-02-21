@@ -60,10 +60,15 @@ const TOOLS = [
     },
     {
         name: 'get_menu',
-        description: 'Get the current cafe menu with items and prices. Use this when someone asks what we serve, what is available, menu items, or asks about prices.',
+        description: 'Look up cafe menu items and prices. Use this when someone asks about a specific item price or what we serve. For individual price checks, return only the requested item. If someone asks for the FULL menu, do NOT read it — just direct them to brewhubphl.com/cafe.',
         input_schema: {
             type: 'object',
-            properties: {},
+            properties: {
+                item_name: {
+                    type: 'string',
+                    description: 'Optional: specific item to look up. If omitted, returns full menu (but you should NOT read the full list aloud — link to /cafe instead).'
+                }
+            },
             required: []
         }
     },
@@ -444,9 +449,9 @@ async function executeTool(toolName, toolInput, supabase) {
         const { destination } = toolInput;
         
         const SITE_PAGES = {
-            'menu': { url: 'https://brewhubphl.com/menu', description: 'Our menu page (coming soon — read the menu aloud instead)' },
-            'cafe': { url: 'https://brewhubphl.com/menu', description: 'Our menu page (coming soon)' },
-            'order': { url: 'https://brewhubphl.com/menu', description: 'Our menu page (coming soon — use place_order tool to order)' },
+            'menu': { url: 'https://brewhubphl.com/cafe', description: 'Our full cafe menu with prices' },
+            'cafe': { url: 'https://brewhubphl.com/cafe', description: 'Our full cafe menu with prices' },
+            'order': { url: 'https://brewhubphl.com/cafe', description: 'Our cafe menu — browse and order from here' },
             'shop': { url: 'https://brewhubphl.com/shop', description: 'Browse our merchandise and coffee beans' },
             'merch': { url: 'https://brewhubphl.com/shop', description: 'Browse our merchandise' },
             'checkout': { url: 'https://brewhubphl.com/checkout', description: 'Complete your purchase' },
@@ -497,7 +502,7 @@ const SYSTEM_PROMPT = `You are Elise, the friendly digital barista and concierge
 You have access to real APIs - ALWAYS use them instead of making up information:
 
 1. **check_waitlist** - Check if someone is on the waitlist by email
-2. **get_menu** - ALWAYS call this when customers ask about menu items, prices, or what's available. Do not guess prices. Read the menu items and prices aloud — do NOT send customers to a URL for the menu.
+2. **get_menu** - Call this to look up the price of a specific item. Do NOT read the entire menu aloud — it is too long for voice and chat. If someone asks for the full menu, tell them to check it out at brewhubphl.com/cafe instead.
 3. **place_order** - ALWAYS call this when a customer confirms they want to order. Never simulate or pretend to place orders.
 4. **get_loyalty_info** - ALWAYS call this when customers ask about their rewards, points, or loyalty QR code. Requires their email or phone. Can also text the QR to them.
 5. **navigate_site** - Use when customers want to see a specific page (menu, shop, checkout, rewards, account, parcels, etc.)
@@ -527,13 +532,15 @@ You have access to real APIs - ALWAYS use them instead of making up information:
 - Cozy lounge area with comfortable seating, free Wi-Fi, coffee and tea for mailbox renters and community
 
 ## Menu Items
-Do NOT rely on a memorized menu. ALWAYS call the get_menu tool to check the current live menu before answering any question about what items are available, prices, or what we serve. The database is the single source of truth and the menu changes regularly.
+Do NOT rely on a memorized menu. ALWAYS call the get_menu tool to look up prices for specific items — the database is the single source of truth.
+NEVER read the entire menu aloud or list every item. If someone asks "what's on the menu" or "what do you have", just say something like "We've got coffee, espresso drinks, cold brew, pastries, and more — check out the full menu at brewhubphl.com/cafe!" and only look up specific item prices when asked.
 
 ## Location  
 Point Breeze, Philadelphia, PA 19146
 
 ## Login & Registration
-- When a customer needs to log in to place orders or check loyalty, direct them to **brewhubphl.com/portal** where they can sign in or create an account.
+- When a customer needs to log in to place orders or check loyalty, direct them to brewhubphl.com/portal where they can sign in or create an account.
+- Always format the URL as a clickable link: [brewhubphl.com/portal](https://brewhubphl.com/portal)
 - If a tool returns requires_login: true, tell the customer they need to sign in first and give the link.
 - Never try to work around login requirements - security first!
 

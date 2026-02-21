@@ -87,14 +87,17 @@ export default function BrewHubLanding() {
   const [initialRender, setInitialRender] = useState(true);
   const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
   const isSpeakingRef = useRef(false);
+  const isVoiceActiveRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatBoxRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<BrewSpeechRecognition | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const messagesRef = useRef(messages);
 
-  // Keep a mutable ref to messages so speech callbacks always see latest state
+  // Keep mutable refs so speech callbacks always see latest state (avoids stale closures)
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { isVoiceActiveRef.current = isVoiceActive; }, [isVoiceActive]);
 
   // Splash screen timer and scroll to top
   useEffect(() => {
@@ -145,10 +148,16 @@ export default function BrewHubLanding() {
   // ── Play Elise's reply through ElevenLabs TTS ──
   const speakReply = useCallback(async (text: string) => {
     try {
+      // Strip URLs so TTS doesn't read them aloud:
+      // [label](url) → "label (link in the chat)" | bare https://… → "link in the chat"
+      const ttsText = text
+        .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, '$1 (link in the chat)')
+        .replace(/https?:\/\/[^\s),]+/g, 'link in the chat');
+
       const res = await fetch('/.netlify/functions/text-to-speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-BrewHub-Action': 'true' },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ text: ttsText })
       });
 
       if (!res.ok) {
@@ -163,9 +172,44 @@ export default function BrewHubLanding() {
         try { recognitionRef.current.stop(); } catch { /* not started */ }
       }
 
-      // Response is base64-encoded audio/mpeg
       const audioBlob = await res.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
+      const arrayBuffer = await audioBlob.arrayBuffer();
+
+      // ── iOS/Safari fix: use Web Audio API instead of new Audio() ──
+      // Safari blocks Audio.play() unless triggered in the *same* sync call
+      // stack as a user gesture. Web Audio API via a pre-unlocked AudioContext
+      // works reliably because we unlock it on the mic-permission tap.
+      const ctx = audioContextRef.current;
+      if (ctx) {
+        // Safari may suspend the context; resume it
+        if (ctx.state === 'suspended') await ctx.resume();
+
+        try {
+          const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
+          const source = ctx.createBufferSource();
+          source.buffer = decoded;
+          source.connect(ctx.destination);
+
+          source.onended = () => {
+            audioRef.current = null;
+            isSpeakingRef.current = false;
+            if (recognitionRef.current && isVoiceActiveRef.current) {
+              setVoiceStatus("Listening...");
+              try { recognitionRef.current.start(); } catch { /* already started */ }
+            }
+          };
+
+          audioRef.current = source as unknown as HTMLAudioElement;
+          setVoiceStatus("Elise is speaking...");
+          source.start(0);
+          return; // success via Web Audio
+        } catch (decodeErr) {
+          console.warn('Web Audio decode failed, falling back to Audio element:', decodeErr);
+        }
+      }
+
+      // ── Fallback: standard Audio element (works on desktop browsers) ──
+      const audioUrl = URL.createObjectURL(new Blob([arrayBuffer], { type: 'audio/mpeg' }));
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
 
@@ -173,8 +217,7 @@ export default function BrewHubLanding() {
         URL.revokeObjectURL(audioUrl);
         audioRef.current = null;
         isSpeakingRef.current = false;
-        // Resume listening after playback
-        if (recognitionRef.current && isVoiceActive) {
+        if (recognitionRef.current && isVoiceActiveRef.current) {
           setVoiceStatus("Listening...");
           try { recognitionRef.current.start(); } catch { /* already started */ }
         }
@@ -185,8 +228,13 @@ export default function BrewHubLanding() {
     } catch (err) {
       isSpeakingRef.current = false;
       console.error('TTS playback error:', err);
+      // Resume listening so the user isn't stuck
+      if (recognitionRef.current && isVoiceActiveRef.current) {
+        setVoiceStatus("Listening...");
+        try { recognitionRef.current.start(); } catch { /* already started */ }
+      }
     }
-  }, [isVoiceActive]);
+  }, []);
 
   // ── Handle a single voice turn: transcript → Claude → TTS ──
   const handleVoiceTurn = useCallback(async (transcript: string) => {
@@ -229,6 +277,16 @@ export default function BrewHubLanding() {
       // Request microphone access first
       await navigator.mediaDevices.getUserMedia({ audio: true });
 
+      // Unlock AudioContext on this user-gesture call stack (required by iOS Safari).
+      // Creating + resuming it here means subsequent play() calls will work.
+      if (!audioContextRef.current) {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtx) audioContextRef.current = new AudioCtx();
+      }
+      if (audioContextRef.current?.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
       const recognition = new SpeechRecognitionCtor();
       recognition.lang = 'en-US';
       recognition.interimResults = false;
@@ -255,7 +313,8 @@ export default function BrewHubLanding() {
 
       recognition.onend = () => {
         // Auto-restart if voice is still active, not mid-processing, and not during TTS playback
-        if (recognitionRef.current && !isVoiceProcessing && !isSpeakingRef.current) {
+        // Use refs to avoid stale closures from the initial startVoiceSession call
+        if (recognitionRef.current && isVoiceActiveRef.current && !isSpeakingRef.current) {
           try { recognitionRef.current.start(); } catch { /* ok */ }
         }
       };
@@ -280,9 +339,16 @@ export default function BrewHubLanding() {
       recognitionRef.current = null;
     }
     if (audioRef.current) {
-      audioRef.current.pause();
+      // Handle both HTMLAudioElement (.pause) and AudioBufferSourceNode (.stop)
+      try { (audioRef.current as any).stop?.(); } catch { /* ok */ }
+      try { (audioRef.current as any).pause?.(); } catch { /* ok */ }
       audioRef.current = null;
     }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    isSpeakingRef.current = false;
     setIsVoiceActive(false);
     setIsVoiceProcessing(false);
     setVoiceStatus("");

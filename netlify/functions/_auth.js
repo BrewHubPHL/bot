@@ -50,7 +50,17 @@ async function authorize(event, options = {}) {
   }
 
   const authHeader = event.headers?.authorization || event.headers?.Authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  let token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  // Fall back to HttpOnly hub_staff_session cookie (set by pin-login.js)
+  // when no Authorization header is present — e.g. customer-facing pages
+  // where client JS cannot read the HttpOnly cookie to set the header.
+  if (!token) {
+    const cookieHeader = event.headers?.cookie || '';
+    const match = cookieHeader.match(/(?:^|;\s*)hub_staff_session=([^;]+)/);
+    if (match) token = decodeURIComponent(match[1]);
+  }
+
   if (!token) return { ok: false, response: json(401, { error: 'Unauthorized' }) };
 
   const parts = token.split('.');

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   LayoutDashboard,
   UtensilsCrossed,
@@ -13,6 +14,7 @@ import StatsGrid from "@/app/(site)/components/manager/StatsGrid";
 import RecentActivity from "@/app/(site)/components/manager/RecentActivity";
 import CatalogManager from "@/app/(site)/components/manager/CatalogManager";
 import PayrollSection from "@/app/(site)/components/manager/PayrollSection";
+import ReceiptRoll from "@/app/(site)/components/manager/ReceiptRoll";
 
 /* ─── New hiring viewer (co-located) ────────────────────── */
 import HiringViewer from "./HiringViewer";
@@ -56,6 +58,16 @@ export default function ManagerDashboard() {
           </span>
         </div>
 
+        {/* ── Quick nav links to other ops pages ── */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-3 py-1.5 text-[11px] text-stone-500">
+          <Link href="/pos" className="hover:text-amber-400 transition-colors">POS</Link>
+          <Link href="/kds" className="hover:text-amber-400 transition-colors">KDS</Link>
+          <Link href="/scanner" className="hover:text-amber-400 transition-colors">Scanner</Link>
+          <Link href="/staff-hub" className="hover:text-amber-400 transition-colors">Staff Hub</Link>
+          <span className="text-stone-700">|</span>
+          <Link href="/" className="hover:text-amber-400 transition-colors">Main Site</Link>
+        </div>
+
         {/* ── Tab bar (horizontal, scrollable on mobile) ── */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <nav className="flex gap-1 overflow-x-auto pb-px scrollbar-hide -mb-px">
@@ -85,6 +97,7 @@ export default function ManagerDashboard() {
         {activeTab === "overview" && (
           <div className="space-y-2">
             <StatsGrid />
+            <ReceiptRoll />
             <RecentActivity />
           </div>
         )}
