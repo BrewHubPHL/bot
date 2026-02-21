@@ -101,7 +101,7 @@ exports.handler = async (event) => {
       }
 
       // Whitelist allowed columns
-      const allowed = ['name', 'description', 'price_cents', 'image_url', 'is_active', 'category'];
+      const allowed = ['name', 'description', 'price_cents', 'image_url', 'is_active', 'category', 'archived_at'];
       const row = { updated_at: new Date().toISOString() };
       for (const key of allowed) {
         if (key in updates) row[key] = updates[key];
@@ -120,7 +120,7 @@ exports.handler = async (event) => {
       return json(200, { product: data });
     }
 
-    // ─── DELETE ──────────────────────────────────────────
+    // ─── DELETE → Soft-delete (archive) ────────────────────
     if (event.httpMethod === 'DELETE') {
       const { id } = body;
       if (!id || typeof id !== 'string') {
@@ -129,7 +129,7 @@ exports.handler = async (event) => {
 
       const { error } = await supabase
         .from('merch_products')
-        .delete()
+        .update({ archived_at: new Date().toISOString(), is_active: false })
         .eq('id', id);
 
       if (error) throw error;

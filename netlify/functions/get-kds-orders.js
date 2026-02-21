@@ -20,8 +20,8 @@ exports.handler = async (event) => {
   try {
     const { data, error } = await supabase
       .from('orders')
-      .select('id, customer_name, status, created_at, coffee_orders(drink_name)')
-      .in('status', ['paid', 'preparing', 'ready'])
+      .select('id, customer_name, status, created_at, coffee_orders(id, drink_name, customizations, price)')
+      .in('status', ['pending', 'paid', 'preparing', 'ready'])
       .order('created_at', { ascending: true });
 
     if (error) throw error;

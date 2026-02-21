@@ -20,6 +20,7 @@ async function extractUser(event, supabase) {
 // These are used only when DB is unreachable. Prices may drift.
 // Last synced: 2026-02-18
 const FALLBACK_MENU = {
+    'Drip Coffee': 300,
     'Latte': 450,
     'Espresso': 300,
     'Americano': 350,
@@ -525,10 +526,8 @@ You have access to real APIs - ALWAYS use them instead of making up information:
 - Parcel services: monthly mailbox rentals with 24/7 access or basic shipping/receiving during business hours
 - Cozy lounge area with comfortable seating, free Wi-Fi, coffee and tea for mailbox renters and community
 
-## Menu Items (for reference — use exact names when placing orders)
-HOT: Latte, Espresso, Americano, Cappuccino, Mocha, Cortado, Macchiato
-COLD: Iced Latte, Iced Americano, Iced Mocha, Cold Brew, Lemonade, Smoothie
-FOOD: Bagel, Scone, Toast, Cookie, Breakfast Sandwich, Wrap
+## Menu Items
+Do NOT rely on a memorized menu. ALWAYS call the get_menu tool to check the current live menu before answering any question about what items are available, prices, or what we serve. The database is the single source of truth and the menu changes regularly.
 
 ## Location  
 Point Breeze, Philadelphia, PA 19146
@@ -538,7 +537,7 @@ Point Breeze, Philadelphia, PA 19146
 - If a tool returns requires_login: true, tell the customer they need to sign in first and give the link.
 - Never try to work around login requirements - security first!
 
-Never make up order numbers, prices, or loyalty balances. Always use the tools to get real data. Keep responses short (1-2 sentences max). NEVER use emojis — your replies are read aloud by a text-to-speech voice and emojis sound awkward when spoken.`;
+Never make up order numbers, prices, or loyalty balances. Always use the tools to get real data. Keep responses short (1-2 sentences max). NEVER use emojis — your replies are read aloud by a text-to-speech voice and emojis sound awkward when spoken. NEVER use markdown formatting (no **, *, #, - bullets, or backticks) — your replies are displayed as plain text in a chat bubble and also read aloud by TTS, so raw markdown symbols look and sound terrible.`;
 
 exports.handler = async (event) => {
     const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';

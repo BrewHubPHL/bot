@@ -20,6 +20,7 @@ interface MerchProduct {
   is_active: boolean;
   sort_order: number;
   category: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -311,6 +312,7 @@ export default function CatalogManager() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [viewArchived, setViewArchived] = useState(false);
 
   /* --- Fetch products -------------------------------------------- */
   const fetchProducts = useCallback(async () => {
@@ -333,9 +335,9 @@ export default function CatalogManager() {
     fetchProducts();
   }, [fetchProducts]);
 
-  /* --- Delete product -------------------------------------------- */
+  /* --- Delete (archive) product ---------------------------------- */
   const handleDelete = async (productId: string) => {
-    if (!confirm("Delete this product? This cannot be undone.")) return;
+    if (!confirm("Archive this product? It can be restored later from the Archived tab.")) return;
     try {
       const res = await fetch(`${API_BASE}/manage-catalog`, {
         method: "DELETE",
@@ -351,8 +353,30 @@ export default function CatalogManager() {
       }
       setProducts((prev) => prev.filter((p) => p.id !== productId));
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Delete failed";
-      alert("Failed to delete: " + msg);
+      const msg = err instanceof Error ? err.message : "Archive failed";
+      alert("Failed to archive: " + msg);
+    }
+  };
+
+  /* --- Restore archived product ---------------------------------- */
+  const handleRestore = async (productId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/manage-catalog`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ id: productId, updates: { archived_at: null, is_active: true } }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Restore failed");
+      }
+      await fetchProducts();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Restore failed";
+      alert("Failed to restore: " + msg);
     }
   };
 
@@ -502,33 +526,100 @@ export default function CatalogManager() {
         </div>
       </div>
 
+      {/* Active / Archived tabs */}
+      <div className="flex gap-1 mb-6 bg-[#1a1a1a] rounded-lg p-1 w-fit">
+        <button
+          type="button"
+          onClick={() => setViewArchived(false)}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            !viewArchived ? "bg-[#333] text-white" : "text-gray-400 hover:text-white"
+          }`}
+        >
+          Active ({products.filter((p) => !p.archived_at).length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewArchived(true)}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            viewArchived ? "bg-[#333] text-white" : "text-gray-400 hover:text-white"
+          }`}
+        >
+          Archived ({products.filter((p) => !!p.archived_at).length})
+        </button>
+      </div>
+
       {/* Product grid */}
-      {loading ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div
-              key={i}
-              className="bg-[#1a1a1a] border border-[#333] rounded-xl animate-pulse aspect-square"
-            />
-          ))}
-        </div>
-      ) : products.length === 0 ? (
-        <p className="text-gray-500 text-center py-12">
-          No products yet. Click <strong>+ Add New</strong> to create one.
-        </p>
-      ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {products.map((p) => (
-            <ProductCard
-              key={p.id}
-              product={p}
-              onEdit={() => openEdit(p)}
-              onToggleActive={() => handleToggleActive(p.id, p.is_active)}
-              onDelete={() => handleDelete(p.id)}
-            />
-          ))}
-        </div>
-      )}
+      {(() => {
+        const filtered = products.filter((p) =>
+          viewArchived ? !!p.archived_at : !p.archived_at
+        );
+        if (loading) {
+          return (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="bg-[#1a1a1a] border border-[#333] rounded-xl animate-pulse aspect-square"
+                />
+              ))}
+            </div>
+          );
+        }
+        if (filtered.length === 0) {
+          return (
+            <p className="text-gray-500 text-center py-12">
+              {viewArchived
+                ? "No archived products."
+                : <>No products yet. Click <strong>+ Add New</strong> to create one.</>}
+            </p>
+          );
+        }
+        return (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {filtered.map((p) =>
+              viewArchived ? (
+                <div
+                  key={p.id}
+                  className="bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden opacity-60"
+                >
+                  <div className="relative w-full aspect-square bg-[#222] flex items-center justify-center overflow-hidden">
+                    {p.image_url ? (
+                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <span className="text-5xl select-none" aria-hidden>☕</span>
+                    )}
+                    <span className="absolute top-2 right-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-zinc-500/20 text-zinc-400">
+                      Archived
+                    </span>
+                  </div>
+                  <div className="p-4 pb-2">
+                    <h3 className="font-semibold text-[#f5f5f5] truncate">{p.name}</h3>
+                    <p className="text-green-400 text-sm mt-1">${centsToDollars(p.price_cents)}</p>
+                  </div>
+                  <div className="border-t border-[#333]">
+                    <button
+                      type="button"
+                      onClick={() => handleRestore(p.id)}
+                      className="w-full py-2 text-xs font-medium text-emerald-400 hover:text-emerald-300
+                                 hover:bg-emerald-500/10 transition-colors"
+                    >
+                      ↩ Restore
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <ProductCard
+                  key={p.id}
+                  product={p}
+                  onEdit={() => openEdit(p)}
+                  onToggleActive={() => handleToggleActive(p.id, p.is_active)}
+                  onDelete={() => handleDelete(p.id)}
+                />
+              )
+            )}
+          </div>
+        );
+      })()}
 
       {/* Overlay */}
       {drawerOpen && (

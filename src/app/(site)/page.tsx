@@ -27,6 +27,14 @@ function sanitizeUrl(raw: string): string | null {
 
 // Convert URLs and markdown links in chat text to clickable <a> tags
 function linkify(text: string): React.ReactNode[] {
+  // Strip common markdown formatting that Claude may emit
+  text = text
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // **bold** → bold
+    .replace(/\*(.+?)\*/g, '$1')       // *italic* → italic
+    .replace(/`([^`]+)`/g, '$1')       // `code` → code
+    .replace(/^#{1,3}\s+/gm, '')       // ### headings → plain
+    .replace(/^[-*]\s+/gm, '• ');      // - bullets → • bullets
+
   // Match markdown links [label](url) OR bare URLs
   const pattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)|(https?:\/\/[^\s),]+)/g;
   const parts: React.ReactNode[] = [];

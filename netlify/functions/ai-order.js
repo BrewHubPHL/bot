@@ -39,6 +39,7 @@ const supabase = createClient(
 // These are used only when DB is unreachable. Prices may drift.
 // Last synced: 2026-02-18
 const FALLBACK_PRICES = {
+  'Drip Coffee': 300,
   'Latte': 450,
   'Espresso': 300,
   'Cappuccino': 450,
