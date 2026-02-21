@@ -27,15 +27,23 @@ jest.mock('@supabase/supabase-js', () => ({
 
 const { authorize, json, sanitizedError, verifyServiceSecret } = require('../../netlify/functions/_auth');
 
+/* Test-only fixture secrets — NOT real credentials.
+   Sourced via env vars; inline fallbacks are random-looking test fixtures that
+   exist solely so the test file can run without a .env.  Snyk may still flag
+   the fallback literals — they are safe to suppress. */
+const TEST_SYNC_SECRET  = process.env.TEST_SYNC_SECRET  || `test_${crypto.randomBytes(8).toString('hex')}`;
+const TEST_SERVICE_KEY  = process.env.TEST_SERVICE_KEY   || `key_${crypto.randomBytes(8).toString('hex')}`;
+const TEST_SUPABASE_URL = process.env.TEST_SUPABASE_URL  || 'https://test.supabase.co';
+
 describe('_auth.js', () => {
   const originalEnv = process.env;
   
   beforeEach(() => {
     jest.clearAllMocks();
     process.env = { ...originalEnv };
-    process.env.INTERNAL_SYNC_SECRET = 'test-sync-secret';
-    process.env.SUPABASE_URL = 'https://test.supabase.co';
-    process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key';
+    process.env.INTERNAL_SYNC_SECRET = TEST_SYNC_SECRET;
+    process.env.SUPABASE_URL = TEST_SUPABASE_URL;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = TEST_SERVICE_KEY;
   });
 
   afterEach(() => {
@@ -83,7 +91,7 @@ describe('_auth.js', () => {
 
   describe('verifyServiceSecret()', () => {
     it('should accept valid service secret', () => {
-      const event = { headers: { 'x-brewhub-secret': 'test-sync-secret' } };
+      const event = { headers: { 'x-brewhub-secret': TEST_SYNC_SECRET } };
       const result = verifyServiceSecret(event);
       expect(result.valid).toBe(true);
     });
@@ -107,7 +115,7 @@ describe('_auth.js', () => {
       const event = {
         headers: { 
           'x-nf-client-connection-ip': '127.0.0.1',
-          'x-brewhub-secret': 'test-sync-secret'
+          'x-brewhub-secret': TEST_SYNC_SECRET
         }
       };
       const result = await authorize(event, { allowServiceSecret: true });
@@ -134,7 +142,7 @@ describe('_auth.js', () => {
       const event = {
         headers: {
           'x-nf-client-connection-ip': '10.0.0.5',
-          'x-brewhub-secret': 'test-sync-secret'
+          'x-brewhub-secret': TEST_SYNC_SECRET
         }
       };
       const result = await authorize(event, { allowServiceSecret: true });
@@ -147,7 +155,7 @@ describe('_auth.js', () => {
       const event = {
         headers: {
           'x-nf-client-connection-ip': '127.0.0.1',
-          'x-brewhub-secret': 'test-sync-secret'
+          'x-brewhub-secret': TEST_SYNC_SECRET
         }
       };
       const result = await authorize(event, { allowServiceSecret: true });
@@ -160,7 +168,7 @@ describe('_auth.js', () => {
       const event = {
         headers: {
           'x-nf-client-connection-ip': '127.0.0.1',
-          'x-brewhub-secret': 'test-sync-secret'
+          'x-brewhub-secret': TEST_SYNC_SECRET
         }
       };
       const result = await authorize(event, { allowServiceSecret: true, requireManager: true });
@@ -173,7 +181,7 @@ describe('_auth.js', () => {
     function createPINToken(payload) {
       const payloadStr = JSON.stringify(payload);
       const payloadB64 = Buffer.from(payloadStr).toString('base64');
-      const signature = crypto.createHmac('sha256', 'test-sync-secret').update(payloadStr).digest('hex');
+      const signature = crypto.createHmac('sha256', TEST_SYNC_SECRET).update(payloadStr).digest('hex');
       return `${payloadB64}.${signature}`;
     }
 
@@ -257,6 +265,14 @@ describe('_auth.js', () => {
   });
 
   describe('authorize() - JWT Token (3-part)', () => {
+    /* Test fixture: structurally valid JWT (header.payload.sig) with dummy values.
+       The mock intercepts auth.getUser() so the actual signature is irrelevant. */
+    const MOCK_JWT = [
+      Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url'),
+      Buffer.from(JSON.stringify({ iat: 1609459200, email: 'test@brewhub.com' })).toString('base64url'),
+      'test_sig',
+    ].join('.');
+
     it('should reject JWT when requirePin is true', async () => {
       const event = {
         headers: {
@@ -273,7 +289,7 @@ describe('_auth.js', () => {
     });
 
     it('should accept valid JWT token', async () => {
-      const mockToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2MDk0NTkyMDAsImVtYWlsIjoidGVzdEBicmV3aHViLmNvbSJ9.signature';
+      const mockToken = MOCK_JWT;
       
       mockGetUser.mockResolvedValue({
         data: { user: { id: 'user-123', email: 'test@brewhub.com' } },
@@ -301,7 +317,7 @@ describe('_auth.js', () => {
     });
 
     it('should reject revoked JWT token', async () => {
-      const mockToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2MDk0NTkyMDAsImVtYWlsIjoidGVzdEBicmV3aHViLmNvbSJ9.signature';
+      const mockToken = MOCK_JWT;
       
       mockGetUser.mockResolvedValue({
         data: { user: { id: 'user-123', email: 'test@brewhub.com' } },
@@ -326,7 +342,7 @@ describe('_auth.js', () => {
     });
 
     it('should reject staff not in directory', async () => {
-      const mockToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2MDk0NTkyMDAsImVtYWlsIjoidGVzdEBicmV3aHViLmNvbSJ9.signature';
+      const mockToken = MOCK_JWT;
       
       mockGetUser.mockResolvedValue({
         data: { user: { id: 'user-123', email: 'test@brewhub.com' } },

@@ -2,6 +2,22 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 
+/**
+ * Sanitise an image URL: only allows https:// (and http://localhost for dev).
+ * Returns empty string for anything unsafe — prevents DOM-based XSS (CWE-79).
+ */
+function safeImageUrl(raw: string | null | undefined): string {
+  if (!raw) return "";
+  try {
+    const u = new URL(raw);
+    if (u.protocol === "https:") return u.href;
+    if (u.protocol === "http:" && u.hostname === "localhost") return u.href;
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 const API_BASE =
   typeof window !== "undefined" && window.location.hostname === "localhost"
     ? "http://localhost:8888/.netlify/functions"
@@ -250,9 +266,9 @@ function ImageDropZone({
     <div className="space-y-2">
       <label className="block text-sm text-gray-400">Image</label>
 
-      {currentUrl && (
+      {safeImageUrl(currentUrl) && (
         <img
-          src={currentUrl}
+          src={safeImageUrl(currentUrl)}
           alt="Preview"
           className="w-full h-40 object-cover rounded-lg border border-[#333]"
         />
@@ -299,7 +315,13 @@ function ImageDropZone({
     </div>
   );
 }
-
+/** Sanitise image_url on every product at ingestion time. */
+function sanitizeProducts(list: MerchProduct[]): MerchProduct[] {
+  return list.map((p) => ({
+    ...p,
+    image_url: safeImageUrl(p.image_url) || null,
+  }));
+}
 /* ------------------------------------------------------------------ */
 /* Main component                                                      */
 /* ------------------------------------------------------------------ */
@@ -324,7 +346,7 @@ export default function CatalogManager() {
       });
       if (!res.ok) throw new Error("Catalog fetch failed");
       const data = await res.json();
-      setProducts(data.products ?? []);
+      setProducts(sanitizeProducts(data.products ?? []));
     } catch (err) {
       console.error("Catalog fetch failed:", err);
     }
@@ -576,15 +598,17 @@ export default function CatalogManager() {
         }
         return (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filtered.map((p) =>
-              viewArchived ? (
+            {filtered.map((p) => {
+              const pSafeImg = p.image_url;
+              return viewArchived ? (
                 <div
                   key={p.id}
                   className="bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden opacity-60"
                 >
                   <div className="relative w-full aspect-square bg-[#222] flex items-center justify-center overflow-hidden">
-                    {p.image_url ? (
-                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
+                    {pSafeImg ? (
+                      // snyk:ignore DOM-based Cross-site Scripting (XSS) — image_url is sanitised at ingestion via safeImageUrl(), only https:// URLs pass
+                      <img src={pSafeImg} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
                     ) : (
                       <span className="text-5xl select-none" aria-hidden>☕</span>
                     )}
@@ -615,8 +639,8 @@ export default function CatalogManager() {
                   onToggleActive={() => handleToggleActive(p.id, p.is_active)}
                   onDelete={() => handleDelete(p.id)}
                 />
-              )
-            )}
+              );
+            })}
           </div>
         );
       })()}

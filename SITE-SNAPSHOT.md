@@ -1,5 +1,5 @@
 ﻿# BrewHub Full Site Snapshot
-**Generated:** February 18, 2026
+**Generated:** February 21, 2026
 **Purpose:** Disaster recovery reference - full source of every file in the codebase.
 
 ---
@@ -15,14 +15,14 @@
 - `.vscode/mcp.json`
 - `.vscode/settings.json`
 - `ARCHITECTURE.md`
-- `dev-config.js`
 - `eslint.config.mjs`
 - `jest.config.js`
-- `local-server.js`
 - `netlify.toml`
 - `netlify/functions/_auth.js`
 - `netlify/functions/_gdpr.js`
 - `netlify/functions/_ip-guard.js`
+- `netlify/functions/_receipt.js`
+- `netlify/functions/_sanitize.js`
 - `netlify/functions/_usage.js`
 - `netlify/functions/adjust-inventory.js`
 - `netlify/functions/ai-order.js`
@@ -35,9 +35,9 @@
 - `netlify/functions/create-inventory-item.js`
 - `netlify/functions/create-order.js`
 - `netlify/functions/get-loyalty.js`
+- `netlify/functions/get-manager-stats.js`
 - `netlify/functions/get-menu.js`
 - `netlify/functions/get-merch.js`
-- `netlify/functions/get-voice-session.js`
 - `netlify/functions/health.js`
 - `netlify/functions/inventory-check.js`
 - `netlify/functions/inventory-lookup.js`
@@ -74,35 +74,12 @@
 - `public/.well-known/apple-developer-merchantid-domain-association`
 - `public/_headers`
 - `public/_redirects`
-- `public/admin.html`
-- `public/admin-logic.js`
-- `public/cafe.html`
-- `public/checkout.html`
-- `public/clock-handler.js`
-- `public/css/brand.css`
-- `public/css/brand-system.css`
-- `public/index.html`
-- `public/js/auth.js`
-- `public/kds.html`
 - `public/llms.txt`
-- `public/login.html`
-- `public/manager.html`
-- `public/parcels.html`
-- `public/portal.html`
-- `public/privacy.html`
-- `public/resident.html`
 - `public/robots.txt`
-- `public/scan.html`
-- `public/shop.html`
 - `public/site.webmanifest`
 - `public/sitemap.xml`
-- `public/staff-hub.html`
-- `public/staff-utility-mode.css`
-- `public/terms.html`
-- `public/thank-you.html`
 - `README.md`
 - `README_SECURITY.md`
-- `rewards/index.html`
 - `scripts/check-models.js`
 - `scripts/generate-apple-file.js`
 - `scripts/register-apple-pay.js`
@@ -116,6 +93,8 @@
 - `src/app/(ops)/layout.tsx`
 - `src/app/(ops)/pos/page.tsx`
 - `src/app/(ops)/scanner/page.tsx`
+- `src/app/api/check-in/route.ts`
+- `src/app/api/revalidate/route.ts`
 - `src/app/(site)/about/page.tsx`
 - `src/app/(site)/admin/dashboard/page.tsx`
 - `src/app/(site)/admin/inventory/page.tsx`
@@ -144,6 +123,9 @@
 - `src/app/globals.css`
 - `src/app/layout.tsx`
 - `src/components/ScrollToTop.tsx`
+- `src/components/StaffNavigation.tsx`
+- `src/lib/escapeHtml.ts`
+- `src/lib/rateLimit.ts`
 - `src/lib/supabase.ts`
 - `supabase/config.toml`
 - `supabase/functions/brewbot-voice/.npmrc`

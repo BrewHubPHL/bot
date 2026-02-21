@@ -51,3 +51,13 @@
 | ElevenLabs  | Text-to-Speech (TTS)    | `ELEVENLABS_API_KEY`      |
 | Twilio      | SMS Notifications       | `TWILIO_ACCOUNT_SID`      |
 | Resend      | Transactional Emails    | `RESEND_API_KEY`          |
+
+---
+
+## Shared TypeScript Utilities (`src/lib/`)
+
+| File | Purpose |
+|---|---|
+| `supabase.ts` | Supabase client singleton + factory |
+| `rateLimit.ts` | In-memory sliding-window IP rate limiter (zero-dependency) |
+| `escapeHtml.ts` | HTML entity escaper for transactional email templates |

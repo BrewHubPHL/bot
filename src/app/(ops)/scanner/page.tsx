@@ -106,6 +106,8 @@ export default function ScannerPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanLockRef = useRef(false); // prevents double-scans
+  const lastScannedCode = useRef<string>("");
+  const lastScannedTime = useRef<number>(0);
   const animFrameRef = useRef<number>(0);
 
   /* ─── Clock ──────────────────────────────────────────────────── */
@@ -187,10 +189,19 @@ export default function ScannerPage() {
   /* ─── Handle scan result ─────────────────────────────────────── */
   const handleScan = async (rawValue: string) => {
     if (scanLockRef.current) return; // Prevent double-scan
-    scanLockRef.current = true;
-    haptic("tap");
 
     const value = rawValue.trim();
+    const now = Date.now();
+
+    // Cooldown: ignore identical barcode scanned within 3 seconds
+    if (value === lastScannedCode.current && now - lastScannedTime.current < 3000) {
+      return;
+    }
+
+    scanLockRef.current = true;
+    lastScannedCode.current = value;
+    lastScannedTime.current = now;
+    haptic("tap");
 
     // Auto-detect: is this a loyalty QR (email) or inventory barcode?
     if (isLoyaltyCode(value)) {

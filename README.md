@@ -34,10 +34,16 @@ brewhubbot/
 │   │   ├── pos/           #     3-column POS (Categories → Builder → Ticket)
 │   │   ├── kds/           #     Kitchen Display System
 │   │   └── scanner/       #     Inventory barcode scanner
-│   └── layout.tsx         #   Root layout
-├── public/                # Legacy HTML pages (kds, manager, cafe, parcels)
+│   └── api/               #   App Router API routes (rate-limited wrappers)
+│       ├── check-in/      #     Parcel check-in (rate-limited proxy)
+│       └── revalidate/    #     Cache revalidation endpoint
+├── src/lib/               # Shared utilities
+│   ├── supabase.ts        #   Supabase client
+│   ├── rateLimit.ts       #   In-memory IP rate limiter
+│   └── escapeHtml.ts      #   HTML entity escaper for emails
+├── public/                # Static assets (icons, manifest, robots.txt)
 ├── netlify/functions/     # Serverless API endpoints (50+ functions)
-├── supabase/              # DB schemas (1–28), RPC functions, RLS policies
+├── supabase/              # DB schemas (1–33), RPC functions, RLS policies
 ├── scripts/               # Utilities (Apple Pay, secret rotation, AI tests)
 └── tests/                 # Jest test suite
 ```
@@ -56,16 +62,6 @@ brewhubbot/
 | `/scanner` | Inventory barcode scanner |
 | `/manager` | Manager dashboard (stats, KDS, inventory) |
 | `/about`, `/privacy`, `/terms` | Info pages |
-
-### Legacy HTML (`public/`)
-| Page | Description |
-|---|---|
-| `kds.html` | Full-featured KDS (realtime, status transitions, stale alerts) |
-| `manager.html` | Manager dashboard with embedded KDS widget + 🖨️ receipt roll |
-| `cafe.html` | Legacy staff POS |
-| `parcels.html` | Parcel check-in & pickup |
-| `scan.html` | Inventory scanner |
-| `shop.html` | Merch storefront (Square Checkout links) |
 
 ---
 
@@ -112,6 +108,8 @@ brewhubbot/
 | `_gdpr.js` | Request logging & GDPR compliance |
 | `_ip-guard.js` | Rate limiting with timing-safe comparison |
 | `_receipt.js` | 32-column thermal receipt generator (shared by webhook + KDS) |
+| `_sanitize.js` | Input sanitization (strip tags, scripts, event handlers) |
+| `_csrf.js` | CSRF header validation |
 | `_usage.js` | API quota tracking |
 
 ---
@@ -211,5 +209,7 @@ npm run lint         # ESLint
 
 ## Notes
 - All Square functions use `SQUARE_PRODUCTION_TOKEN` with hardcoded `SquareEnvironment.Production`.
-- All pages are now served by Next.js. Legacy HTML pages are archived in the `dead/` folder.
+- All pages are served by Next.js App Router. Legacy HTML has been permanently deleted.
 - KDS, manager dashboard, and all ops pages are under `src/app/(ops)/` with PIN-based auth.
+- API rate limiting is enforced via `src/lib/rateLimit.ts` on App Router API routes.
+- Email templates use `escapeHtml()` to prevent HTML injection in user-supplied fields.

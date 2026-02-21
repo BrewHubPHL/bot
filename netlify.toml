@@ -7,13 +7,15 @@
 
 [functions]
   directory = "netlify/functions"
-  node_bundle = {} 
+  node_bundle = {}
 
 [dev]
   command = "npm run dev"
   port = 8888
   targetPort = 3000
   framework = "next"
+
+# ── Redirects ────────────────────────────────────────────────────
 
 # Staff shortcut
 [[redirects]]
@@ -22,7 +24,7 @@
   status = 302
   force = true
 
-# AI Agent API endpoints (clean URLs)
+# AI Agent API → Netlify Functions
 [[redirects]]
   from = "/api/menu"
   to = "/.netlify/functions/get-menu"
@@ -47,10 +49,13 @@
   status = 200
   force = true
 
+# ── Edge Functions ───────────────────────────────────────────────
+
 [[edge_functions]]
   path = "/marketing-bot"
   function = "marketing-bot"
 
-# Scheduled: Cancel orders stuck in 'pending' for >30 minutes
+# ── Scheduled Functions ──────────────────────────────────────────
+
 [functions."cancel-stale-orders"]
   schedule = "*/5 * * * *"

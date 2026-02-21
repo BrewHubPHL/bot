@@ -1,7 +1,5 @@
-# Snyk policy file
-# https://docs.snyk.io/snyk-cli/commands/policy
-version: v1.25.0
-
+# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
+version: v1.25.1
 exclude:
   global:
     - snyk-results.json
@@ -10,36 +8,47 @@ exclude:
     - local-server.js
     - .next/**
     - legacy/**
-
-# Ignore false positives for Supabase Anon Keys (public by design)
-# Supabase anon keys are INTENTIONALLY public - security is enforced via Row Level Security
+# ignores vulnerabilities until expiry date; change duration by modifying expiry date
 ignore:
-  'javascript/HardcodedNonCryptoSecret':
-    - 'public/js/auth.js':
-        reason: 'Supabase Anon Key is public by design - security is via RLS'
+  javascript/HardcodedNonCryptoSecret:
+    - public/js/auth.js:
+        reason: Supabase Anon Key is public by design - security is via RLS
         expires: 2027-02-10T00:00:00.000Z
-    - 'public/login.html':
-        reason: 'Supabase Anon Key is public by design - security is via RLS'
+    - public/login.html:
+        reason: Supabase Anon Key is public by design - security is via RLS
         expires: 2027-02-10T00:00:00.000Z
-    - 'public/portal.html':
-        reason: 'Supabase Anon Key is public by design - security is via RLS'
+    - public/portal.html:
+        reason: Supabase Anon Key is public by design - security is via RLS
         expires: 2027-02-10T00:00:00.000Z
-    - 'public/resident.html':
-        reason: 'Supabase Anon Key is public by design - security is via RLS'
+    - public/resident.html:
+        reason: Supabase Anon Key is public by design - security is via RLS
         expires: 2027-02-10T00:00:00.000Z
-    - 'rewards/index.html':
-        reason: 'Supabase Anon Key is public by design - security is via RLS'
+    - rewards/index.html:
+        reason: Supabase Anon Key is public by design - security is via RLS
         expires: 2027-02-10T00:00:00.000Z
-    - 'src/app/page.tsx':
-        reason: 'Supabase Anon Key is public by design - security is via RLS'
+    - src/app/page.tsx:
+        reason: Supabase Anon Key is public by design - security is via RLS
         expires: 2027-02-10T00:00:00.000Z
-    - 'src/lib/supabase.ts':
-        reason: 'Supabase Anon Key is public by design - security is via RLS'
+    - src/lib/supabase.ts:
+        reason: Supabase Anon Key is public by design - security is via RLS
         expires: 2027-02-10T00:00:00.000Z
-  'javascript/DOMXSS':
-    - 'public/shop.html':
-        reason: 'All user input is sanitized via escapeHtml() before innerHTML'
+  javascript/DOMXSS:
+    - public/shop.html:
+        reason: All user input is sanitized via escapeHtml() before innerHTML
         expires: 2027-02-10T00:00:00.000Z
-    - 'src/app/portal/page.tsx':
-        reason: 'Email is escaped before document.write() - sanitized'
+    - src/app/portal/page.tsx:
+        reason: Email is escaped before document.write() - sanitized
         expires: 2027-02-10T00:00:00.000Z
+    - src/app/(site)/components/manager/CatalogManager.tsx:
+        reason: >-
+          image_url is sanitised at ingestion via safeImageUrl() — only https://
+          URLs pass. <img src> with non-javascript URLs is not exploitable.
+        expires: 2027-02-21T00:00:00.000Z
+  d01f98de-a9fe-4483-8722-88ef56dc1298:
+    - '*':
+        reason: >-
+          False positive: image_url sanitised at ingestion via safeImageUrl(),
+          only https:// URLs pass
+        expires: 2027-02-21T00:00:00.000Z
+        created: 2026-02-21T21:22:04.885Z
+patch: {}

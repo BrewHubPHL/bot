@@ -2,16 +2,10 @@
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
-import { createClient } from "@supabase/supabase-js";
-
-/* ─── Supabase client (for Realtime subscription) ─── */
-const SUPABASE_URL = "https://rruionkpgswvncypweiv.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+import { supabase } from "@/lib/supabase";
 
 const MAX_RECEIPTS = 10;
+const POLL_INTERVAL_MS = 12_000; // fallback polling every 12 s
 
 /* ─── Types ─── */
 interface Receipt {
@@ -76,9 +70,11 @@ export default function ReceiptRoll() {
     loadReceipts();
   }, [token, loadReceipts]);
 
-  // Realtime subscription for new receipts
+  // Realtime subscription for new receipts + polling fallback
   useEffect(() => {
     if (!token) return;
+
+    let realtimeActive = false;
 
     const channel = supabase
       .channel("manager-receipts")
@@ -89,17 +85,45 @@ export default function ReceiptRoll() {
           const newReceipt = payload.new as Receipt;
           setNewIds((prev) => new Set(prev).add(newReceipt.id));
           setReceipts((prev) => {
+            // De-duplicate in case polling already caught it
+            if (prev.some((r) => r.id === newReceipt.id)) return prev;
             const updated = [newReceipt, ...prev];
             return updated.slice(0, MAX_RECEIPTS);
           });
         }
       )
-      .subscribe();
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "receipt_queue" },
+        (payload) => {
+          const updated = payload.new as Receipt;
+          setReceipts((prev) =>
+            prev.map((r) => (r.id === updated.id ? updated : r))
+          );
+        }
+      )
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          realtimeActive = true;
+          console.log("[ReceiptRoll] Realtime connected");
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          realtimeActive = false;
+          console.warn("[ReceiptRoll] Realtime unavailable — polling active");
+        }
+      });
+
+    // Polling fallback — ensures data refreshes even if Realtime is
+    // blocked by RLS or the table isn't in the publication yet.
+    const poll = setInterval(() => {
+      loadReceipts();
+    }, POLL_INTERVAL_MS);
 
     return () => {
+      clearInterval(poll);
       supabase.removeChannel(channel);
     };
-  }, [token]);
+  }, [token, loadReceipts]);
 
   if (!token) {
     return (

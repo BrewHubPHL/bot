@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 import confetti from 'canvas-confetti';
 import React from 'react';
 
@@ -70,10 +70,7 @@ function linkify(text: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [text];
 }
 
-// 1. ENGINE CONFIGURATION
-const SUPABASE_URL = 'https://rruionkpgswvncypweiv.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWlvbmtwZ3N3dm5jeXB3ZWl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMTQ5MDYsImV4cCI6MjA4NDg5MDkwNn0.fzM310q9Qs_f-zhuBqyjnQXs3mDmOp_dbiFRs0ctQmU';
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// 1. ENGINE CONFIGURATION — client imported from @/lib/supabase
 
 export default function BrewHubLanding() {
   // State Management

@@ -117,6 +117,7 @@ export default function POSPage() {
   const [terminalStatus, setTerminalStatus] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [orderSuccess, setOrderSuccess] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Loyalty scanner
   const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomer | null>(null);
@@ -187,6 +188,7 @@ export default function POSPage() {
     setCreatedOrderId(null);
     setTerminalStatus("");
     setErrorMsg("");
+    setIsSubmitting(false);
     setLoyaltyCustomer(null);
   }, []);
 
@@ -348,8 +350,8 @@ export default function POSPage() {
 
   /* ─── Step 1: Send to KDS (create Supabase order immediately) ─ */
   const handleSendToKDS = async () => {
-    if (cart.length === 0) return;
-    setTicketPhase("confirm");
+    if (cart.length === 0 || isSubmitting) return;
+    setIsSubmitting(true);
 
     try {
       const token = getAccessToken();
@@ -392,6 +394,7 @@ export default function POSPage() {
       if (!orderId) throw new Error("No order ID returned");
 
       setCreatedOrderId(orderId);
+      setTicketPhase("confirm");
       setOrderSuccess(orderId.slice(0, 6).toUpperCase());
       setTimeout(() => setOrderSuccess(null), 4000);
 
@@ -399,6 +402,8 @@ export default function POSPage() {
       const msg = e instanceof Error ? e.message : "Order creation failed";
       setErrorMsg(msg);
       setTicketPhase("error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -800,11 +805,15 @@ export default function POSPage() {
           {/* Phase: BUILDING — Send to KDS button */}
           {ticketPhase === "building" && (
             <button
-              disabled={cart.length === 0}
+              disabled={cart.length === 0 || isSubmitting}
               onClick={handleSendToKDS}
               className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
             >
-              <ChevronRight size={16} /> Send to KDS
+              {isSubmitting ? (
+                <><Loader2 size={16} className="animate-spin" /> Processing…</>
+              ) : (
+                <><ChevronRight size={16} /> Send to KDS</>
+              )}
             </button>
           )}
 

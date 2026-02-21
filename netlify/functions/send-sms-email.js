@@ -4,7 +4,8 @@ const { authorize, json, verifyServiceSecret } = require('./_auth');
 // HTML-escape user-supplied strings to prevent injection in emails
 const escapeHtml = (s) => String(s || '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
