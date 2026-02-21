@@ -86,6 +86,7 @@ export default function BrewHubLanding() {
   const [voiceStatus, setVoiceStatus] = useState("");
   const [initialRender, setInitialRender] = useState(true);
   const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
+  const isSpeakingRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatBoxRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<BrewSpeechRecognition | null>(null);
@@ -155,6 +156,13 @@ export default function BrewHubLanding() {
         return;
       }
 
+      // Stop listening BEFORE playing audio to prevent echo feedback loop
+      // (mic picks up speaker output and feeds it back as a new transcript)
+      isSpeakingRef.current = true;
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch { /* not started */ }
+      }
+
       // Response is base64-encoded audio/mpeg
       const audioBlob = await res.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
@@ -164,6 +172,7 @@ export default function BrewHubLanding() {
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
         audioRef.current = null;
+        isSpeakingRef.current = false;
         // Resume listening after playback
         if (recognitionRef.current && isVoiceActive) {
           setVoiceStatus("Listening...");
@@ -174,6 +183,7 @@ export default function BrewHubLanding() {
       setVoiceStatus("Elise is speaking...");
       await audio.play();
     } catch (err) {
+      isSpeakingRef.current = false;
       console.error('TTS playback error:', err);
     }
   }, [isVoiceActive]);
@@ -244,8 +254,8 @@ export default function BrewHubLanding() {
       };
 
       recognition.onend = () => {
-        // Auto-restart if voice is still active and we're not mid-processing
-        if (recognitionRef.current && !isVoiceProcessing) {
+        // Auto-restart if voice is still active, not mid-processing, and not during TTS playback
+        if (recognitionRef.current && !isVoiceProcessing && !isSpeakingRef.current) {
           try { recognitionRef.current.start(); } catch { /* ok */ }
         }
       };
