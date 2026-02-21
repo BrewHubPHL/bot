@@ -14,7 +14,7 @@ exports.handler = async (event) => {
 
   // 1. Staff auth (contains resident PII - parcels workflow)
   // High-sensitivity: Require token issued within last 15 minutes
-  const auth = await authorize(event, { maxTokenAgeMinutes: 15 });
+  const auth = await authorize(event, { maxTokenAgeMinutes: 15, requirePin: true });
   if (!auth.ok) return auth.response;
 
   if (event.httpMethod !== 'GET') {

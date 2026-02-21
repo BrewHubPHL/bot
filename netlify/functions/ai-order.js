@@ -65,7 +65,8 @@ async function getMenuPrices() {
   const { data, error } = await supabase
     .from('merch_products')
     .select('name, price_cents')
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .is('archived_at', null);
   
   if (error || !data || data.length === 0) {
     console.warn('[AI-ORDER] Using fallback prices');

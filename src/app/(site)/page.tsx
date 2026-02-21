@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { createClient } from '@supabase/supabase-js';
 import confetti from 'canvas-confetti';
-import { Conversation } from '@elevenlabs/client';
 import React from 'react';
 
 /**
@@ -78,9 +77,15 @@ export default function BrewHubLanding() {
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState("");
   const [initialRender, setInitialRender] = useState(true);
+  const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const conversationRef = useRef<Conversation | null>(null);
   const chatBoxRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<BrewSpeechRecognition | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const messagesRef = useRef(messages);
+
+  // Keep a mutable ref to messages so speech callbacks always see latest state
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   // Splash screen timer and scroll to top
   useEffect(() => {
@@ -107,70 +112,161 @@ export default function BrewHubLanding() {
     };
   }, []);
 
-  // 4. VOICE CHAT LOGIC (ElevenLabs Conversational AI)
-  const startVoiceSession = async () => {
+  // ── Shared helper: send text to Claude and return the reply ──
+  const sendToClaude = useCallback(async (userText: string): Promise<string> => {
+    const chatHeaders: Record<string, string> = { 'Content-Type': 'application/json', 'X-BrewHub-Action': 'true' };
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      chatHeaders['Authorization'] = `Bearer ${session.access_token}`;
+    }
+
+    const response = await fetch('/.netlify/functions/claude-chat', {
+      method: 'POST',
+      headers: chatHeaders,
+      body: JSON.stringify({
+        text: userText,
+        email: localStorage.getItem('brewhub_email') || "",
+        history: messagesRef.current.slice(-10).map(m => ({ role: m.role, content: m.content }))
+      })
+    });
+    const data = await response.json();
+    return data.reply || "Sorry, I didn't catch that.";
+  }, []);
+
+  // ── Play Elise's reply through ElevenLabs TTS ──
+  const speakReply = useCallback(async (text: string) => {
     try {
-      setVoiceStatus("Connecting...");
-      
-      // Get signed URL from Netlify function
-      const res = await fetch('/.netlify/functions/get-voice-session');
-      const data = await res.json();
-      
-      if (!data.signedUrl) {
-        throw new Error(data.error || 'Failed to get voice session');
+      const res = await fetch('/.netlify/functions/text-to-speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-BrewHub-Action': 'true' },
+        body: JSON.stringify({ text })
+      });
+
+      if (!res.ok) {
+        console.warn('TTS returned', res.status);
+        return;
       }
+
+      // Response is base64-encoded audio/mpeg
+      const audioBlob = await res.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        audioRef.current = null;
+        // Resume listening after playback
+        if (recognitionRef.current && isVoiceActive) {
+          setVoiceStatus("Listening...");
+          try { recognitionRef.current.start(); } catch { /* already started */ }
+        }
+      };
+
+      setVoiceStatus("Elise is speaking...");
+      await audio.play();
+    } catch (err) {
+      console.error('TTS playback error:', err);
+    }
+  }, [isVoiceActive]);
+
+  // ── Handle a single voice turn: transcript → Claude → TTS ──
+  const handleVoiceTurn = useCallback(async (transcript: string) => {
+    if (!transcript.trim()) return;
+
+    setIsVoiceProcessing(true);
+    setMessages(prev => [...prev, { role: 'user', content: transcript }]);
+    setVoiceStatus("Thinking...");
+
+    try {
+      const reply = await sendToClaude(transcript);
+      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      await speakReply(reply);
+    } catch (err) {
+      console.error('Voice turn error:', err);
+      setMessages(prev => [...prev, { role: 'assistant', content: "I'm having trouble connecting to my coffee sensors. Try again in a second!" }]);
+      // Resume listening even on error
+      if (recognitionRef.current) {
+        setVoiceStatus("Listening...");
+        try { recognitionRef.current.start(); } catch { /* already started */ }
+      }
+    } finally {
+      setIsVoiceProcessing(false);
+    }
+  }, [sendToClaude, speakReply]);
+
+  // 4. VOICE CHAT LOGIC (Web Speech API STT → Claude → ElevenLabs TTS)
+  const startVoiceSession = async () => {
+    // Feature check
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setVoiceStatus("Voice not supported in this browser. Try Chrome or Edge.");
+      setTimeout(() => setVoiceStatus(""), 4000);
+      return;
+    }
+
+    try {
+      setVoiceStatus("Requesting mic access...");
 
       // Request microphone access first
       await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      // Start ElevenLabs Conversation (handles VAD automatically)
-      const conversation = await Conversation.startSession({
-        signedUrl: data.signedUrl,
-        onConnect: () => {
-          setIsVoiceActive(true);
-          setVoiceStatus("Listening... speak now!");
-        },
-        onDisconnect: () => {
-          setIsVoiceActive(false);
-          setVoiceStatus("");
-        },
-        onMessage: (message: { source: string; message: string }) => {
-          if (message.source === 'user') {
-            setMessages(prev => [...prev, { role: 'user', content: message.message }]);
-          } else if (message.source === 'ai') {
-            setMessages(prev => [...prev, { role: 'assistant', content: message.message }]);
-          }
-        },
-        onError: (message: string) => {
-          console.error('Voice error:', message);
-          setVoiceStatus("Connection error");
-          setTimeout(() => setVoiceStatus(""), 3000);
-        },
-        onModeChange: (mode: { mode: string }) => {
-          if (mode.mode === 'listening') {
-            setVoiceStatus("Listening...");
-          } else if (mode.mode === 'speaking') {
-            setVoiceStatus("Elise is speaking...");
-          }
-        }
-      });
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.continuous = false;      // one utterance per turn
+      recognition.maxAlternatives = 1;
 
-      conversationRef.current = conversation;
+      recognition.onresult = (event: BrewSpeechRecognitionEvent) => {
+        const transcript = event.results[0][0].transcript;
+        handleVoiceTurn(transcript);
+      };
+
+      recognition.onerror = (event: BrewSpeechRecognitionErrorEvent) => {
+        // 'no-speech' is normal — user simply didn't speak, restart
+        if (event.error === 'no-speech' || event.error === 'aborted') {
+          if (recognitionRef.current) {
+            try { recognitionRef.current.start(); } catch { /* ok */ }
+          }
+          return;
+        }
+        console.error('Speech recognition error:', event.error);
+        setVoiceStatus(`Mic error: ${event.error}`);
+        setTimeout(() => setVoiceStatus(""), 3000);
+      };
+
+      recognition.onend = () => {
+        // Auto-restart if voice is still active and we're not mid-processing
+        if (recognitionRef.current && !isVoiceProcessing) {
+          try { recognitionRef.current.start(); } catch { /* ok */ }
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsVoiceActive(true);
+      setVoiceStatus("Listening... speak now!");
 
     } catch (err) {
       console.error('Voice error:', err);
-      setVoiceStatus("Failed to start - check mic permissions");
+      setVoiceStatus("Failed to start — check mic permissions");
       setIsVoiceActive(false);
       setTimeout(() => setVoiceStatus(""), 3000);
     }
   };
 
-  const stopVoiceSession = async () => {
-    if (conversationRef.current) {
-      await conversationRef.current.endSession();
-      conversationRef.current = null;
+  const stopVoiceSession = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;   // prevent auto-restart
+      recognitionRef.current.abort();
+      recognitionRef.current = null;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
     }
     setIsVoiceActive(false);
+    setIsVoiceProcessing(false);
     setVoiceStatus("");
   };
 
@@ -193,7 +289,7 @@ export default function BrewHubLanding() {
     }
   };
 
-  // 3. TEXT CHAT LOGIC (Claude-powered)
+  // 3. TEXT CHAT LOGIC (Claude-powered — same backend as voice)
   const handleTextChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
@@ -203,24 +299,8 @@ export default function BrewHubLanding() {
     setChatInput("");
 
     try {
-      // Include auth token if user is logged in (enables ordering and loyalty lookup)
-      const chatHeaders: Record<string, string> = { 'Content-Type': 'application/json', 'X-BrewHub-Action': 'true' };
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        chatHeaders['Authorization'] = `Bearer ${session.access_token}`;
-      }
-
-      const response = await fetch('/.netlify/functions/claude-chat', {
-        method: 'POST',
-        headers: chatHeaders,
-        body: JSON.stringify({ 
-          text: userText,
-          email: localStorage.getItem('brewhub_email') || "",
-          history: messages.slice(-10).map(m => ({ role: m.role, content: m.content }))
-        })
-      });
-      const data = await response.json();
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+      const reply = await sendToClaude(userText);
+      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: "I'm having trouble connecting to my coffee sensors. Try again in a second!" }]);
     }

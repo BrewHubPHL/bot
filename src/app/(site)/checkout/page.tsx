@@ -1,8 +1,8 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, ShoppingBag, CreditCard, Loader2, CheckCircle } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { ArrowLeft, ShoppingBag, CreditCard, Loader2, CheckCircle, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import Script from 'next/script';
 
@@ -28,9 +28,14 @@ export default function CheckoutPage() {
   const [orderId, setOrderId] = useState('');
   const [squareReady, setSquareReady] = useState(false);
   const [cardReady, setCardReady] = useState(false);
+  const [applePayReady, setApplePayReady] = useState(false);
+  const [googlePayReady, setGooglePayReady] = useState(false);
+  const [walletProcessing, setWalletProcessing] = useState(false);
 
   const cardRef = useRef<any>(null);
   const paymentsRef = useRef<any>(null);
+  const applePayRef = useRef<any>(null);
+  const googlePayRef = useRef<any>(null);
   const squareConfigRef = useRef<{ appId: string; locationId: string } | null>(null);
 
   const totalCents = cart.reduce((sum, item) => sum + (item.price_cents * item.quantity), 0);
@@ -74,6 +79,33 @@ export default function CheckoutPage() {
         cardRef.current = await paymentsRef.current.card();
         await cardRef.current.attach('#card-container');
         setCardReady(true);
+
+        // Build a payment request for wallet methods
+        const walletPaymentRequest = paymentsRef.current.paymentRequest({
+          countryCode: 'US',
+          currencyCode: 'USD',
+          total: {
+            amount: (totalCents / 100).toFixed(2),
+            label: 'BrewHub PHL',
+          },
+        });
+
+        // Try Apple Pay (only available on Safari / iOS with configured wallet)
+        try {
+          applePayRef.current = await paymentsRef.current.applePay(walletPaymentRequest);
+          setApplePayReady(true);
+        } catch {
+          console.log('Apple Pay not available on this device');
+        }
+
+        // Try Google Pay (available on Chrome with configured wallet)
+        try {
+          googlePayRef.current = await paymentsRef.current.googlePay(walletPaymentRequest);
+          await googlePayRef.current.attach('#google-pay-button');
+          setGooglePayReady(true);
+        } catch {
+          console.log('Google Pay not available on this device');
+        }
       } catch (e) {
         console.error('Square init error:', e);
         setError('Payment system unavailable. Please try again later.');
@@ -83,37 +115,23 @@ export default function CheckoutPage() {
     initSquare();
 
     return () => {
-      if (cardRef.current) {
-        cardRef.current.destroy();
-      }
+      if (cardRef.current) cardRef.current.destroy();
+      if (googlePayRef.current) googlePayRef.current.destroy?.();
     };
   }, [squareReady, cart.length]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!cardRef.current || !email.trim()) {
-      setError('Please fill in your email and card details');
-      return;
-    }
-
+  // ── Shared: submit payment with a tokenized nonce ──
+  const submitPayment = useCallback(async (sourceId: string) => {
     setLoading(true);
     setError('');
 
     try {
-      // Tokenize card
-      const result = await cardRef.current.tokenize();
-      
-      if (result.status !== 'OK') {
-        throw new Error(result.errors?.[0]?.message || 'Card validation failed');
-      }
-
-      // Process payment
       const response = await fetch('/.netlify/functions/process-merch-payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-BrewHub-Action': 'true' },
         body: JSON.stringify({
           cart,
-          sourceId: result.token,
+          sourceId,
           customerEmail: email.trim(),
           customerName: name.trim(),
         }),
@@ -133,6 +151,56 @@ export default function CheckoutPage() {
     }
 
     setLoading(false);
+    setWalletProcessing(false);
+  }, [cart, email, name]);
+
+  // ── Card payment (form submit) ──
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!cardRef.current || !email.trim()) {
+      setError('Please fill in your email and card details');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await cardRef.current.tokenize();
+      
+      if (result.status !== 'OK') {
+        throw new Error(result.errors?.[0]?.message || 'Card validation failed');
+      }
+
+      await submitPayment(result.token);
+    } catch (err: any) {
+      setError(err.message || 'Payment failed. Please try again.');
+      setLoading(false);
+    }
+  }
+
+  // ── Wallet payment (Apple Pay / Google Pay) ──
+  async function handleWalletPayment(walletMethod: any, walletName: string) {
+    if (!email.trim()) {
+      setError('Please enter your email before paying');
+      return;
+    }
+
+    setWalletProcessing(true);
+    setError('');
+
+    try {
+      const result = await walletMethod.tokenize();
+
+      if (result.status === 'OK') {
+        await submitPayment(result.token);
+      } else {
+        throw new Error(result.errors?.[0]?.message || `${walletName} payment failed`);
+      }
+    } catch (err: any) {
+      setError(err.message || `${walletName} payment failed. Please try card payment.`);
+      setWalletProcessing(false);
+    }
   }
 
   // Success state
@@ -245,6 +313,43 @@ export default function CheckoutPage() {
                   />
                 </div>
 
+                {/* Wallet Buttons (Apple Pay / Google Pay) */}
+                {(applePayReady || googlePayReady) && (
+                  <div className="space-y-3">
+                    <label className="block text-sm font-medium text-stone-600">
+                      <Wallet size={16} className="inline mr-2" />
+                      Express Checkout
+                    </label>
+
+                    {applePayReady && (
+                      <button
+                        type="button"
+                        onClick={() => handleWalletPayment(applePayRef.current, 'Apple Pay')}
+                        disabled={loading || walletProcessing}
+                        className="w-full h-12 bg-black text-white rounded-lg font-medium text-base disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-900 transition-colors"
+                        style={{ WebkitAppearance: '-apple-pay-button' } as React.CSSProperties}
+                      >
+                         Pay with Apple Pay
+                      </button>
+                    )}
+
+                    {googlePayReady && (
+                      <div
+                        id="google-pay-button"
+                        onClick={() => handleWalletPayment(googlePayRef.current, 'Google Pay')}
+                        className="min-h-[48px] rounded-lg overflow-hidden cursor-pointer"
+                      />
+                    )}
+
+                    {/* Divider */}
+                    <div className="flex items-center gap-3 text-stone-400 text-sm">
+                      <div className="flex-1 border-t border-stone-200" />
+                      or pay with card
+                      <div className="flex-1 border-t border-stone-200" />
+                    </div>
+                  </div>
+                )}
+
                 {/* Card Input */}
                 <div>
                   <label className="block text-sm font-medium text-stone-600 mb-2">
@@ -270,10 +375,10 @@ export default function CheckoutPage() {
                 {/* Submit */}
                 <button
                   type="submit"
-                  disabled={loading || !cardReady}
+                  disabled={loading || walletProcessing || !cardReady}
                   className="w-full py-4 bg-[var(--hub-brown)] text-white rounded-lg font-semibold hover:bg-[var(--hub-espresso)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {loading ? (
+                  {(loading || walletProcessing) ? (
                     <>
                       <Loader2 size={20} className="animate-spin" />
                       Processing...

@@ -11,6 +11,7 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@braintree/sanitize-url@^7.1.2",
         "npm:@elevenlabs/client@0.14",
         "npm:@elevenlabs/elevenlabs-js@^2.34.0",
         "npm:@google/generative-ai@~0.24.1",
@@ -38,6 +39,7 @@
         "npm:react@19.2.3",
         "npm:sonarqube-scanner@^3.5.0",
         "npm:square@44",
+        "npm:supabase@^2.76.12",
         "npm:tailwindcss@4",
         "npm:typescript@5",
         "npm:ws@^8.19.0"

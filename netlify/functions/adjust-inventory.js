@@ -7,7 +7,7 @@ const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY
 
 exports.handler = async (event) => {
   // 1. Secure Auth (Manager Only — baristas cannot adjust stock)
-  const auth = await authorize(event, { requireManager: true });
+  const auth = await authorize(event, { requireManager: true, requirePin: true });
   if (!auth.ok) return auth.response;
 
   // CSRF protection

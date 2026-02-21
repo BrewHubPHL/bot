@@ -305,8 +305,8 @@ export default function ResidentPortal() {
           <div className="mt-6 space-y-3">
             <p className="text-center text-xs text-stone-600">
               By continuing, you agree to our{" "}
-              <a href="/terms.html" className="underline hover:text-stone-400">Terms</a> and{" "}
-              <a href="/privacy.html" className="underline hover:text-stone-400">Privacy Policy</a>
+              <a href="/terms" className="underline hover:text-stone-400">Terms</a> and{" "}
+              <a href="/privacy" className="underline hover:text-stone-400">Privacy Policy</a>
             </p>
             {authMode === "signup" && (
               <div className="bg-stone-800/50 border border-stone-700 rounded-lg p-3 text-xs text-stone-500 space-y-1">

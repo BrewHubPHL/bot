@@ -25,7 +25,7 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  const auth = await authorize(event);
+  const auth = await authorize(event, { requirePin: true });
   if (!auth.ok) return auth.response;
 
   let tracking_number;

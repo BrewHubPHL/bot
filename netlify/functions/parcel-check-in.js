@@ -1,6 +1,7 @@
 ﻿const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { sanitizeInput } = require('./_sanitize');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -47,7 +48,7 @@ exports.handler = async (event) => {
     return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action' }, body: '' };
   }
 
-  const auth = await authorize(event);
+  const auth = await authorize(event, { requirePin: true });
   if (auth.ok) {
     const csrfBlock = requireCsrfHeader(event);
     if (csrfBlock) return csrfBlock;
@@ -61,7 +62,13 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { tracking_number, carrier, recipient_name, resident_id, scan_only, skip_notification } = JSON.parse(event.body);
+    const body = JSON.parse(event.body);
+    const tracking_number = (body.tracking_number || '').trim();
+    const carrier = body.carrier;
+    const recipient_name = sanitizeInput(body.recipient_name);
+    const resident_id = body.resident_id;
+    const scan_only = body.scan_only;
+    const skip_notification = body.skip_notification;
 
     if (!tracking_number) {
       return { 
@@ -99,9 +106,9 @@ exports.handler = async (event) => {
           .insert({
             tracking_number,
             carrier: detectedCarrier,
-            recipient_name: expected.customer_name,
-            recipient_phone: expected.customer_phone,
-            unit_number: expected.unit_number,
+            recipient_name: sanitizeInput(expected.customer_name),
+            recipient_phone: sanitizeInput(expected.customer_phone),
+            unit_number: sanitizeInput(expected.unit_number),
             status: 'arrived',
             received_at: new Date().toISOString(),
             match_type: 'pre-registered'
@@ -134,10 +141,10 @@ exports.handler = async (event) => {
       const { data, error } = await supabase.rpc('atomic_parcel_checkin', {
         p_tracking_number: tracking_number,
         p_carrier: detectedCarrier,
-        p_recipient_name: expected.customer_name,
-        p_recipient_phone: expected.customer_phone,
-        p_recipient_email: expected.customer_email,
-        p_unit_number: expected.unit_number,
+        p_recipient_name: sanitizeInput(expected.customer_name),
+        p_recipient_phone: sanitizeInput(expected.customer_phone),
+        p_recipient_email: sanitizeInput(expected.customer_email),
+        p_unit_number: sanitizeInput(expected.unit_number),
         p_match_type: 'pre-registered'
       });
 
@@ -207,10 +214,10 @@ exports.handler = async (event) => {
         .single();
 
       if (resident) {
-        finalRecipient = resident.name;
-        unitNumber = resident.unit_number;
-        recipientPhone = resident.phone;
-        recipientEmail = resident.email;
+        finalRecipient = sanitizeInput(resident.name);
+        unitNumber = sanitizeInput(resident.unit_number);
+        recipientPhone = sanitizeInput(resident.phone);
+        recipientEmail = sanitizeInput(resident.email);
       }
     }
 
@@ -221,8 +228,8 @@ exports.handler = async (event) => {
         .insert({
           tracking_number,
           carrier: detectedCarrier,
-          recipient_name: finalRecipient,
-          unit_number: unitNumber,
+          recipient_name: sanitizeInput(finalRecipient),
+          unit_number: sanitizeInput(unitNumber),
           status: 'arrived',
           received_at: new Date().toISOString(),
           match_type: 'manual'
@@ -254,10 +261,10 @@ exports.handler = async (event) => {
     const { data, error } = await supabase.rpc('atomic_parcel_checkin', {
       p_tracking_number: tracking_number,
       p_carrier: detectedCarrier,
-      p_recipient_name: finalRecipient,
-      p_recipient_phone: recipientPhone,
-      p_recipient_email: recipientEmail,
-      p_unit_number: unitNumber,
+      p_recipient_name: sanitizeInput(finalRecipient),
+      p_recipient_phone: sanitizeInput(recipientPhone),
+      p_recipient_email: sanitizeInput(recipientEmail),
+      p_unit_number: sanitizeInput(unitNumber),
       p_match_type: 'manual'
     });
 

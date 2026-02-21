@@ -26,7 +26,7 @@ exports.handler = async (event) => {
   if (csrfBlock) return csrfBlock;
 
   // Require staff authentication for terminal checkout
-  const auth = await authorize(event);
+  const auth = await authorize(event, { requirePin: true });
   if (!auth.ok) return auth.response;
 
   let orderId, deviceId;

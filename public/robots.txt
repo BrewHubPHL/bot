@@ -1,11 +1,13 @@
 User-agent: *
 Allow: /
-Disallow: /admin.html
-Disallow: /manager.html
-Disallow: /login.html
-Disallow: /scan.html
-Disallow: /thank-you.html
-Disallow: /portal.html
+Disallow: /admin
+Disallow: /manager
+Disallow: /login
+Disallow: /scanner
+Disallow: /staff-hub
+Disallow: /kds
+Disallow: /pos
+Disallow: /thank-you
 Disallow: /.netlify/
 
 # AI Crawlers Welcome

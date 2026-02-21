@@ -9,7 +9,6 @@ module.exports = {
   offloadFunctions: [
     'claude-chat',      // Claude AI SDK
     'marketing-bot',    // Google AI + Facebook SDK  
-    'get-voice-session', // ElevenLabs
     'text-to-speech'    // ElevenLabs
   ],
 

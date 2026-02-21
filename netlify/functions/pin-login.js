@@ -167,6 +167,7 @@ exports.handler = async (event) => {
       sid: sessionId,
       staffId: matchedStaff.id,
       email: matchedStaff.email,
+      iat: Date.now(),
       exp: expiresAt,
     });
     const secret = process.env.INTERNAL_SYNC_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;

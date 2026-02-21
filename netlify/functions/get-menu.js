@@ -100,6 +100,7 @@ exports.handler = async (event) => {
       .from('merch_products')
       .select('name, price_cents, description, is_active')
       .eq('is_active', true)
+      .is('archived_at', null)
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true });
 

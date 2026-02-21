@@ -63,7 +63,8 @@ exports.handler = async (event) => {
     .from('merch_products')
     .select('name, price_cents')
     .in('name', itemNames)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .is('archived_at', null);
 
   if (dbErr) {
     console.error('Create order price lookup error:', dbErr);

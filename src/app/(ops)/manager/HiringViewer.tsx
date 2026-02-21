@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useOpsSession } from "@/components/OpsGate";
+import { sanitizeUrl } from "@braintree/sanitize-url";
 import {
   FileText,
   RefreshCw,
@@ -43,6 +44,31 @@ const API_BASE =
 
 /* Polling interval: check for new applications every 30 seconds */
 const POLL_INTERVAL_MS = 30_000;
+
+/**
+ * Validate that a resume URL is safe to open.
+ * Only allows HTTPS URLs pointing to our Supabase storage bucket.
+ * Returns the canonical, sanitised href or null.
+ */
+function safeResumeHref(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const sanitized = sanitizeUrl(raw);
+  if (sanitized === "about:blank") return null;
+  try {
+    const parsed = new URL(sanitized);
+    if (parsed.protocol !== "https:") return null;
+    // Only allow our Supabase storage domain
+    const supaHost = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "")
+      .replace(/^https?:\/\//, "")
+      .replace(/\/+$/, "");
+    if (!supaHost || parsed.host !== supaHost) return null;
+    if (!parsed.pathname.startsWith("/storage/v1/object/public/resumes/"))
+      return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
 
 /* ─── Main Component ─────────────────────────────────────── */
 export default function HiringViewer() {
@@ -170,6 +196,8 @@ export default function HiringViewer() {
         <div className="space-y-3">
           {filtered.map((a) => {
             const expanded = expandedId === a.id;
+            const resumeHref = safeResumeHref(a.resume_url);
+            const hasResume = !!resumeHref;
             return (
               <div
                 key={a.id}
@@ -200,9 +228,9 @@ export default function HiringViewer() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    {a.resume_url && (
+                    {hasResume && (
                       <a
-                        href={a.resume_url.startsWith('http') ? a.resume_url : '#'}
+                        href={resumeHref}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}

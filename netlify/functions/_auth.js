@@ -1,74 +1,51 @@
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAdmin = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-/**
- * Constant-time string comparison to prevent timing attacks.
- * Returns false if either value is falsy or lengths differ.
- */
-function safeCompare(a, b) {
-  if (!a || !b) return false;
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
+const json = (code, data) => ({ statusCode: code, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+
+function getClientIP(event) {
+  return event.headers['x-nf-client-connection-ip'] || event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'unknown';
 }
 
-/**
- * Verify internal service secret from request headers.
- * Use this for internal service-to-service authentication.
- * @param {object} event - Netlify function event
- * @returns {{ valid: boolean, response?: object }}
- */
-function verifyServiceSecret(event) {
-  const secret = event.headers?.['x-brewhub-secret'];
-  const envSecret = process.env.INTERNAL_SYNC_SECRET;
-  
-  if (!secret || !envSecret || !safeCompare(secret, envSecret)) {
-    return { valid: false, response: json(401, { error: 'Unauthorized' }) };
+function isIPAllowed(ip) {
+  if (ip === '127.0.0.1' || ip === '::1') return true;
+  const allowed = process.env.ALLOWED_IPS;
+  if (!allowed) {
+    console.error('[IP GATE] ALLOWED_IPS env var is not set — blocking all non-localhost requests. Set ALLOWED_IPS=* to explicitly allow all IPs.');
+    return false;
   }
-  return { valid: true };
+  if (allowed.trim() === '*') return true;
+  return allowed.split(',').map(x => x.trim()).includes(ip);
 }
-
-const json = (statusCode, payload) => ({
-  statusCode,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(payload),
-});
 
 function getJwtIat(token) {
   try {
-    const payloadPart = token.split('.')[1];
-    if (!payloadPart) return null;
-    const payloadJson = Buffer.from(payloadPart, 'base64').toString('utf8');
-    const payload = JSON.parse(payloadJson);
-    return typeof payload.iat === 'number' ? payload.iat : null;
-  } catch (err) {
-    return null;
-  }
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf8'));
+    return payload.iat || null;
+  } catch { return null; }
 }
 
-/**
- * Authorize a request. Returns user info + role.
- * @param {object} event - Netlify function event
- * @param {object} options - { requireManager: boolean, allowServiceSecret: boolean, maxTokenAgeMinutes: number }
- */
 async function authorize(event, options = {}) {
-  const { requireManager = false, allowServiceSecret = false, maxTokenAgeMinutes = null } = options;
+  const { requireManager = false, allowServiceSecret = false, maxTokenAgeMinutes = null, requirePin = false } = options;
 
-  // Internal service-to-service calls - ONLY allowed if explicitly enabled
-  // This prevents INTERNAL_SYNC_SECRET from being a "god mode" bypass
+  const clientIP = getClientIP(event);
+  if (!isIPAllowed(clientIP)) {
+    console.error(`[IP BLOCKED] ${clientIP}`);
+    return { ok: false, response: json(403, { error: 'Access denied: Unauthorized IP' }) };
+  }
+
   if (allowServiceSecret) {
-    const serviceAuth = verifyServiceSecret(event);
-    if (serviceAuth.valid) {
-      // Service tokens cannot perform manager-only operations
-      if (requireManager) {
-        console.error('[AUTH BLOCKED] Service token attempted manager action');
-        return { ok: false, response: json(403, { error: 'Service tokens cannot perform manager actions' }) };
+    const secret = event.headers?.['x-brewhub-secret'];
+    const envSecret = process.env.INTERNAL_SYNC_SECRET;
+    if (secret && envSecret) {
+      const bufA = Buffer.from(secret);
+      const bufB = Buffer.from(envSecret);
+      if (bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB)) {
+        if (requireManager) return { ok: false, response: json(403, { error: 'Service tokens cannot perform manager actions' }) };
+        return { ok: true, via: 'secret', role: 'service' };
       }
-      return { ok: true, via: 'secret', role: 'service' };
     }
   }
 
@@ -76,22 +53,15 @@ async function authorize(event, options = {}) {
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
   if (!token) return { ok: false, response: json(401, { error: 'Unauthorized' }) };
 
-  // ═══════════════════════════════════════════════════════════
-  // OPS PIN TOKEN: Accept HMAC tokens from pin-login.js
-  // ═══════════════════════════════════════════════════════════
-  // PIN tokens have 2 dot-separated parts (payload.signature)
-  // JWTs have 3 dot-separated parts (header.payload.signature)
-  const tokenParts = token.split('.');
-  if (tokenParts.length === 2) {
+  const parts = token.split('.');
+
+  if (parts.length === 2) {
     try {
-      const [payloadB64, signature] = tokenParts;
-      if (!payloadB64 || !signature) {
-        return { ok: false, response: json(401, { error: 'Invalid token format' }) };
-      }
-      const payloadStr = Buffer.from(payloadB64, 'base64').toString('utf-8');
+      const [payloadB64, signature] = parts;
+      const payloadStr = Buffer.from(payloadB64, 'base64').toString('utf8');
       const secret = process.env.INTERNAL_SYNC_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
       const expected = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
-
+      
       const sigBuf = Buffer.from(signature, 'hex');
       const expBuf = Buffer.from(expected, 'hex');
       if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
@@ -100,167 +70,106 @@ async function authorize(event, options = {}) {
 
       const payload = JSON.parse(payloadStr);
       if (!payload.exp || Date.now() > payload.exp) {
-        return { ok: false, response: json(401, { error: 'PIN session expired. Enter PIN again.' }) };
+        return { ok: false, response: json(401, { error: 'PIN session expired' }) };
       }
 
-      // Look up staff role from directory
-      const staffEmail = (payload.email || '').toLowerCase();
-      const { data: staffRec, error: staffErr } = await supabaseAdmin
-        .from('staff_directory')
-        .select('role')
-        .eq('email', staffEmail)
-        .single();
+      const email = (payload.email || '').toLowerCase();
+      const { data: staff, error } = await supabase.from('staff_directory').select('role, version_updated_at').eq('email', email).single();
+      if (error || !staff) return { ok: false, response: json(403, { error: 'Staff not found' }) };
 
-      if (staffErr || !staffRec) {
-        return { ok: false, response: json(403, { error: 'Staff not found' }) };
+      if (staff.version_updated_at && payload.iat) {
+        const versionTime = new Date(staff.version_updated_at).getTime();
+        if (versionTime > payload.iat) {
+          console.warn(`[AUTH BLOCKED] Token version mismatch: ${email}`);
+          return { ok: false, response: json(401, { error: 'Session invalidated', code: 'TOKEN_VERSION_MISMATCH' }) };
+        }
       }
 
-      const opsRole = staffRec.role;
-      const opsIsManager = (opsRole === 'manager' || opsRole === 'admin');
-      if (requireManager && !opsIsManager) {
-        return { ok: false, response: json(403, { error: 'Forbidden: Manager access required' }) };
-      }
+      const isManager = staff.role === 'manager' || staff.role === 'admin';
+      if (requireManager && !isManager) return { ok: false, response: json(403, { error: 'Manager access required' }) };
 
-      return { ok: true, via: 'pin', user: { email: staffEmail, id: payload.staffId }, role: opsRole };
+      return { ok: true, via: 'pin', user: { email, id: payload.staffId }, role: staff.role };
     } catch (err) {
-      console.error('[AUTH] PIN token verification failed:', err);
+      console.error('[AUTH] PIN verification failed:', err);
       return { ok: false, response: json(401, { error: 'Invalid PIN session' }) };
     }
   }
 
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !data?.user) {
-    return { ok: false, response: json(401, { error: 'Unauthorized' }) };
-  }
-
-  // Revocation check: deny if user was revoked after token issuance
-  try {
-    const { data: revoked, error: revokedError } = await supabaseAdmin
-      .from('revoked_users')
-      .select('revoked_at')
-      .eq('user_id', data.user.id)
-      .single();
-
-    if (revokedError && revokedError.code !== 'PGRST116') {
-      console.error('[AUTH] Revocation check failed:', revokedError);
-      return { ok: false, response: json(500, { error: 'Authorization failed' }) };
+  if (parts.length === 3) {
+    if (requirePin) {
+      console.error('[AUTH BLOCKED] PIN required but JWT provided');
+      return { ok: false, response: json(403, { error: 'PIN authentication required' }) };
     }
 
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) return { ok: false, response: json(401, { error: 'Unauthorized' }) };
+
+    const { data: revoked } = await supabase.from('revoked_users').select('revoked_at').eq('user_id', data.user.id).single();
     if (revoked?.revoked_at) {
       const iat = getJwtIat(token);
       const revokedAt = new Date(revoked.revoked_at).getTime();
-      const issuedAt = iat ? iat * 1000 : 0;
-
-      if (!iat || revokedAt >= issuedAt) {
-        console.error(`[AUTH BLOCKED] Revoked user token: ${data.user.email}`);
+      if (!iat || revokedAt >= iat * 1000) {
+        console.error(`[AUTH BLOCKED] Revoked user: ${data.user.email}`);
         return { ok: false, response: json(403, { error: 'Access revoked' }) };
       }
     }
-  } catch (err) {
-    console.error('[AUTH] Revocation crash:', err);
-    return { ok: false, response: json(500, { error: 'Authorization failed' }) };
-  }
 
-  // ═══════════════════════════════════════════════════════════
-  // TOKEN FRESHNESS CHECK (Stateless-to-Stateful Hybrid)
-  // ═══════════════════════════════════════════════════════════
-  // For high-sensitivity endpoints, reject tokens older than maxTokenAgeMinutes.
-  // This forces re-authentication for financial/PII operations.
-  if (maxTokenAgeMinutes !== null) {
-    const iat = getJwtIat(token);
-    if (!iat) {
-      return { ok: false, response: json(401, { error: 'Invalid token: missing iat' }) };
+    if (maxTokenAgeMinutes !== null) {
+      const iat = getJwtIat(token);
+      if (!iat) return { ok: false, response: json(401, { error: 'Invalid token' }) };
+      const ageMs = Date.now() - (iat * 1000);
+      if (ageMs > maxTokenAgeMinutes * 60 * 1000) {
+        console.error(`[AUTH BLOCKED] Stale token: ${data.user.email}`);
+        return { ok: false, response: json(401, { error: 'Session expired' }) };
+      }
     }
-    const tokenAgeMs = Date.now() - (iat * 1000);
-    const maxAgeMs = maxTokenAgeMinutes * 60 * 1000;
-    if (tokenAgeMs > maxAgeMs) {
-      console.error(`[AUTH BLOCKED] Stale token (${Math.round(tokenAgeMs/60000)}min old): ${data.user.email}`);
-      return { ok: false, response: json(401, { error: 'Session expired. Please re-authenticate.' }) };
+
+    const email = (data.user.email || '').toLowerCase();
+    const { data: staff, error: staffErr } = await supabase.from('staff_directory').select('role, version_updated_at').eq('email', email).single();
+    if (staffErr || !staff) {
+      console.error(`[AUTH BLOCKED] Not in staff directory: ${email}`);
+      return { ok: false, response: json(403, { error: 'Forbidden' }) };
     }
-  }
 
-  const email = (data.user.email || '').toLowerCase();
-  
-  // SSoT CHECK: Query staff_directory instead of env var
-  // Also fetch token versioning fields for immediate invalidation detection
-  const { data: staffRecord, error: staffError } = await supabaseAdmin
-      .from('staff_directory')
-      .select('role, token_version, version_updated_at')
-      .eq('email', email)
-      .single();
-
-  if (staffError || !staffRecord) {
-     console.error(`[AUTH BLOCKED] Access denied (Not in Staff Directory): ${email}`);
-     return { ok: false, response: json(403, { error: 'Forbidden' }) };
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // TOKEN VERSIONING: Immediate Session Invalidation
-  // ═══════════════════════════════════════════════════════════
-  // If the staff member's role was changed (or sessions were manually invalidated),
-  // version_updated_at will be newer than the token's issued-at time.
-  // This forces immediate re-authentication despite a valid JWT.
-  if (staffRecord.version_updated_at) {
-    const versionUpdatedAt = new Date(staffRecord.version_updated_at).getTime();
-    const iat = getJwtIat(token);
-    const tokenIssuedAt = iat ? iat * 1000 : 0;
-
-    if (versionUpdatedAt > tokenIssuedAt) {
-      console.warn(`[AUTH BLOCKED] Token invalidated by version bump: ${email} (v${staffRecord.token_version})`);
-      return { 
-        ok: false, 
-        response: json(401, { 
-          error: 'Session invalidated. Please sign in again.',
-          code: 'TOKEN_VERSION_MISMATCH'
-        }) 
-      };
+    if (staff.version_updated_at) {
+      const versionTime = new Date(staff.version_updated_at).getTime();
+      const iat = getJwtIat(token);
+      if (iat && versionTime > iat * 1000) {
+        console.warn(`[AUTH BLOCKED] Token version mismatch: ${email}`);
+        return { ok: false, response: json(401, { error: 'Session invalidated', code: 'TOKEN_VERSION_MISMATCH' }) };
+      }
     }
+
+    const isManager = staff.role === 'manager' || staff.role === 'admin';
+    if (requireManager && !isManager) {
+      console.error(`[AUTH BLOCKED] Staff attempted manager action: ${email}`);
+      return { ok: false, response: json(403, { error: 'Manager access required' }) };
+    }
+
+    return { ok: true, via: 'jwt', user: data.user, role: staff.role };
   }
 
-  const role = staffRecord.role;
-  const isManager = (role === 'manager' || role === 'admin');
-
-  // If endpoint requires manager role, enforce it
-  if (requireManager && !isManager) {
-    console.error(`[AUTH BLOCKED] Staff attempted manager action: ${email}`);
-    return { ok: false, response: json(403, { error: 'Forbidden: Manager access required' }) };
-  }
-
-  return { 
-    ok: true, 
-    via: 'jwt', 
-    user: data.user,
-    role: role
-  };
+  return { ok: false, response: json(401, { error: 'Invalid token format' }) };
 }
 
-/**
- * Sanitize error responses to prevent schema snooping.
- * Logs the real error server-side but returns a generic message to clients.
- * @param {Error|object} error - The actual error object
- * @param {string} context - Where the error occurred (for logging)
- * @returns {object} - Netlify response object with sanitized error
- */
 function sanitizedError(error, context = 'Operation') {
-  // Log the real error server-side for debugging
-  console.error(`[${context}] Internal error:`, error?.message || error);
-  
-  // Never expose these patterns to clients
-  const sensitivePatterns = [
-    /relation ".*" does not exist/i,
-    /column ".*" does not exist/i,
-    /permission denied/i,
-    /violates row-level security/i,
-    /PGRST\d+/i,
-    /42P01|42501|42703/i // PostgreSQL error codes
-  ];
+  console.error(`[${context}]`, error?.message || error);
+  const patterns = [/relation.*does not exist/i, /column.*does not exist/i, /permission denied/i, /violates row-level security/i, /PGRST\d+/i, /42P01|42501|42703/i];
+  const msg = String(error?.message || error || '');
+  const isSensitive = patterns.some(p => p.test(msg));
+  return json(500, { error: isSensitive ? 'An error occurred. Please try again.' : 'Operation failed' });
+}
 
-  const errorMsg = String(error?.message || error || '');
-  const isSensitive = sensitivePatterns.some(p => p.test(errorMsg));
-
-  return json(500, { 
-    error: isSensitive ? 'An error occurred. Please try again.' : 'Operation failed'
-  });
+function verifyServiceSecret(event) {
+  const secret = event.headers?.['x-brewhub-secret'];
+  const envSecret = process.env.INTERNAL_SYNC_SECRET;
+  if (!secret || !envSecret) return { valid: false, response: json(401, { error: 'Unauthorized' }) };
+  const bufA = Buffer.from(secret);
+  const bufB = Buffer.from(envSecret);
+  if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+    return { valid: false, response: json(401, { error: 'Unauthorized' }) };
+  }
+  return { valid: true };
 }
 
 module.exports = { authorize, json, sanitizedError, verifyServiceSecret };

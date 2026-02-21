@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "crypto";
 
 /**
  * Secure middleware for BrewHub ops routes.
@@ -12,14 +11,14 @@ import { createHmac, timingSafeEqual } from "crypto";
  * HttpOnly + Secure + SameSite=Strict.
  */
 
-const OPS_PATHS = ["/kds", "/pos", "/scanner", "/manager"];
+const OPS_PATHS = ["/kds", "/pos", "/scanner", "/manager", "/staff-hub"];
 
 function isOpsRoute(pathname: string): boolean {
   // Match /kds, /pos, /scanner, /manager (Next.js removes the (ops) group prefix)
   return OPS_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
-function verifySessionToken(token: string, secret: string): { valid: boolean; expired: boolean; payload?: Record<string, unknown> } {
+async function verifySessionToken(token: string, secret: string): Promise<{ valid: boolean; expired: boolean; payload?: Record<string, unknown> }> {
   try {
     const dotIdx = token.lastIndexOf(".");
     if (dotIdx === -1) return { valid: false, expired: false };
@@ -28,15 +27,21 @@ function verifySessionToken(token: string, secret: string): { valid: boolean; ex
     const signature = token.substring(dotIdx + 1);
     if (!payloadB64 || !signature) return { valid: false, expired: false };
 
-    const payloadStr = Buffer.from(payloadB64, "base64").toString("utf-8");
-    const expected = createHmac("sha256", secret).update(payloadStr).digest("hex");
+    const payloadStr = atob(payloadB64);
 
-    // Constant-time comparison
-    const sigBuf = Buffer.from(signature, "hex");
-    const expBuf = Buffer.from(expected, "hex");
-    if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
-      return { valid: false, expired: false };
-    }
+    // Import key for HMAC-SHA256 (Web Crypto — Edge Runtime compatible)
+    const keyData = new TextEncoder().encode(secret);
+    const key = await crypto.subtle.importKey(
+      "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["verify"]
+    );
+
+    // Decode hex signature to bytes
+    const sigBytes = new Uint8Array(signature.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
+    const msgBytes = new TextEncoder().encode(payloadStr);
+
+    // crypto.subtle.verify performs a constant-time comparison internally
+    const valid = await crypto.subtle.verify("HMAC", key, sigBytes, msgBytes);
+    if (!valid) return { valid: false, expired: false };
 
     const payload = JSON.parse(payloadStr) as Record<string, unknown>;
 
@@ -51,7 +56,7 @@ function verifySessionToken(token: string, secret: string): { valid: boolean; ex
   }
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Only gate ops routes
@@ -95,7 +100,7 @@ export function middleware(request: NextRequest) {
     });
   }
 
-  const result = verifySessionToken(sessionCookie, secret);
+  const result = await verifySessionToken(sessionCookie, secret);
 
   if (result.expired) {
     // Clear the stale cookie and redirect to force re-authentication
@@ -124,5 +129,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/kds/:path*", "/pos/:path*", "/scanner/:path*", "/manager/:path*"],
+  matcher: ["/kds/:path*", "/pos/:path*", "/scanner/:path*", "/manager/:path*", "/staff-hub/:path*"],
 };

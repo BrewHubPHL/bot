@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
-const crypto = require('crypto');
+const { authorize, json } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -8,74 +9,44 @@ const supabase = createClient(
 
 const VALID_ACTIONS = ['in', 'out'];
 
-/**
- * Verify the HMAC ops-session token created by pin-login.js
- */
-function verifyToken(token) {
-  if (!token) return null;
-
-  try {
-    const [payloadB64, signature] = token.split('.');
-    if (!payloadB64 || !signature) return null;
-
-    const payloadStr = Buffer.from(payloadB64, 'base64').toString('utf-8');
-    const secret = process.env.INTERNAL_SYNC_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const expected = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
-
-    // Constant-time comparison for signature
-    const sigBuf = Buffer.from(signature, 'hex');
-    const expBuf = Buffer.from(expected, 'hex');
-    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
-      return null;
-    }
-
-    const payload = JSON.parse(payloadStr);
-    if (!payload.exp || Date.now() > payload.exp) return null; // expired
-
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-const json = (statusCode, data) => ({
-  statusCode,
-  headers: {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  },
-  body: JSON.stringify(data),
-});
-
 exports.handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') return json(200, {});
-  if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  };
+
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers: corsHeaders, body: '' };
+  }
+
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, headers: corsHeaders, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+  }
+
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return { ...csrfBlock, headers: { ...csrfBlock.headers, ...corsHeaders } };
+
+  // Authenticate using centralized authorize() — requires PIN token
+  const auth = await authorize(event, { requirePin: true });
+  if (!auth.ok) {
+    return { ...auth.response, headers: { ...auth.response.headers, ...corsHeaders } };
+  }
 
   try {
-    // Auth: require ops token from pin-login
-    const authHeader = event.headers.authorization || '';
-    const token = authHeader.replace(/^Bearer\s+/i, '');
-    const session = verifyToken(token);
-
-    if (!session) {
-      return json(401, { error: 'Unauthorized — PIN session expired or invalid' });
-    }
-
     const { action } = JSON.parse(event.body || '{}');
 
     if (!action || !VALID_ACTIONS.includes(action)) {
-      return json(400, { error: `Invalid action. Must be one of: ${VALID_ACTIONS.join(', ')}` });
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: `Invalid action. Must be one of: ${VALID_ACTIONS.join(', ')}` })
+      };
     }
 
-    const staffEmail = session.email;
-    const staffId = session.staffId;
-
-    if (!staffEmail) {
-      return json(400, { error: 'Invalid session — missing email' });
-    }
-
+    const staffEmail = auth.user.email;
     const now = new Date().toISOString();
 
     if (action === 'in') {
@@ -89,7 +60,11 @@ exports.handler = async (event) => {
         .limit(1);
 
       if (openLog && openLog.length > 0) {
-        return json(409, { error: 'Already clocked in. Clock out first.' });
+        return {
+          statusCode: 409,
+          headers: corsHeaders,
+          body: JSON.stringify({ error: 'Already clocked in. Clock out first.' })
+        };
       }
 
       // Insert clock-in record
@@ -104,7 +79,11 @@ exports.handler = async (event) => {
 
       if (insertErr) {
         console.error('[PIN-CLOCK] Insert error:', insertErr);
-        return json(500, { error: 'Failed to clock in' });
+        return {
+          statusCode: 500,
+          headers: corsHeaders,
+          body: JSON.stringify({ error: 'Failed to clock in' })
+        };
       }
 
       // Update is_working flag
@@ -114,7 +93,11 @@ exports.handler = async (event) => {
         .eq('email', staffEmail);
 
       console.log(`[PIN-CLOCK] ${staffEmail} clocked IN`);
-      return json(200, { success: true, action: 'in', time: now });
+      return {
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({ success: true, action: 'in', time: now })
+      };
     }
 
     if (action === 'out') {
@@ -130,11 +113,19 @@ exports.handler = async (event) => {
 
       if (findErr) {
         console.error('[PIN-CLOCK] Find error:', findErr);
-        return json(500, { error: 'Failed to find active shift' });
+        return {
+          statusCode: 500,
+          headers: corsHeaders,
+          body: JSON.stringify({ error: 'Failed to find active shift' })
+        };
       }
 
       if (!activeLog || activeLog.length === 0) {
-        return json(409, { error: 'Not currently clocked in.' });
+        return {
+          statusCode: 409,
+          headers: corsHeaders,
+          body: JSON.stringify({ error: 'Not currently clocked in.' })
+        };
       }
 
       // Update with clock_out time
@@ -145,7 +136,11 @@ exports.handler = async (event) => {
 
       if (updateErr) {
         console.error('[PIN-CLOCK] Update error:', updateErr);
-        return json(500, { error: 'Failed to clock out' });
+        return {
+          statusCode: 500,
+          headers: corsHeaders,
+          body: JSON.stringify({ error: 'Failed to clock out' })
+        };
       }
 
       // Update is_working flag
@@ -155,10 +150,18 @@ exports.handler = async (event) => {
         .eq('email', staffEmail);
 
       console.log(`[PIN-CLOCK] ${staffEmail} clocked OUT`);
-      return json(200, { success: true, action: 'out', time: now });
+      return {
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({ success: true, action: 'out', time: now })
+      };
     }
   } catch (err) {
     console.error('[PIN-CLOCK] Error:', err);
-    return json(500, { error: 'Clock operation failed' });
+    return {
+      statusCode: 500,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: 'Clock operation failed' })
+    };
   }
 };

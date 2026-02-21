@@ -50,6 +50,7 @@ export default async function ShopPage() {
         .from('merch_products')
         .select('name, price_cents, description, image_url, checkout_url, sort_order, category')
         .eq('is_active', true)
+        .is('archived_at', null)
         .order('sort_order', { ascending: true })
         .order('name', { ascending: true });
 

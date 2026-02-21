@@ -3,20 +3,15 @@
 enabled = true
 verify_jwt = true
 import_map = "./functions/parcel-pickup/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/parcel-pickup/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/parcel-pickup/*.html" ]
 
-[functions.brewbot-voice]
+[functions.notification-worker]
 enabled = true
 verify_jwt = true
-import_map = "./functions/brewbot-voice/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/brewbot-voice/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/brewbot-voice/*.html" ]
+import_map = "./functions/notification-worker/deno.json"
+entrypoint = "./functions/notification-worker/index.ts"
+
+[functions.welcome-email]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/welcome-email/index.ts"

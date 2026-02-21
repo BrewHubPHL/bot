@@ -180,6 +180,7 @@ async function executeTool(toolName, toolInput, supabase) {
                     .from('merch_products')
                     .select('name, price_cents, description')
                     .eq('is_active', true)
+                    .is('archived_at', null)
                     .order('sort_order', { ascending: true });
 
                 if (!error && data && data.length > 0) {
@@ -225,7 +226,7 @@ async function executeTool(toolName, toolInput, supabase) {
             return {
                 success: false,
                 requires_login: true,
-                result: 'You need to be logged in to place an order! Sign in or create an account at brewhubphl.com/portal, then come back and I\'ll get your order going. ☕'
+                result: 'You need to be logged in to place an order! Sign in or create an account at brewhubphl.com/portal, then come back and I\'ll get your order going.'
             };
         }
 
@@ -243,7 +244,8 @@ async function executeTool(toolName, toolInput, supabase) {
                 const { data } = await supabase
                     .from('merch_products')
                     .select('name, price_cents')
-                    .eq('is_active', true);
+                    .eq('is_active', true)
+                    .is('archived_at', null);
                 if (data && data.length > 0) {
                     menuPrices = {};
                     data.forEach(item => { menuPrices[item.name] = item.price_cents; });
@@ -329,7 +331,7 @@ async function executeTool(toolName, toolInput, supabase) {
 
         if (!email && !phone) {
             if (!authedUser) {
-                return { result: 'I need you to log in first so I can look up your loyalty info! Sign in at brewhubphl.com/portal ☕' };
+                return { result: 'I need you to log in first so I can look up your loyalty info! Sign in at brewhubphl.com/portal' };
             }
             return { result: 'I need your email or phone number to look up your loyalty info.' };
         }
@@ -339,7 +341,7 @@ async function executeTool(toolName, toolInput, supabase) {
         if (!authedUser) {
             return {
                 requires_login: true,
-                result: 'To check your loyalty points, please log in first at brewhubphl.com/portal — that way I can securely pull up your account! ☕'
+                result: 'To check your loyalty points, please log in first at brewhubphl.com/portal — that way I can securely pull up your account!'
             };
         }
 
@@ -409,7 +411,7 @@ async function executeTool(toolName, toolInput, supabase) {
                     body: new URLSearchParams({
                         To: formattedPhone,
                         MessagingServiceSid: messagingServiceSid,
-                        Body: `☕ BrewHub Loyalty\nYou have ${points} points!\n${pointsToReward} more to your next free drink.\n\nYour QR: ${qrImageUrl}\n\nPortal: ${qrUrl}`
+                        Body: `BrewHub Loyalty\nYou have ${points} points!\n${pointsToReward} more to your next free drink.\n\nYour QR: ${qrImageUrl}\n\nPortal: ${qrUrl}`
                     }).toString()
                 }).catch(err => console.error('SMS send error:', err));
 
@@ -536,7 +538,7 @@ Point Breeze, Philadelphia, PA 19146
 - If a tool returns requires_login: true, tell the customer they need to sign in first and give the link.
 - Never try to work around login requirements - security first!
 
-Never make up order numbers, prices, or loyalty balances. Always use the tools to get real data. Keep responses short (1-2 sentences max). Use emojis sparingly.`;
+Never make up order numbers, prices, or loyalty balances. Always use the tools to get real data. Keep responses short (1-2 sentences max). NEVER use emojis — your replies are read aloud by a text-to-speech voice and emojis sound awkward when spoken.`;
 
 exports.handler = async (event) => {
     const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
@@ -560,7 +562,7 @@ exports.handler = async (event) => {
         return {
             statusCode: 429,
             headers,
-            body: JSON.stringify({ reply: 'Elise is resting her voice. Try again later! ☕' })
+            body: JSON.stringify({ reply: 'Elise is resting her voice. Try again later!' })
         };
     }
 
@@ -698,16 +700,16 @@ exports.handler = async (event) => {
 
         // Fallback: Simple keyword responses
         const lowerText = userText.toLowerCase().trim();
-        let reply = "For any questions, feel free to email info@brewhubphl.com or DM us on Instagram @brewhubphl! ☕";
+        let reply = "For any questions, feel free to email info@brewhubphl.com or DM us on Instagram @brewhubphl!";
 
         if (lowerText.includes('hi') || lowerText.includes('hello') || lowerText.includes('hey')) {
-            reply = "Hey there! Welcome to BrewHub! How can I help? ☕";
+            reply = "Hey there! Welcome to BrewHub! How can I help?";
         } else if (lowerText.includes('email') || lowerText.includes('contact') || lowerText.includes('marketing')) {
             reply = "For business or marketing inquiries, email info@brewhubphl.com! 📧";
         } else if (lowerText.includes('menu') || lowerText.includes('drinks') || lowerText.includes('coffee') || lowerText.includes('black') || lowerText.includes('latte')) {
-            reply = "We'll have all the classics - drip coffee, lattes, cappuccinos, cold brew and more! Can't wait to serve you ☕";
+            reply = "We'll have all the classics - drip coffee, lattes, cappuccinos, cold brew and more! Can't wait to serve you.";
         } else if (lowerText.includes('when') || lowerText.includes('open')) {
-            reply = "We're gearing up for our grand opening! Join the waitlist above to be the first to know! 🎉";
+            reply = "We're gearing up for our grand opening! Join the waitlist above to be the first to know!";
         } else if (lowerText.includes('where') || lowerText.includes('location')) {
             reply = "We're setting up in Point Breeze, Philadelphia! Follow @brewhubphl for updates 📍";
         }

@@ -44,8 +44,8 @@ export default function SiteLayout({
               Facebook
             </a>
             <a href="/staff" className="nav-link">Staff</a>
-            <a href="/privacy.html" className="nav-link">Privacy</a>
-            <a href="/terms.html" className="nav-link">Terms</a>
+            <a href="/privacy" className="nav-link">Privacy</a>
+            <a href="/terms" className="nav-link">Terms</a>
             <a href="/about" className="nav-link">About</a>
             <a href="/careers" className="nav-link">Careers</a>
             <a href="/portal" className="nav-link">Resident Login</a>

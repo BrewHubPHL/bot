@@ -1,12 +1,13 @@
 // Text-to-Speech using ElevenLabs
 const { authorize } = require('./_auth');
 const { checkQuota } = require('./_usage');
+const { requireCsrfHeader } = require('./_csrf');
 
 exports.handler = async (event) => {
     const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
     const corsHeaders = {
         'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
     };
 
@@ -17,6 +18,10 @@ exports.handler = async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, headers: corsHeaders, body: 'Method not allowed' };
     }
+
+    // CSRF protection — prevents cross-origin abuse
+    const csrfBlock = requireCsrfHeader(event);
+    if (csrfBlock) return csrfBlock;
 
     // 1. Check Auth (Staff get unlimited/VIP)
     const auth = await authorize(event);

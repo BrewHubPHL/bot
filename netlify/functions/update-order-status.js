@@ -34,7 +34,7 @@ exports.handler = async (event) => {
   if (csrfBlock) return csrfBlock;
 
   // 2. Staff Authentication Required
-  const auth = await authorize(event);
+  const auth = await authorize(event, { requirePin: true });
   if (!auth.ok) return auth.response;
 
   try {

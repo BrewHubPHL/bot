@@ -48,6 +48,7 @@ export default function OpsGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [session, setSession] = useState<OpsSession | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const [clockLoading, setClockLoading] = useState(false);
   const [clockMsg, setClockMsg] = useState("");
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
@@ -66,6 +67,48 @@ export default function OpsGate({ children }: { children: ReactNode }) {
     return () => clearInterval(tick);
   }, [mounted]);
 
+  // Verify existing session with backend on mount
+  const verifySession = useCallback(async (savedSession: OpsSession) => {
+    setVerifying(true);
+    try {
+      // Call a lightweight endpoint to verify token & sync is_working status
+      const res = await fetch(`${API_BASE}/pin-verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${savedSession.token}`,
+          "X-BrewHub-Action": "true",
+        },
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        // Handle token version mismatch or other auth failures
+        if (data.code === "TOKEN_VERSION_MISMATCH") {
+          console.warn("[OpsGate] Session invalidated by backend");
+        }
+        sessionStorage.removeItem("ops_session");
+        setSession(null);
+        return;
+      }
+
+      const data = await res.json();
+      // Sync is_working status from backend
+      const syncedSession: OpsSession = {
+        ...savedSession,
+        staff: { ...savedSession.staff, is_working: data.is_working ?? savedSession.staff.is_working },
+      };
+      setSession(syncedSession);
+      sessionStorage.setItem("ops_session", JSON.stringify(syncedSession));
+    } catch (err) {
+      console.error("[OpsGate] Session verification failed:", err);
+      sessionStorage.removeItem("ops_session");
+      setSession(null);
+    } finally {
+      setVerifying(false);
+    }
+  }, []);
+
   // Check for existing session in sessionStorage on mount
   useEffect(() => {
     try {
@@ -76,7 +119,8 @@ export default function OpsGate({ children }: { children: ReactNode }) {
         const [payloadB64] = parsed.token.split(".");
         const payload = JSON.parse(atob(payloadB64));
         if (payload.exp && Date.now() < payload.exp) {
-          setSession(parsed);
+          // Verify with backend to ensure token is still valid
+          verifySession(parsed);
         } else {
           sessionStorage.removeItem("ops_session");
         }
@@ -84,7 +128,7 @@ export default function OpsGate({ children }: { children: ReactNode }) {
     } catch {
       sessionStorage.removeItem("ops_session");
     }
-  }, []);
+  }, [verifySession]);
 
   // Keyboard input handler
   useEffect(() => {
@@ -137,7 +181,7 @@ export default function OpsGate({ children }: { children: ReactNode }) {
       const res = await fetch(`${API_BASE}/pin-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-BrewHub-Action": "true" },
-        credentials: "include",  // Required: accept Set-Cookie from pin-login
+        credentials: "include",
         body: JSON.stringify({ pin }),
       });
 
@@ -227,6 +271,16 @@ export default function OpsGate({ children }: { children: ReactNode }) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-zinc-600" />
+      </div>
+    );
+  }
+
+  /* ─── Verifying existing session ─── */
+  if (verifying) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-amber-400 mb-4" />
+        <p className="text-zinc-500 text-sm">Verifying session…</p>
       </div>
     );
   }

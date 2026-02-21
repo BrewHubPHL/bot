@@ -38,7 +38,7 @@ exports.handler = async (event) => {
 
   try {
     // 3. Staff auth via centralized _auth.js (includes token versioning, revocation, freshness)
-    const auth = await authorize(event);
+    const auth = await authorize(event, { requirePin: true });
     if (!auth.ok) return auth.response;
 
     const user = auth.user;

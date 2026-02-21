@@ -33,17 +33,9 @@ coverage/
 dist/
 build/
 
-# Legacy HTML replaced by Next.js (keeping locally as backup)
-legacy/index.html
-legacy/shop.html
-legacy/checkout.html
-legacy/portal.html
-legacy/resident.html
-public/index.html
-public/shop.html
-public/checkout.html
-public/portal.html
-public/resident.html
+# Legacy HTML replaced by Next.js (archived in dead/)
+legacy/
+dead/
 
 # IDE
 .vscode/settings.json

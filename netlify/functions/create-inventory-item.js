@@ -9,7 +9,7 @@ const supabase = createClient(
 
 exports.handler = async (event) => {
   // Auth check (Manager Only — baristas cannot create inventory items)
-  const auth = await authorize(event, { requireManager: true });
+  const auth = await authorize(event, { requireManager: true, requirePin: true });
   if (!auth.ok) return auth.response;
 
   if (event.httpMethod !== 'POST') {

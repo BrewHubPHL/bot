@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { sanitizeInput } = require('./_sanitize');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -40,12 +41,12 @@ exports.handler = async (event) => {
   }
 
   const email = (body.email || '').trim().toLowerCase();
-  const name = (body.name || '').trim();
-  const address = (body.address || '').trim();
-  const phone = (body.phone || '').trim() || null;
+  const fullName = sanitizeInput(body.name || body.full_name);
+  const addressStreet = sanitizeInput(body.address || body.address_street);
+  const phone = sanitizeInput(body.phone) || null;
   const smsOptIn = Boolean(body.sms_opt_in);
 
-  if (!email || !name || !address) {
+  if (!email || !fullName || !addressStreet) {
     return json(400, { error: 'Missing required fields' });
   }
 
@@ -79,8 +80,8 @@ exports.handler = async (event) => {
       .from('customers')
       .insert({
         email,
-        name,
-        address,
+        full_name: fullName,
+        address_street: addressStreet,
         phone,
         sms_opt_in: smsOptIn,
         loyalty_points: 0

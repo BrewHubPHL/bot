@@ -1,17 +1,20 @@
-# Explicit routes for legacy HTML pages
-/login.html        /login.html       200
-/portal.html       /portal.html      200
-/cafe.html         /cafe.html        200
-/kds.html          /kds.html         200
-/parcels.html      /parcels.html     200
-/scan.html         /scan.html        200
-/manager.html      /manager.html     200
-/admin.html        /admin.html       200
-/shop.html         /shop.html        200
-/checkout.html     /checkout.html    200
-/thank-you.html    /thank-you.html   200
-/resident.html     /resident.html    200
-/privacy.html      /privacy.html     200
+# Legacy .html → clean Next.js URLs (301 permanent redirects)
+/login.html        /login             301
+/portal.html       /portal            301
+/cafe.html         /cafe              301
+/kds.html          /kds               301
+/parcels.html      /parcels           301
+/scan.html         /scanner           301
+/manager.html      /manager           301
+/admin.html        /admin             301
+/shop.html         /shop              301
+/checkout.html     /checkout          301
+/thank-you.html    /thank-you         301
+/resident.html     /resident          301
+/privacy.html      /privacy           301
+/terms.html        /terms             301
+/staff-hub.html    /staff-hub         301
+/queue.html        /queue             301
 
 # Apple Pay domain verification
 /.well-known/*     /.well-known/:splat  200

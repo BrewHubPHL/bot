@@ -40,6 +40,8 @@ interface ParcelRow {
 /* ------------------------------------------------------------------ */
 
 const POLL_MS = 10_000; // 10-second polling interval
+const MAX_POLL_MS = 60_000; // max backoff: 60 seconds
+const STALE_MS = 30_000; // show "stale" indicator after 30s without success
 const NEW_THRESHOLD_MS = 5 * 60 * 1000; // 5-minute "new" window
 
 /** Human-friendly waiting duration */
@@ -80,6 +82,11 @@ export default function ParcelMonitor() {
   const [parcels, setParcels] = useState<ParcelRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(Date.now());
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [lastSuccess, setLastSuccess] = useState<number>(Date.now());
+
+  /* ---- Backoff ref (doubles on consecutive errors, resets on success) */
+  const backoffRef = React.useRef(POLL_MS);
 
   /* ---- Fetch from the secure VIEW ------------------------------- */
   const fetchParcels = useCallback(async () => {
@@ -88,20 +95,50 @@ export default function ParcelMonitor() {
       .select("*")
       .order("received_at", { ascending: false });
 
-    if (!error && data) setParcels(data as ParcelRow[]);
+    if (error) {
+      setFetchError(error.message ?? "Connection lost");
+      backoffRef.current = Math.min(backoffRef.current * 2, MAX_POLL_MS);
+    } else {
+      setParcels(data as ParcelRow[]);
+      setFetchError(null);
+      setLastSuccess(Date.now());
+      backoffRef.current = POLL_MS; // reset backoff on success
+    }
     setLoading(false);
   }, []);
 
-  /* ---- Polling: fetch every 10s + tick clock every second -------- */
+  /* ---- Polling: fetch with adaptive backoff + pause when hidden -- */
   useEffect(() => {
     fetchParcels();
 
-    const pollId = setInterval(fetchParcels, POLL_MS);
+    let pollId: ReturnType<typeof setTimeout>;
+    const schedulePoll = () => {
+      pollId = setTimeout(() => {
+        fetchParcels().then(schedulePoll);
+      }, backoffRef.current);
+    };
+    schedulePoll();
+
     const clockId = setInterval(() => setTick(Date.now()), 1_000);
 
+    // Pause polling when the tab/kiosk is hidden (saves resources)
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        // Immediately fetch when returning to view, then resume schedule
+        fetchParcels().then(() => {
+          clearTimeout(pollId);
+          schedulePoll();
+        });
+      } else {
+        clearTimeout(pollId);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
-      clearInterval(pollId);
+      clearTimeout(pollId);
       clearInterval(clockId);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [fetchParcels]);
 
@@ -113,9 +150,23 @@ export default function ParcelMonitor() {
     hour12: true,
   });
 
+  const isStale = tick - lastSuccess > STALE_MS;
+
   /* ---- Render --------------------------------------------------- */
   return (
     <div className="fixed inset-0 z-[9999] w-screen h-screen bg-black text-white overflow-hidden flex flex-col select-none cursor-default">
+
+      {/* ═══════════ ERROR / STALE BANNER ═══════════ */}
+      {fetchError && (
+        <div className="shrink-0 bg-red-900/80 text-red-200 text-center py-2 text-sm font-semibold tracking-wide">
+          ⚠ Connection issue — retrying&hellip; ({fetchError})
+        </div>
+      )}
+      {!fetchError && isStale && (
+        <div className="shrink-0 bg-amber-900/60 text-amber-200 text-center py-2 text-sm font-semibold tracking-wide">
+          ⏳ Data may be stale — last updated {Math.round((tick - lastSuccess) / 1000)}s ago
+        </div>
+      )}
 
       {/* ═══════════ HEADER ═══════════ */}
       <header className="shrink-0 flex items-center justify-between px-10 py-6 border-b border-white/5">
@@ -127,13 +178,19 @@ export default function ParcelMonitor() {
         </div>
 
         <div className="flex items-center gap-8">
-          {/* Live indicator */}
+          {/* Live indicator — switches to amber when stale */}
           <span className="flex items-center gap-2 text-sm text-gray-500">
             <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
+              {isStale ? (
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500" />
+              ) : (
+                <>
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
+                </>
+              )}
             </span>
-            Live
+            {isStale ? "Reconnecting" : "Live"}
           </span>
 
           {/* Package count */}

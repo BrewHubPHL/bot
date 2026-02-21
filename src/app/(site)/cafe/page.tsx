@@ -29,6 +29,7 @@ export default function CafePage() {
         .from("merch_products")
         .select("id, name, price_cents")
         .eq("is_active", true)
+        .is("archived_at", null)
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true });
       if (!error && data) setMenu(data);

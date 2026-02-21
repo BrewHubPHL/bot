@@ -141,6 +141,7 @@ export default function POSPage() {
         .from("merch_products")
         .select("id, name, price_cents, description, image_url")
         .eq("is_active", true)
+        .is("archived_at", null)
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true });
 

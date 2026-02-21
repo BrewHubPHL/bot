@@ -44,7 +44,7 @@ exports.handler = async (event) => {
   if (csrfBlock) return csrfBlock;
 
   // Staff auth required
-  const auth = await authorize(event);
+  const auth = await authorize(event, { requirePin: true });
   if (!auth.ok) return auth.response;
 
   try {
@@ -105,7 +105,8 @@ exports.handler = async (event) => {
         .from('merch_products')
         .select('id, name, price_cents')
         .in('id', uniqueIds)
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .is('archived_at', null);
       if (prodErr) {
         console.error('[CAFE] Product ID lookup error:', prodErr);
         return json(500, { error: 'Failed to verify product prices.' });
@@ -120,7 +121,8 @@ exports.handler = async (event) => {
         .from('merch_products')
         .select('id, name, price_cents')
         .in('name', uniqueNames)
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .is('archived_at', null);
       if (prodErr) {
         console.error('[CAFE] Product name lookup error:', prodErr);
         return json(500, { error: 'Failed to verify product prices.' });

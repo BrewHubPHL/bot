@@ -79,6 +79,7 @@ exports.handler = async (event) => {
       .from('merch_products')
       .select('id, name, price_cents')
       .eq('is_active', true)
+      .is('archived_at', null)
       .or(filterParts.join(','));
     if (dbErr) {
       console.error('DB lookup error:', dbErr);

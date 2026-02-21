@@ -87,7 +87,6 @@ brewhubbot/
 | Function | Description |
 |---|---|
 | `claude-chat` | Claude conversational AI with tool use (place orders, check menu) |
-| `get-voice-session` | ElevenLabs ConvAI session initialization |
 | `text-to-speech` | ElevenLabs TTS for voice responses |
 
 ### Operations
@@ -164,7 +163,7 @@ The database is managed through sequential migration files (`schema-1` through `
 
 ## Voice Usage Policy
 Voice features are limited to the public-facing chatbot only.
-- **Allowed:** Homepage voice chat with Elise (ElevenLabs ConvAI + TTS)
+- **Allowed:** Homepage voice chat via Claude AI + ElevenLabs TTS
 - **Not allowed:** Voice announcements for orders, KDS, or operational alerts
 - Keep all operational flows text-only unless explicitly approved
 
@@ -195,8 +194,7 @@ Required in Netlify:
 | Variable | Purpose |
 |---|---|
 | `CLAUDE_API_KEY` | Anthropic Claude chat |
-| `ELEVENLABS_API_KEY` | Voice synthesis |
-| `ELEVENLABS_AGENT_ID` | ConvAI agent |
+| `ELEVENLABS_API_KEY` | Voice synthesis (TTS) |
 | `RESEND_API_KEY` | Transactional email |
 | `GOOGLE_SCRIPT_URL` | Google Sheets sync |
 
@@ -207,12 +205,11 @@ Required in Netlify:
 ```bash
 npm install          # Install dependencies
 npm run dev          # Next.js dev server
-npm run dev:legacy   # Local server for public/ HTML pages
 npm test             # Run Jest tests
 npm run lint         # ESLint
 ```
 
 ## Notes
 - All Square functions use `SQUARE_PRODUCTION_TOKEN` with hardcoded `SquareEnvironment.Production`.
-- Legacy HTML pages and Next.js app share the same Supabase database and Netlify functions.
-- KDS has two implementations: `public/kds.html` (full-featured) and `src/app/(ops)/kds/` (Next.js).
+- All pages are now served by Next.js. Legacy HTML pages are archived in the `dead/` folder.
+- KDS, manager dashboard, and all ops pages are under `src/app/(ops)/` with PIN-based auth.
