@@ -41,19 +41,19 @@ exports.handler = async (event) => {
     const { orderId, status, paymentMethod, reason } = JSON.parse(event.body);
 
     if (!orderId) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Missing Order ID' }) };
+      return { statusCode: 400, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Missing Order ID' }) };
     }
 
     // Validate status is one of allowed values
     const allowedStatuses = ['paid', 'preparing', 'ready', 'completed', 'cancelled'];
     if (!status || !allowedStatuses.includes(status)) {
-      return { statusCode: 400, body: JSON.stringify({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }) };
+      return { statusCode: 400, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }) };
     }
 
     // Validate UUID format
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!UUID_RE.test(orderId)) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Invalid order ID format' }) };
+      return { statusCode: 400, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Invalid order ID format' }) };
     }
 
     // ── STATUS TRANSITION STATE MACHINE ──────────────────────
@@ -61,8 +61,10 @@ exports.handler = async (event) => {
     const VALID_TRANSITIONS = {
       pending:   ['paid', 'preparing', 'cancelled'],
       paid:      ['preparing', 'cancelled'],
-      preparing: ['ready', 'cancelled'],
+      preparing: ['preparing', 'ready', 'cancelled'],  // preparing→preparing: idempotent for cash after KDS tap
       ready:     ['completed', 'cancelled'],
+      // Abandoned orders (15-min cron) can be revived by a cash/comp payment
+      abandoned: ['preparing', 'cancelled'],
       // Terminal states — no transitions allowed:
       completed: [],
       cancelled: [],
@@ -77,7 +79,7 @@ exports.handler = async (event) => {
       .single();
 
     if (lookupErr || !currentOrder) {
-      return { statusCode: 404, body: JSON.stringify({ error: 'Order not found' }) };
+      return { statusCode: 404, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Order not found' }) };
     }
 
     const allowed = VALID_TRANSITIONS[currentOrder.status] || [];
@@ -116,7 +118,7 @@ exports.handler = async (event) => {
         .single();
 
       if (checkErr || !orderCheck) {
-        return { statusCode: 404, body: JSON.stringify({ error: 'Order not found' }) };
+        return { statusCode: 404, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Order not found' }) };
       }
 
       const orderCents = orderCheck.total_amount_cents || 0;

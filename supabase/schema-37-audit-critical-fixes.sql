@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS inventory_audit_log (
 -- RLS: staff can read audit log, only service role can write
 ALTER TABLE inventory_audit_log ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Staff can read inventory audit" ON inventory_audit_log;
 CREATE POLICY "Staff can read inventory audit"
   ON inventory_audit_log FOR SELECT TO authenticated
   USING (EXISTS (

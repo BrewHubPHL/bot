@@ -538,6 +538,21 @@ export default function POSPage() {
       });
 
       if (!resp.ok) {
+        // 409 = order already moved past pending (e.g., KDS tapped "Start"
+        // or the abandon-cron fired). Treat as recoverable — the payment_id
+        // may not have been recorded, but the order is alive on the KDS.
+        if (resp.status === 409) {
+          console.warn("[POS] Cash payment got 409 — order already transitioned, treating as success");
+          setTicketPhase("paid");
+          setTerminalStatus("Payment recorded (order already active)");
+          setTimeout(() => {
+            setCart([]);
+            setTicketPhase("building");
+            setCreatedOrderId(null);
+            setTerminalStatus("");
+          }, 3000);
+          return;
+        }
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.error || "Failed to record payment");
       }

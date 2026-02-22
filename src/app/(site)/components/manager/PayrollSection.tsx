@@ -12,6 +12,63 @@ const API_BASE =
 /* ------------------------------------------------------------------ */
 const MISSED_PUNCH_THRESHOLD_MS = 16 * 60 * 60 * 1000; // 16 hours
 const OT_THRESHOLD_HOURS = 40;
+const SHOP_TZ = "America/New_York";
+
+/* ------------------------------------------------------------------ */
+/* Timezone helpers — display & input always use America/New_York       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Interpret a <input type="datetime-local"> value (no TZ info) as
+ * America/New_York time and return a proper ISO 8601 UTC string.
+ *
+ * The payroll UI shows clock-in times in Eastern, so the manager
+ * naturally enters the clock-out in Eastern as well.  Without this
+ * conversion, new Date(dtLocal) silently uses the *browser* timezone
+ * which may differ (e.g. a laptop still on UTC, or a manager on
+ * vacation in another timezone) and produces a wrong UTC timestamp.
+ */
+function datetimeLocalToEasternISO(dtLocal: string): string {
+  const [datePart, timePart] = dtLocal.split("T");
+  const [y, mo, d] = datePart.split("-").map(Number);
+  const [h, mi] = (timePart ?? "00:00").split(":").map(Number);
+
+  // Treat the raw components as UTC so we have a stable reference.
+  const asUTC = Date.UTC(y, mo - 1, d, h, mi);
+
+  // Find how America/New_York renders that same UTC instant,
+  // then measure the gap — that gap is the NY offset.
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: SHOP_TZ,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const parts = fmt.formatToParts(new Date(asUTC));
+  const g = (t: string) => Number(parts.find((p) => p.type === t)!.value);
+  const nyAtUTC = Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") === 24 ? 0 : g("hour"), g("minute"));
+
+  // offsetMs is negative when NY is behind UTC (e.g. −5 h for EST)
+  const offsetMs = nyAtUTC - asUTC;
+
+  // The user typed Eastern values, so true‐UTC = raw − offset
+  return new Date(asUTC - offsetMs).toISOString();
+}
+
+/**
+ * Convert a UTC ISO string to a `datetime-local` value in Eastern,
+ * for use as an <input> min / default value.
+ */
+function utcToEasternDatetimeLocal(isoUtc: string): string {
+  const d = new Date(isoUtc);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: SHOP_TZ,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(d);
+  const g = (t: string) => parts.find((p) => p.type === t)!.value;
+  const hr = g("hour") === "24" ? "00" : g("hour");
+  return `${g("year")}-${g("month")}-${g("day")}T${hr}:${g("minute")}`;
+}
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -304,7 +361,7 @@ export default function PayrollSection() {
         },
         body: JSON.stringify({
           employee_email: email,
-          clock_out_time: new Date(fixTime).toISOString(),
+          clock_out_time: datetimeLocalToEasternISO(fixTime),
         }),
       });
 
@@ -475,9 +532,11 @@ export default function PayrollSection() {
                           type="datetime-local"
                           value={fixTime}
                           onChange={(e) => setFixTime(e.target.value)}
+                          min={row.missedPunchClockIn ? utcToEasternDatetimeLocal(row.missedPunchClockIn) : undefined}
                           className="bg-[#111] border border-[#444] rounded px-2 py-1 text-xs text-white
                                      focus:outline-none focus:ring-1 focus:ring-amber-500 w-full max-w-[220px]"
                         />
+                        <span className="text-[9px] text-gray-500">Times are in Eastern (ET)</span>
                         <div className="flex gap-1.5">
                           <button
                             type="button"
