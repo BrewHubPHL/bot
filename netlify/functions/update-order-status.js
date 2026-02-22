@@ -9,20 +9,48 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+/**
+ * Generate a short, URL-safe error reference ID for log correlation.
+ * Format: ERR-<timestamp_hex>-<random_hex>  (e.g. ERR-1a2b3c4d-f7e8)
+ */
+function generateErrorId() {
+  const ts = Date.now().toString(16);
+  const rand = Math.random().toString(16).substring(2, 6);
+  return `ERR-${ts}-${rand}`;
+}
+
+/**
+ * Log an error to system_sync_logs and return the generated error_id.
+ * Non-fatal — swallows its own failures so the caller can still respond.
+ */
+async function logSyncError(source, detail, extra = {}) {
+  const errorId = generateErrorId();
+  try {
+    await supabase.from('system_sync_logs').insert({
+      source,
+      detail: `[${errorId}] ${detail}`,
+      severity: extra.severity || 'error',
+      profile_id: extra.profileId || null,
+      email: extra.email || null,
+      sql_state: extra.sqlState || null,
+    });
+  } catch (logErr) {
+    console.error(`[LOG-SYNC] Failed to write sync log ${errorId}:`, logErr.message);
+  }
+  return errorId;
+}
+
 exports.handler = async (event) => {
   const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+  const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  };
 
   // 1. Handle CORS
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers: {
-        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      },
-      body: '',
-    };
+    return { statusCode: 200, headers: CORS_HEADERS, body: '' };
   }
 
   if (event.httpMethod !== 'POST') {
@@ -38,22 +66,30 @@ exports.handler = async (event) => {
   if (!auth.ok) return auth.response;
 
   try {
-    const { orderId, status, paymentMethod, reason } = JSON.parse(event.body);
+    const body = JSON.parse(event.body);
+    const orderId = body.orderId;
+    const paymentMethod = body.paymentMethod;
+    const reason = body.reason;
+
+    // ── NORMALIZE STATUS TO LOWERCASE ──────────────────────────
+    const status = typeof body.status === 'string'
+      ? body.status.trim().toLowerCase()
+      : '';
 
     if (!orderId) {
-      return { statusCode: 400, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Missing Order ID' }) };
+      return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Missing Order ID' }) };
     }
 
     // Validate status is one of allowed values
     const allowedStatuses = ['paid', 'preparing', 'ready', 'completed', 'cancelled'];
     if (!status || !allowedStatuses.includes(status)) {
-      return { statusCode: 400, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }) };
+      return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }) };
     }
 
     // Validate UUID format
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!UUID_RE.test(orderId)) {
-      return { statusCode: 400, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Invalid order ID format' }) };
+      return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Invalid order ID format' }) };
     }
 
     // ── STATUS TRANSITION STATE MACHINE ──────────────────────
@@ -74,19 +110,19 @@ exports.handler = async (event) => {
 
     const { data: currentOrder, error: lookupErr } = await supabase
       .from('orders')
-      .select('status')
+      .select('status, total_amount_cents')
       .eq('id', orderId)
       .single();
 
     if (lookupErr || !currentOrder) {
-      return { statusCode: 404, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Order not found' }) };
+      return { statusCode: 404, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Order not found' }) };
     }
 
     const allowed = VALID_TRANSITIONS[currentOrder.status] || [];
     if (!allowed.includes(status)) {
       return {
         statusCode: 409,
-        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+        headers: CORS_HEADERS,
         body: JSON.stringify({
           error: `Cannot transition from '${currentOrder.status}' to '${status}'`,
         }),
@@ -105,23 +141,12 @@ exports.handler = async (event) => {
       if (!compReason || compReason.length < 2) {
         return {
           statusCode: 400,
-          headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+          headers: CORS_HEADERS,
           body: JSON.stringify({ error: 'A reason is required when comping an order.' }),
         };
       }
 
-      // Fetch order total to enforce dollar cap
-      const { data: orderCheck, error: checkErr } = await supabase
-        .from('orders')
-        .select('total_amount_cents')
-        .eq('id', orderId)
-        .single();
-
-      if (checkErr || !orderCheck) {
-        return { statusCode: 404, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Order not found' }) };
-      }
-
-      const orderCents = orderCheck.total_amount_cents || 0;
+      const orderCents = currentOrder.total_amount_cents || 0;
       const isManager = auth.role === 'manager' || auth.role === 'admin';
 
       // Non-managers cannot comp orders above the cap
@@ -129,7 +154,7 @@ exports.handler = async (event) => {
         console.warn(`[COMP BLOCKED] Staff ${auth.user?.email} tried to comp $${(orderCents/100).toFixed(2)} order ${orderId} (cap: $${(COMP_CAP_CENTS/100).toFixed(2)})`);
         return {
           statusCode: 403,
-          headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+          headers: CORS_HEADERS,
           body: JSON.stringify({
             error: `Comp limit is $${(COMP_CAP_CENTS/100).toFixed(2)} for non-manager staff. Ask a manager to approve.`,
           }),
@@ -166,26 +191,59 @@ exports.handler = async (event) => {
       updatePayload.payment_id = paymentMethod;    // marks order as paid
     }
 
-    // Update the Order Status
-    const { data, error } = await supabase
-      .from('orders')
-      .update(updatePayload)
-      .eq('id', orderId)
-      .select();
+    // ── UPDATE VIA RPC: sets app.voucher_bypass GUC inside a transaction ──
+    // This prevents prevent_order_amount_tampering from rejecting vouchered
+    // ($0.00) orders when handle_order_completion modifies the row.
+    const { data: rpcResult, error: rpcError } = await supabase.rpc(
+      'safe_update_order_status',
+      {
+        p_order_id:     orderId,
+        p_status:       status,
+        p_completed_at: status === 'completed' ? new Date().toISOString() : null,
+        p_payment_id:   updatePayload.payment_id || null,
+      }
+    );
 
-    if (error) throw error;
+    if (rpcError) {
+      // Check if this is a lock timeout (SQLSTATE 55P03)
+      const isLockTimeout = rpcError.message && (
+        rpcError.message.includes('lock timeout') ||
+        rpcError.message.includes('55P03') ||
+        rpcError.message.includes('could not obtain lock')
+      );
+      if (isLockTimeout) {
+        const errorId = await logSyncError('update_order_status', `Lock timeout on order ${orderId}: ${rpcError.message}`, {
+          sqlState: '55P03',
+          email: auth.user?.email,
+        });
+        console.error(`[UPDATE-ORDER] Lock timeout ${errorId}:`, rpcError.message);
+        return {
+          statusCode: 503,
+          headers: { ...CORS_HEADERS, 'Retry-After': '2' },
+          body: JSON.stringify({
+            error: 'Order is being processed by another request. Please retry.',
+            errorId,
+          }),
+        };
+      }
+      throw rpcError;
+    }
 
-    // Verify the update actually matched a row
-    if (!data || data.length === 0) {
+    // RPC returns the updated order as a single JSON row
+    const updatedOrder = rpcResult;
+    if (!updatedOrder || (Array.isArray(updatedOrder) && updatedOrder.length === 0)) {
       return {
         statusCode: 404,
-        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+        headers: CORS_HEADERS,
         body: JSON.stringify({ error: 'Order not found or update had no effect' }),
       };
     }
 
+    // Normalize to array for downstream compatibility
+    const data = Array.isArray(updatedOrder) ? updatedOrder : [updatedOrder];
+
     // Generate receipt for cash/comp payments (Square receipts handled by webhook)
-    if (paymentMethod && ['cash', 'comp'].includes(paymentMethod) && data && data[0]) {
+    if (paymentMethod && ['cash', 'comp'].includes(paymentMethod) && data[0]) {
       try {
         const { data: lineItems } = await supabase
           .from('coffee_orders')
@@ -201,16 +259,29 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+      headers: CORS_HEADERS,
       body: JSON.stringify({ success: true, order: data })
     };
 
   } catch (err) {
-    console.error('[COMPLETE-ORDER] Error:', err);
+    // ── Log to system_sync_logs with correlation ID ────────────
+    const errorId = await logSyncError(
+      'update_order_status',
+      err.message || String(err),
+      {
+        sqlState: err.code || null,
+        email: auth?.user?.email || null,
+      }
+    );
+
+    console.error(`[UPDATE-ORDER] ${errorId}:`, err);
     return {
       statusCode: 500,
-      headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
-      body: JSON.stringify({ error: 'Internal server error' })
+      headers: CORS_HEADERS,
+      body: JSON.stringify({
+        error: 'Internal server error',
+        errorId,
+      })
     };
   }
 };
