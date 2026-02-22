@@ -2,10 +2,14 @@
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
-import { supabase } from "@/lib/supabase";
+
+const API_BASE =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8888/.netlify/functions"
+    : "/.netlify/functions";
 
 const MAX_RECEIPTS = 10;
-const POLL_INTERVAL_MS = 12_000; // fallback polling every 12 s
+const POLL_INTERVAL_MS = 8_000; // poll every 8 s
 
 /* ─── Types ─── */
 interface Receipt {
@@ -48,80 +52,56 @@ export default function ReceiptRoll() {
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const initialLoadDone = useRef(false);
 
-  // Fetch initial receipts
+  // Fetch receipts via server-side Netlify function (bypasses RLS)
   const loadReceipts = useCallback(async () => {
+    if (!token) return;
     try {
-      const { data, error } = await supabase
-        .from("receipt_queue")
-        .select("id, receipt_text, created_at")
-        .order("created_at", { ascending: false })
-        .limit(5);
+      const res = await fetch(`${API_BASE}/get-receipts?limit=10`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const incoming = (json.receipts ?? []) as Receipt[];
 
-      if (error) throw error;
-      setReceipts(data ?? []);
-      initialLoadDone.current = true;
+      setReceipts((prev) => {
+        // Detect new IDs for animation
+        if (initialLoadDone.current) {
+          const prevIds = new Set(prev.map((r) => r.id));
+          const freshIds = incoming.filter((r) => !prevIds.has(r.id)).map((r) => r.id);
+          if (freshIds.length > 0) {
+            setNewIds((old) => {
+              const copy = new Set(old);
+              freshIds.forEach((id) => copy.add(id));
+              return copy;
+            });
+          }
+        }
+        initialLoadDone.current = true;
+        return incoming;
+      });
     } catch (err) {
       console.error("Receipt fetch failed:", err);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
     loadReceipts();
   }, [token, loadReceipts]);
 
-  // Realtime subscription for new receipts + polling fallback
+  // Poll for new receipts (Realtime requires publication + RLS config;
+  // server-side polling is more reliable for the manager dashboard)
   useEffect(() => {
     if (!token) return;
 
-    let realtimeActive = false;
-
-    const channel = supabase
-      .channel("manager-receipts")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "receipt_queue" },
-        (payload) => {
-          const newReceipt = payload.new as Receipt;
-          setNewIds((prev) => new Set(prev).add(newReceipt.id));
-          setReceipts((prev) => {
-            // De-duplicate in case polling already caught it
-            if (prev.some((r) => r.id === newReceipt.id)) return prev;
-            const updated = [newReceipt, ...prev];
-            return updated.slice(0, MAX_RECEIPTS);
-          });
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "receipt_queue" },
-        (payload) => {
-          const updated = payload.new as Receipt;
-          setReceipts((prev) =>
-            prev.map((r) => (r.id === updated.id ? updated : r))
-          );
-        }
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          realtimeActive = true;
-          console.log("[ReceiptRoll] Realtime connected");
-        }
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          realtimeActive = false;
-          console.warn("[ReceiptRoll] Realtime unavailable — polling active");
-        }
-      });
-
-    // Polling fallback — ensures data refreshes even if Realtime is
-    // blocked by RLS or the table isn't in the publication yet.
     const poll = setInterval(() => {
       loadReceipts();
     }, POLL_INTERVAL_MS);
 
+    console.log("[ReceiptRoll] Polling active");
+
     return () => {
       clearInterval(poll);
-      supabase.removeChannel(channel);
     };
   }, [token, loadReceipts]);
 

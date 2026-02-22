@@ -73,12 +73,15 @@ exports.handler = async (event) => {
     }
 
     // ── Find the open (active) time_log for this employee ───
+    // Note: clock-in records may have status 'active' (pin-clock) or
+    // 'Pending' (log-time), so we match on action_type + null clock_out
+    // instead of relying solely on the status column.
     const { data: openLogs, error: findErr } = await supabase
       .from('time_logs')
-      .select('id, clock_in, employee_email')
+      .select('id, clock_in, employee_email, status, action_type')
       .eq('employee_email', employee_email.toLowerCase().trim())
-      .eq('status', 'active')
       .is('clock_out', null)
+      .in('action_type', ['in'])
       .order('clock_in', { ascending: false })
       .limit(1);
 

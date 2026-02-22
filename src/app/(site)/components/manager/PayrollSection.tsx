@@ -46,8 +46,7 @@ interface PayrollRow {
   doubleTimeHours: number; // 2×  — Sunday hours that fall in the OT window (stacking)
   grossPay: number;
   currentStatus: "IN" | "OFF";
-  missedPunch: boolean;
-}
+  missedPunch: boolean;  missedPunchClockIn: string | null; // ISO timestamp of the open clock-in}
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -67,7 +66,7 @@ function getMondayKey(date: Date): string {
  * Returns { shifts, missedPunch }.
  * A missed punch is any 'in' with no matching 'out' after 16 hours.
  */
-function buildShifts(logs: TimeLog[]): { shifts: Shift[]; missedPunch: boolean } {
+function buildShifts(logs: TimeLog[]): { shifts: Shift[]; missedPunch: boolean; missedPunchClockIn: string | null } {
   const sorted = [...logs].sort(
     (a, b) =>
       new Date(a.clock_in ?? a.created_at).getTime() -
@@ -77,6 +76,7 @@ function buildShifts(logs: TimeLog[]): { shifts: Shift[]; missedPunch: boolean }
   const shifts: Shift[] = [];
   let pendingIn: Date | null = null;
   let missedPunch = false;
+  let missedPunchClockIn: string | null = null;
 
   for (const log of sorted) {
     const type = (log.action_type ?? "").toLowerCase();
@@ -87,6 +87,7 @@ function buildShifts(logs: TimeLog[]): { shifts: Shift[]; missedPunch: boolean }
       if (pendingIn !== null) {
         if (Date.now() - pendingIn.getTime() > MISSED_PUNCH_THRESHOLD_MS) {
           missedPunch = true;
+          missedPunchClockIn = pendingIn.toISOString();
         }
       }
       pendingIn = ts;
@@ -103,9 +104,10 @@ function buildShifts(logs: TimeLog[]): { shifts: Shift[]; missedPunch: boolean }
   // Trailing open 'in' with no 'out'
   if (pendingIn !== null && Date.now() - pendingIn.getTime() > MISSED_PUNCH_THRESHOLD_MS) {
     missedPunch = true;
+    missedPunchClockIn = pendingIn.toISOString();
   }
 
-  return { shifts, missedPunch };
+  return { shifts, missedPunch, missedPunchClockIn };
 }
 
 /**
@@ -236,7 +238,7 @@ export default function PayrollSection() {
 
       const rows: PayrollRow[] = staffData.map((emp) => {
       const empLogs = logs.filter((l) => l.employee_email === emp.email);
-      const { shifts, missedPunch } = buildShifts(empLogs);
+      const { shifts, missedPunch, missedPunchClockIn } = buildShifts(empLogs);
       const { regularHours, overtimeHours, doubleTimeHours } = calcHours(shifts);
       const rate = parseFloat(emp.hourly_rate ?? "0") || 0;
       // Gross pay: regular 1× + OT 1.5× + Sunday-over-40h 2×
@@ -260,6 +262,7 @@ export default function PayrollSection() {
         grossPay,
         currentStatus,
         missedPunch,
+        missedPunchClockIn,
       };
     });
 
@@ -445,6 +448,23 @@ export default function PayrollSection() {
                                      bg-red-500/20 text-red-400 border border-red-500/30 rounded px-2 py-0.5">
                       Missing Clock-Out
                     </span>
+                    {row.missedPunchClockIn && (
+                      <div className="mt-1 text-[10px] text-gray-400">
+                        Clocked in{" "}
+                        <span className="text-amber-400 font-semibold">
+                          {new Date(row.missedPunchClockIn).toLocaleString("en-US", {
+                            timeZone: "America/New_York",
+                            weekday: "short",
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: true,
+                          })}
+                        </span>
+                        {" "}({Math.round((Date.now() - new Date(row.missedPunchClockIn).getTime()) / 3_600_000)}h ago)
+                      </div>
+                    )}
 
                     {fixingEmail === row.email ? (
                       <div className="mt-2 flex flex-col gap-1.5">
