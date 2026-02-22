@@ -109,6 +109,7 @@ export default function DashboardOverhaul() {
   /* ── Fix clock-out inline ────────────────────────────── */
   const [fixingId, setFixingId] = useState<string | null>(null);
   const [fixTime, setFixTime] = useState("");
+  const [fixReason, setFixReason] = useState("");
   const [fixBusy, setFixBusy] = useState(false);
 
   /* ── Toast messages ──────────────────────────────────── */
@@ -293,7 +294,7 @@ export default function DashboardOverhaul() {
   // ──────────────────────────────────────────────────────
   const handleFixClock = useCallback(
     async (email: string) => {
-      if (!token || !fixTime) return;
+      if (!token || !fixTime || fixReason.trim().length < 3) return;
       setFixBusy(true);
       try {
         const res = await fetch(`${API_BASE}/fix-clock`, {
@@ -306,6 +307,7 @@ export default function DashboardOverhaul() {
           body: JSON.stringify({
             employee_email: email,
             clock_out_time: new Date(fixTime).toISOString(),
+            reason: fixReason.trim(),
           }),
         });
         const d = await res.json();
@@ -313,6 +315,7 @@ export default function DashboardOverhaul() {
         showToast("success", `Clock-out fixed for ${email}`);
         setFixingId(null);
         setFixTime("");
+        setFixReason("");
         fetchOpenShifts();
         fetchStats();
       } catch (err) {
@@ -323,7 +326,7 @@ export default function DashboardOverhaul() {
       }
       setFixBusy(false);
     },
-    [token, fixTime, showToast, fetchOpenShifts, fetchStats]
+    [token, fixTime, fixReason, showToast, fetchOpenShifts, fetchStats]
   );
 
   // ──────────────────────────────────────────────────────
@@ -620,16 +623,20 @@ export default function DashboardOverhaul() {
                   variant="missed"
                   fixingId={fixingId}
                   fixTime={fixTime}
+                  fixReason={fixReason}
                   fixBusy={fixBusy}
                   onFixStart={() => {
                     setFixingId(s.id);
                     setFixTime("");
+                    setFixReason("");
                   }}
                   onFixCancel={() => {
                     setFixingId(null);
                     setFixTime("");
+                    setFixReason("");
                   }}
                   onFixTimeChange={setFixTime}
+                  onFixReasonChange={setFixReason}
                   onFixSubmit={() => handleFixClock(s.employee_email)}
                 />
               ))}
@@ -641,16 +648,20 @@ export default function DashboardOverhaul() {
                   variant="active"
                   fixingId={fixingId}
                   fixTime={fixTime}
+                  fixReason={fixReason}
                   fixBusy={fixBusy}
                   onFixStart={() => {
                     setFixingId(s.id);
                     setFixTime("");
+                    setFixReason("");
                   }}
                   onFixCancel={() => {
                     setFixingId(null);
                     setFixTime("");
+                    setFixReason("");
                   }}
                   onFixTimeChange={setFixTime}
+                  onFixReasonChange={setFixReason}
                   onFixSubmit={() => handleFixClock(s.employee_email)}
                 />
               ))}
@@ -720,10 +731,12 @@ interface ShiftRowProps {
   variant: "missed" | "active";
   fixingId: string | null;
   fixTime: string;
+  fixReason: string;
   fixBusy: boolean;
   onFixStart: () => void;
   onFixCancel: () => void;
   onFixTimeChange: (val: string) => void;
+  onFixReasonChange: (val: string) => void;
   onFixSubmit: () => void;
 }
 
@@ -732,10 +745,12 @@ function ShiftRow({
   variant,
   fixingId,
   fixTime,
+  fixReason,
   fixBusy,
   onFixStart,
   onFixCancel,
   onFixTimeChange,
+  onFixReasonChange,
   onFixSubmit,
 }: ShiftRowProps) {
   const hrs = hoursAgo(shift.clock_in);
@@ -780,7 +795,7 @@ function ShiftRow({
       </div>
 
       {isFixing ? (
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:flex-nowrap">
           <input
             type="datetime-local"
             value={fixTime}
@@ -789,9 +804,20 @@ function ShiftRow({
                        text-sm text-white min-h-[44px] w-[200px]
                        focus:outline-none focus:ring-1 focus:ring-amber-500"
           />
+          <input
+            type="text"
+            value={fixReason}
+            onChange={(e) => onFixReasonChange(e.target.value)}
+            placeholder="Reason (required)"
+            maxLength={200}
+            className="bg-[#111] border border-[#444] rounded-lg px-3 py-2
+                       text-sm text-white min-h-[44px] w-[200px]
+                       placeholder:text-gray-600
+                       focus:outline-none focus:ring-1 focus:ring-amber-500"
+          />
           <button
             type="button"
-            disabled={!fixTime || fixBusy}
+            disabled={!fixTime || fixReason.trim().length < 3 || fixBusy}
             onClick={onFixSubmit}
             className="min-h-[44px] px-4 rounded-lg text-sm font-bold
                        bg-amber-600 hover:bg-amber-500 disabled:opacity-40
