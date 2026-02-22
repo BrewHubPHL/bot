@@ -3,6 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useOpsSession } from '@/components/OpsGate';
+import { useConnection } from '@/lib/useConnection';
+import OfflineBanner from '@/components/OfflineBanner';
+import { saveKDSSnapshot, getKDSSnapshot } from '@/lib/offlineStore';
 
 /* ── Types ───────────────────────────────────────────────── */
 
@@ -78,7 +81,9 @@ const STATUS_BADGE: Record<string, string> = {
 
 export default function KDS() {
   const session = useOpsSession();
+  const { isOnline, wasOffline, offlineSince } = useConnection();
   const [orders, setOrders] = useState<KDSOrder[]>([]);
+  const [kdsSource, setKdsSource] = useState<"live" | "cached">("live");
   const [clock, setClock] = useState<string>("");
   const [updating, setUpdating] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,9 +112,23 @@ export default function KDS() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { orders: data } = await res.json();
-      setOrders((data as KDSOrder[]) || []);
+      const live = (data as KDSOrder[]) || [];
+      setOrders(live);
+      setKdsSource("live");
+      // Cache to IndexedDB for offline display
+      saveKDSSnapshot(live).catch(() => {});
     } catch (err) {
       console.error("KDS: Fetch Error:", err);
+      // If we have no orders yet, try loading from cache
+      if (orders.length === 0) {
+        try {
+          const cached = await getKDSSnapshot();
+          if (cached.length > 0) {
+            setOrders(cached as KDSOrder[]);
+            setKdsSource("cached");
+          }
+        } catch { /* IDB fail */ }
+      }
     } finally {
       fetchingRef.current = false;
     }
@@ -224,10 +243,17 @@ export default function KDS() {
 
   return (
     <div className="min-h-screen bg-stone-950 p-6 md:p-10 text-white">
+      {/* Offline Banner */}
+      <OfflineBanner isOnline={isOnline} wasOffline={wasOffline} offlineSince={offlineSince} />
+
       <header className="flex flex-wrap justify-between items-end mb-8 md:mb-12 border-b-2 border-stone-800 pb-6 md:pb-8 gap-4">
         <div>
           <h1 className="text-4xl md:text-6xl font-black font-playfair tracking-tighter uppercase italic">BrewHub <span className="text-stone-500">KDS</span></h1>
-          <p className="text-sm font-mono text-stone-600 mt-2">SYSTEM ONLINE // {clock || "—"} // {orders.length} active</p>
+          <p className="text-sm font-mono text-stone-600 mt-2">
+            {isOnline ? 'SYSTEM ONLINE' : '⚠ OFFLINE — SHOWING LAST KNOWN ORDERS'}
+            {kdsSource === 'cached' && isOnline ? ' (cached)' : ''}
+            {' // '}{clock || '—'} // {orders.length} active
+          </p>
         </div>
         {error && (
           <p className="text-red-400 font-mono text-sm bg-red-950 px-4 py-2 rounded">{error}</p>

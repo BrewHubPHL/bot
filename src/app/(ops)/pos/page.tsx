@@ -10,6 +10,12 @@ import {
   Gift, WifiOff, RefreshCw
 } from "lucide-react";
 import SwipeCartItem from "@/components/SwipeCartItem";
+import { useConnection } from "@/lib/useConnection";
+import OfflineBanner from "@/components/OfflineBanner";
+import {
+  cacheMenu, getCachedMenu, queueOfflineOrder, getUnsyncedOrders,
+  markOrderSynced, clearSyncedOrders, type OfflineOrder, type CachedMenuItem,
+} from "@/lib/offlineStore";
 
 /* ─── Types ────────────────────────────────────────────────────── */
 
@@ -104,9 +110,15 @@ function uid() {
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 export default function POSPage() {
+  /* ─── Connection monitoring ──────────────────────────────────── */
+  const { isOnline, wasOffline, offlineSince } = useConnection();
+
   /* ─── State ──────────────────────────────────────────────────── */
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [menuSource, setMenuSource] = useState<"live" | "cached">("live");
   const [loading, setLoading] = useState(true);
+  const [offlineOrders, setOfflineOrders] = useState<OfflineOrder[]>([]);
+  const [syncingOrders, setSyncingOrders] = useState(false);
   const [activeCategory, setActiveCategory] = useState("hot");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
@@ -142,21 +154,123 @@ export default function POSPage() {
     return () => clearInterval(t);
   }, []);
 
-  /* ─── Fetch menu ─────────────────────────────────────────────── */
+  /* ─── Fetch menu (with offline fallback) ──────────────────────── */
   useEffect(() => {
     (async () => {
-      const { data, error } = await supabase
-        .from("merch_products")
-        .select("id, name, price_cents, description, image_url")
-        .eq("is_active", true)
-        .is("archived_at", null)
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true });
+      try {
+        const { data, error } = await supabase
+          .from("merch_products")
+          .select("id, name, price_cents, description, image_url")
+          .eq("is_active", true)
+          .is("archived_at", null)
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true });
 
-      if (!error && data) setMenuItems(data);
-      setLoading(false);
+        if (!error && data && data.length > 0) {
+          setMenuItems(data);
+          setMenuSource("live");
+          // Cache to IndexedDB for offline use
+          cacheMenu(data).catch(() => {});
+        } else {
+          throw new Error("No menu data from Supabase");
+        }
+      } catch {
+        // Network down or Supabase unreachable — load from IndexedDB
+        try {
+          const cached = await getCachedMenu();
+          if (cached.length > 0) {
+            setMenuItems(cached as MenuItem[]);
+            setMenuSource("cached");
+          }
+        } catch { /* IndexedDB also failed — menu stays empty */ }
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
+
+  /* ─── Sync offline orders when connection restores ──────────── */
+  useEffect(() => {
+    if (!wasOffline || !isOnline) return;
+    (async () => {
+      setSyncingOrders(true);
+      try {
+        const pending = await getUnsyncedOrders();
+        const token = getAccessToken();
+        for (const order of pending) {
+          try {
+            await fetch("/.netlify/functions/cafe-checkout", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+                "X-BrewHub-Action": "true",
+              },
+              body: JSON.stringify({
+                items: order.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+                offline_id: order.id,
+                offline_created_at: order.created_at,
+                payment_method: order.payment_method,
+              }),
+            });
+            await markOrderSynced(order.id);
+          } catch (err) {
+            console.error("[POS] Failed to sync offline order:", order.id, err);
+          }
+        }
+        await clearSyncedOrders();
+        setOfflineOrders(await getUnsyncedOrders());
+        // Re-fetch live menu
+        const { data } = await supabase
+          .from("merch_products")
+          .select("id, name, price_cents, description, image_url")
+          .eq("is_active", true)
+          .is("archived_at", null)
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true });
+        if (data && data.length > 0) {
+          setMenuItems(data);
+          setMenuSource("live");
+          cacheMenu(data).catch(() => {});
+        }
+      } finally {
+        setSyncingOrders(false);
+      }
+    })();
+  }, [wasOffline, isOnline]);
+
+  /* ─── Offline order creation (cash-only) ───────────────────── */
+  const handleOfflineOrder = useCallback(async () => {
+    if (cart.length === 0) return;
+    const orderId = `offline-${Date.now()}-${uid()}`;
+    const total = cart.reduce(
+      (sum, ci) => sum + (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0)) * ci.quantity, 0
+    );
+    const order: OfflineOrder = {
+      id: orderId,
+      items: cart.map((ci) => ({
+        product_id: ci.productId,
+        name: ci.name,
+        quantity: ci.quantity,
+        price_cents: ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0),
+      })),
+      total_cents: total,
+      payment_method: "cash",
+      created_at: new Date().toISOString(),
+      synced: false,
+    };
+    await queueOfflineOrder(order);
+    setOfflineOrders((prev) => [...prev, order]);
+    haptic("success");
+    setTicketPhase("paid");
+    setTerminalStatus(`OFFLINE order queued — Collect ${cents(total)} cash`);
+    setTimeout(() => {
+      setCart([]);
+      setTicketPhase("building");
+      setCreatedOrderId(null);
+      setTerminalStatus("");
+    }, 4000);
+  }, [cart]);
 
   /* ─── Derived ────────────────────────────────────────────────── */
   const filteredItems = menuItems.filter((i) => categorize(i.name) === activeCategory);
@@ -703,6 +817,8 @@ export default function POSPage() {
   /* ─── Render ─────────────────────────────────────────────────── */
   return (
     <div className="h-screen w-screen flex bg-stone-950 text-white select-none overflow-hidden">
+      {/* ═══════ Offline Banner ═══════ */}
+      <OfflineBanner isOnline={isOnline} wasOffline={wasOffline} offlineSince={offlineSince} />
       {/* ═══════ COL 1 — Categories ═══════ */}
       <aside className="w-[140px] bg-stone-900 flex flex-col border-r border-stone-800 shrink-0">
         {/* Logo */}
@@ -748,10 +864,23 @@ export default function POSPage() {
             {CATEGORIES.find((c) => c.key === activeCategory)?.label || "Menu"}
           </h1>
           <div className="flex items-center gap-3 text-xs text-stone-500">
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Connected
-            </span>
+            {isOnline ? (
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                {menuSource === "cached" ? "Cached Menu" : "Connected"}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-red-400">
+                <WifiOff size={14} />
+                <span className="font-bold uppercase tracking-wider">Offline</span>
+              </span>
+            )}
+            {syncingOrders && (
+              <span className="flex items-center gap-1 text-amber-400">
+                <RefreshCw size={12} className="animate-spin" />
+                Syncing…
+              </span>
+            )}
           </div>
         </header>
 
@@ -965,19 +1094,31 @@ export default function POSPage() {
             </div>
           )}
 
-          {/* Phase: BUILDING — Send to KDS button */}
+          {/* Phase: BUILDING — Send to KDS or Offline Queue */}
           {ticketPhase === "building" && (
-            <button
-              disabled={cart.length === 0 || isSubmitting}
-              onClick={handleSendToKDS}
-              className="w-full min-h-[48px] py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-            >
-              {isSubmitting ? (
-                <><Loader2 size={16} className="animate-spin" /> Processing…</>
+            <>
+              {isOnline ? (
+                <button
+                  disabled={cart.length === 0 || isSubmitting}
+                  onClick={handleSendToKDS}
+                  className="w-full min-h-[48px] py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <><Loader2 size={16} className="animate-spin" /> Processing…</>
+                  ) : (
+                    <><ChevronRight size={16} /> Send to KDS</>
+                  )}
+                </button>
               ) : (
-                <><ChevronRight size={16} /> Send to KDS</>
+                <button
+                  disabled={cart.length === 0}
+                  onClick={handleOfflineOrder}
+                  className="w-full min-h-[48px] py-4 bg-red-700 hover:bg-red-600 active:bg-red-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 animate-pulse"
+                >
+                  <WifiOff size={16} /> Queue Order (Cash Only)
+                </button>
               )}
-            </button>
+            </>
           )}
 
           {/* Phase: CONFIRM — Pay on Terminal / Mark Paid */}
@@ -989,12 +1130,19 @@ export default function POSPage() {
                 </p>
               )}
 
-              <button
-                onClick={handlePayOnTerminal}
-                className="w-full min-h-[48px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-              >
-                <Monitor size={16} /> Pay on Terminal
-              </button>
+              {isOnline ? (
+                <button
+                  onClick={handlePayOnTerminal}
+                  className="w-full min-h-[48px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  <Monitor size={16} /> Pay on Terminal
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <WifiOff size={14} className="text-red-400 shrink-0" />
+                  <p className="text-xs text-red-300">Terminal unavailable offline — collect cash</p>
+                </div>
+              )}
 
               {/* Use Free Drink Voucher — shown when loyalty customer has unredeemed vouchers */}
               {loyaltyCustomer && loyaltyCustomer.vouchers.length > 0 && voucherPhase === "idle" && (
