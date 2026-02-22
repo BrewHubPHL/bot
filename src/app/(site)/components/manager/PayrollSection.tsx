@@ -46,7 +46,9 @@ interface PayrollRow {
   doubleTimeHours: number; // 2×  — Sunday hours that fall in the OT window (stacking)
   grossPay: number;
   currentStatus: "IN" | "OFF";
-  missedPunch: boolean;  missedPunchClockIn: string | null; // ISO timestamp of the open clock-in}
+  missedPunch: boolean;
+  missedPunchClockIn: string | null; // ISO timestamp of the open clock-in
+}
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
