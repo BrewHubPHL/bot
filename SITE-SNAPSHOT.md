@@ -2,6 +2,21 @@
 **Generated:** February 21, 2026
 **Purpose:** Disaster recovery reference - full source of every file in the codebase.
 
+> **⚠️ STALE — Requires Regeneration**
+>
+> This snapshot was generated on Feb 21, 2026 and is significantly out of date.
+> Missing files include: schemas 8-12, 15-43, ~20 newer Netlify functions
+> (`cancel-stale-orders`, `export-csv`, `fix-clock`, `get-applications`,
+> `get-kds-orders`, `get-payroll`, `get-queue`, `get-receipts`, `log-time`,
+> `manage-catalog`, `ops-diagnostics`, `pin-clock`, `pin-login`, `pin-logout`,
+> `pin-verify`, `submit-application`, `update-application-status`, `upload-menu-image`,
+> `_csrf.js`, `_ip-hash.js`, `_token-bucket.js`), newer pages (`/careers`, `/login`,
+> `/menu`, `/queue`, `/staff-hub`), and updated shared modules.
+> References to deleted files: `README_SECURITY.md`, `ARCHITECTURE.md`, `supabase_tables.md`.
+>
+> See [SITE-MANIFEST.md](SITE-MANIFEST.md) for the current complete inventory.
+> See [SYSTEM-BLUEPRINT.md](SYSTEM-BLUEPRINT.md) for current architecture documentation.
+
 ---
 
 ## Table of Contents

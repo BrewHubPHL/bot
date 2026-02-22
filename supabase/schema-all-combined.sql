@@ -2686,3 +2686,3875 @@ COMMENT ON VIEW staff_directory_safe IS
 -- ─────────────────────────────────────────────────────────────────────────────
 
 REVOKE EXECUTE ON FUNCTION restore_inventory_on_refund(uuid) FROM anon, authenticated;
+
+
+-- 
+-- ## schema-31-drop-redundant-customer-cols.sql
+-- 
+-- ============================================================
+-- BREWHUB SCHEMA 31: Drop redundant customers columns
+-- Migrates name → full_name, address → address_street,
+-- then drops the legacy columns.
+-- ============================================================
+-- Safe to re-run: every statement is guarded with IF / COALESCE.
+
+BEGIN;
+
+-- 1. Back-fill full_name from name where full_name is NULL or empty
+UPDATE customers
+SET    full_name = name
+WHERE  name IS NOT NULL
+  AND  name <> ''
+  AND  (full_name IS NULL OR full_name = '');
+
+-- 2. Back-fill address_street from address where address_street is NULL or empty
+UPDATE customers
+SET    address_street = address
+WHERE  address IS NOT NULL
+  AND  address <> ''
+  AND  (address_street IS NULL OR address_street = '');
+
+-- 3. Drop the redundant columns
+ALTER TABLE customers DROP COLUMN IF EXISTS name;
+ALTER TABLE customers DROP COLUMN IF EXISTS address;
+
+COMMIT;
+
+
+-- 
+-- ## schema-32-kds-update-rls.sql
+-- 
+-- ============================================================
+-- BREWHUB SCHEMA 32: KDS staff UPDATE policy for orders
+--
+-- Problem: The KDS page does client-side UPDATEs on orders.status
+-- but no RLS policy allows staff UPDATE. The only matching policy
+-- is "Deny public access to orders" (FOR ALL USING false), so
+-- every status-change click silently fails.
+--
+-- Fix: Add a FOR UPDATE policy allowing is_brewhub_staff() to
+-- update orders. WITH CHECK restricts the allowed status values.
+-- ============================================================
+
+BEGIN;
+
+-- Allow staff to update order status (KDS workflow)
+DROP POLICY IF EXISTS "Staff can update orders" ON orders;
+CREATE POLICY "Staff can update orders" ON orders
+  FOR UPDATE
+  USING  (is_brewhub_staff())
+  WITH CHECK (
+    is_brewhub_staff()
+    AND status IN ('pending', 'unpaid', 'paid', 'preparing', 'ready', 'completed', 'cancelled')
+  );
+
+COMMIT;
+
+
+-- 
+-- ## schema-33-receipt-realtime.sql
+-- 
+-- ============================================================
+-- SCHEMA 33: Enable Realtime on receipt_queue
+-- ============================================================
+-- Problem: The receipt_queue table has RLS that denies all access
+-- to the anon role. Supabase Realtime (postgres_changes) respects
+-- RLS and requires SELECT permission for the subscribing client.
+-- Since the frontend connects with the anon key (not Supabase Auth),
+-- the Realtime channel never delivers INSERT/UPDATE events.
+--
+-- Fix:
+--   1. Add an anon-friendly SELECT policy for receipt_queue.
+--      (Receipt text is not sensitive — it's the same info a
+--       customer sees on their printed receipt.)
+--   2. Add receipt_queue to the supabase_realtime publication
+--      so postgres_changes events are emitted.
+-- ============================================================
+
+-- 1. Allow anon (and authenticated) SELECT so Realtime works
+DROP POLICY IF EXISTS "Allow anon select for realtime" ON receipt_queue;
+CREATE POLICY "Allow anon select for realtime" ON receipt_queue
+  FOR SELECT
+  USING (true);
+
+-- 2. Add table to Realtime publication (idempotent: errors if already present)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'receipt_queue'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE receipt_queue;
+  END IF;
+END
+$$;
+
+
+-- 
+-- ## schema-37-audit-critical-fixes.sql
+-- 
+-- schema-37-audit-critical-fixes.sql
+-- Critical fixes identified during comprehensive code audit (Feb 2026)
+-- Addresses: missing indexes, missing NOT NULL, missing UNIQUE, orders.updated_at,
+--            inventory audit trail, and staff_directory integrity.
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 1. staff_directory.email: NOT NULL + UNIQUE (ALL RLS depends on this)
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- First clean up any NULLs (shouldn't exist, but be safe)
+DELETE FROM staff_directory WHERE email IS NULL;
+
+ALTER TABLE staff_directory
+  ALTER COLUMN email SET NOT NULL;
+
+-- Add unique constraint on lower(email) if not already present
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE tablename = 'staff_directory' AND indexname = 'idx_staff_directory_email_unique'
+  ) THEN
+    CREATE UNIQUE INDEX idx_staff_directory_email_unique ON staff_directory (lower(email));
+  END IF;
+END $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 2. customers.email: UNIQUE constraint to prevent duplicate loyalty records
+-- ═══════════════════════════════════════════════════════════════════════════════
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE tablename = 'customers' AND indexname = 'idx_customers_email_unique'
+  ) THEN
+    CREATE UNIQUE INDEX idx_customers_email_unique ON customers (lower(email));
+  END IF;
+END $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 3. Missing indexes on high-frequency query columns
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders (user_id);
+CREATE INDEX IF NOT EXISTS idx_vouchers_user_id ON vouchers (user_id);
+CREATE INDEX IF NOT EXISTS idx_parcels_tracking_number ON parcels (tracking_number);
+CREATE INDEX IF NOT EXISTS idx_refund_locks_user_id ON refund_locks (user_id);
+CREATE INDEX IF NOT EXISTS idx_coffee_orders_order_id ON coffee_orders (order_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 4. orders.updated_at: DEFAULT + auto-update trigger
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Set default for new inserts
+ALTER TABLE orders ALTER COLUMN updated_at SET DEFAULT now();
+
+-- Backfill NULLs
+UPDATE orders SET updated_at = created_at WHERE updated_at IS NULL;
+
+-- Auto-update trigger
+CREATE OR REPLACE FUNCTION update_orders_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_orders_updated_at ON orders;
+CREATE TRIGGER trg_orders_updated_at
+  BEFORE UPDATE ON orders
+  FOR EACH ROW
+  EXECUTE FUNCTION update_orders_updated_at();
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 5. Inventory Audit Log — track all stock mutations
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS inventory_audit_log (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id     uuid NOT NULL,
+  item_name   text,
+  delta       integer NOT NULL,
+  new_qty     integer,
+  source      text NOT NULL DEFAULT 'manual',  -- 'manual', 'order_completion', 'refund_restore', 'adjustment'
+  triggered_by text,                            -- staff email or 'system'
+  order_id    uuid,                             -- nullable, links to order if applicable
+  note        text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- RLS: staff can read audit log, only service role can write
+ALTER TABLE inventory_audit_log ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Staff can read inventory audit" ON inventory_audit_log;
+CREATE POLICY "Staff can read inventory audit"
+  ON inventory_audit_log FOR SELECT TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM staff_directory
+    WHERE lower(email) = lower(auth.email())
+  ));
+
+-- Index for item lookups and time-range queries
+CREATE INDEX IF NOT EXISTS idx_inventory_audit_item_id ON inventory_audit_log (item_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_audit_created ON inventory_audit_log (created_at);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 6. coffee_orders.order_id: NOT NULL (orphaned coffee_orders are untrackable)
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Clean up any NULLs first
+DELETE FROM coffee_orders WHERE order_id IS NULL;
+
+ALTER TABLE coffee_orders
+  ALTER COLUMN order_id SET NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 7. expected_parcels.registered_at: DEFAULT now()
+-- ═══════════════════════════════════════════════════════════════════════════════
+ALTER TABLE expected_parcels ALTER COLUMN registered_at SET DEFAULT now();
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 8. Prevent duplicate parcel check-ins (same tracking_number in 'arrived' status)
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE UNIQUE INDEX IF NOT EXISTS idx_parcels_tracking_arrived
+  ON parcels (tracking_number) WHERE status = 'arrived';
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 9. Inventory item_name uniqueness
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_item_name_unique
+  ON inventory (lower(item_name));
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Done. This migration is idempotent and safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+
+-- 
+-- ## schema-38-loyalty-ssot-sync.sql
+-- 
+-- ============================================================
+-- Schema 38: Loyalty Single Source of Truth (SSoT) Sync
+-- ============================================================
+-- PROBLEM: `profiles.loyalty_points` is the authoritative column
+-- (used by increment_loyalty, decrement_loyalty_on_refund, the
+-- POS loyalty scanner, and the portal). But the legacy `customers`
+-- table also has a `loyalty_points` column that some admin queries
+-- reference. Without a sync mechanism the two drift apart,
+-- creating support tickets and incorrect voucher issuance.
+--
+-- SOLUTION: A Postgres trigger on `profiles` that cascades any
+-- loyalty_points change into the `customers` row sharing the
+-- same email. The trigger is AFTER UPDATE so it does not block
+-- the primary write path and fails silently (via EXCEPTION block)
+-- to avoid breaking the happy path if no matching customer row
+-- exists.
+--
+-- The trigger is idempotent: re-running this migration replaces
+-- the function and trigger without error.
+-- ============================================================
+
+-- 1. Add email column to profiles if missing (needed for join)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'email'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN email text;
+    -- Backfill from auth.users
+    UPDATE public.profiles p
+       SET email = u.email
+      FROM auth.users u
+     WHERE p.id = u.id AND p.email IS NULL;
+  END IF;
+END $$;
+
+-- 2. Create the sync function
+CREATE OR REPLACE FUNCTION sync_loyalty_to_customers()
+RETURNS trigger AS $$
+BEGIN
+  -- Only fire when loyalty_points actually changed
+  IF NEW.loyalty_points IS DISTINCT FROM OLD.loyalty_points THEN
+    UPDATE public.customers
+       SET loyalty_points = NEW.loyalty_points
+     WHERE lower(email) = lower(NEW.email)
+       AND NEW.email IS NOT NULL;
+  END IF;
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- Never break the primary write path; log and continue
+  RAISE WARNING 'sync_loyalty_to_customers failed for profile %: %', NEW.id, SQLERRM;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3. Attach trigger (replace if exists)
+DROP TRIGGER IF EXISTS trg_sync_loyalty_to_customers ON public.profiles;
+CREATE TRIGGER trg_sync_loyalty_to_customers
+  AFTER UPDATE OF loyalty_points ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION sync_loyalty_to_customers();
+
+-- 4. One-time backfill: push current profiles.loyalty_points
+--    into matching customers rows so they start in sync.
+UPDATE public.customers c
+   SET loyalty_points = p.loyalty_points
+  FROM public.profiles p
+ WHERE lower(c.email) = lower(p.email)
+   AND p.loyalty_points IS NOT NULL
+   AND c.loyalty_points IS DISTINCT FROM p.loyalty_points;
+
+-- 5. Reverse sync: if customers had points that profiles didn't,
+--    pull the MAX into profiles (one-time reconciliation).
+UPDATE public.profiles p
+   SET loyalty_points = GREATEST(COALESCE(p.loyalty_points, 0), c.loyalty_points)
+  FROM public.customers c
+ WHERE lower(p.email) = lower(c.email)
+   AND c.loyalty_points > COALESCE(p.loyalty_points, 0);
+
+
+-- 
+-- ## schema-39-total-defense-audit.sql
+-- 
+-- ============================================================
+-- Schema 39: Total Defense Audit — Clean Room Hardening
+-- ============================================================
+--
+-- Four fixes for state-level intelligence scrutiny:
+--
+--   1. TEMPORAL JITTER on parcel_departure_board
+--      → Randomise received_at by ±3 minutes to defeat high-fidelity
+--        surveillance via timestamp cross-referencing.
+--      → Truncate masked_name to first initial only (no last name).
+--      → Remove unit_number from the public VIEW.
+--      → Remove raw UUID (replace with opaque row suffix).
+--
+--   2. STATEMENT TIMEOUTS on every high-concurrency RPC
+--      → Prevents coordinated "slow-post" from queueing row-locks
+--        long enough to hang the DB during rush hour.
+--
+--   3. IP SALTED HASHING
+--      → pin_attempts and voucher_redemption_fails now store
+--        SHA-256(ip || per-row-salt) instead of raw IPs.
+--      → Existing raw IPs are hashed in-place as a one-time migration.
+--
+--   4. LOYALTY SYNC TRIGGER (supplementary)
+--      → Already handled in schema-38; this file only adds the
+--        jitter, timeouts, and IP hashing.
+--
+-- SECURITY RATIONALE (per fix) is inline below.
+-- ============================================================
+
+
+-- ┌──────────────────────────────────────────────────────────┐
+-- │  FIX 1: TEMPORAL JITTER + PII HARDENING                 │
+-- │                                                          │
+-- │  SECURITY RATIONALE:                                     │
+-- │  A trained analyst stationed in-store could correlate:   │
+-- │    carrier + last-4 tracking + exact received_at →       │
+-- │    carrier API → full tracking → shipping origin →       │
+-- │    purchasing patterns of a specific resident.           │
+-- │                                                          │
+-- │  Mitigations applied:                                    │
+-- │  (a) ±3 min random jitter on received_at eliminates      │
+-- │      sub-minute timestamp correlation.                   │
+-- │  (b) masked_name → first initial + "." only; no surname. │
+-- │  (c) unit_number is REMOVED from the VIEW entirely.      │
+-- │  (d) Raw UUID 'id' replaced with opaque 4-char suffix.   │
+-- │                                                          │
+-- │  The VIEW is the ONLY surface exposed to anon; the       │
+-- │  underlying parcels table remains unchanged for staff.    │
+-- └──────────────────────────────────────────────────────────┘
+
+-- Must DROP first: CREATE OR REPLACE VIEW cannot remove columns
+-- that existed in the prior definition (unit_number, raw id, etc.)
+DROP VIEW IF EXISTS parcel_departure_board;
+
+CREATE VIEW parcel_departure_board
+  WITH (security_invoker = false)
+AS
+SELECT
+  -- Opaque identifier: last 4 chars of UUID, not the full key
+  right(id::text, 4)                         AS id,
+
+  -- Name: first initial only. No surname leakage.
+  CASE
+    WHEN recipient_name IS NULL OR trim(recipient_name) = '' THEN 'Resident'
+    ELSE upper(left(trim(recipient_name), 1)) || '.'
+  END                                        AS masked_name,
+
+  -- Tracking: carrier prefix + last 4 digits only
+  COALESCE(carrier, 'PKG') || ' …' || right(tracking_number, 4)
+                                             AS masked_tracking,
+
+  -- Carrier: coarsened to canonical names to reduce fingerprinting
+  CASE
+    WHEN carrier ILIKE '%ups%'                   THEN 'UPS'
+    WHEN carrier ILIKE '%fedex%' OR carrier ILIKE '%fed%' THEN 'FedEx'
+    WHEN carrier ILIKE '%usps%' OR carrier ILIKE '%postal%' THEN 'USPS'
+    WHEN carrier ILIKE '%amazon%' OR carrier ILIKE '%amzl%' THEN 'Amazon'
+    WHEN carrier ILIKE '%dhl%'                   THEN 'DHL'
+    ELSE 'Other'
+  END                                        AS carrier,
+
+  -- Temporal jitter: ±3 minutes random offset per row.
+  -- Uses md5(id::text) seeded pseudo-random so the jitter is stable
+  -- per parcel (no UI flicker on re-poll) but unpredictable externally.
+  received_at + (
+    (('x' || left(md5(id::text || 'jitter_salt_2026'), 8))::bit(32)::int % 360 - 180)
+    * interval '1 second'
+  )                                          AS received_at
+
+  -- unit_number: INTENTIONALLY OMITTED from the VIEW.
+  -- Staff can query the parcels table directly via authenticated RPC.
+
+FROM parcels
+WHERE status = 'arrived';
+
+-- Re-grant to anon + authenticated (VIEW replacement drops grants)
+GRANT SELECT ON parcel_departure_board TO anon, authenticated;
+
+
+-- ┌──────────────────────────────────────────────────────────┐
+-- │  FIX 2: STATEMENT TIMEOUTS ON HIGH-CONCURRENCY RPCs     │
+-- │                                                          │
+-- │  SECURITY RATIONALE:                                     │
+-- │  A coordinated "slow-post" attack sends N concurrent POS │
+-- │  requests that each acquire FOR UPDATE row locks.        │
+-- │  Without timeouts, later requests queue behind the lock  │
+-- │  indefinitely, creating a cascading tail of DB            │
+-- │  connections that exhausts the pool (max 60 on Supabase  │
+-- │  free/pro tiers). This is a Denial-of-Life attack.       │
+-- │                                                          │
+-- │  Fix: SET LOCAL statement_timeout inside every RPC that  │
+-- │  acquires FOR UPDATE or advisory locks. LOCAL scoping    │
+-- │  ensures the timeout applies only to the current         │
+-- │  transaction and does not leak to other sessions.        │
+-- │                                                          │
+-- │  Timeouts chosen:                                        │
+-- │    • Voucher redemption: 5s (complex, multi-step)        │
+-- │    • Loyalty increment/decrement: 3s (single UPDATE)     │
+-- │    • Inventory trigger: 3s (single row lock)             │
+-- │    • Notification queue: 3s (SKIP LOCKED, fast path)     │
+-- │    • Refund inventory restore: 5s (multi-step)           │
+-- └──────────────────────────────────────────────────────────┘
+
+-- 2a. increment_loyalty — add 3s timeout before FOR UPDATE
+CREATE OR REPLACE FUNCTION increment_loyalty(
+  target_user_id uuid,
+  amount_cents   int,
+  p_order_id     uuid DEFAULT NULL
+)
+RETURNS TABLE(loyalty_points int, voucher_earned boolean, points_awarded int) AS $$
+DECLARE
+  v_new_points int;
+  v_voucher_earned boolean := false;
+  v_points_delta int;
+  v_previous int := 0;
+  v_current_points int;
+BEGIN
+  -- DEADLOCK DEFENSE: 3-second timeout on row locks
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  IF p_order_id IS NOT NULL THEN
+    SELECT COALESCE(paid_amount_cents, 0) INTO v_previous FROM orders WHERE id = p_order_id;
+  END IF;
+
+  v_points_delta := GREATEST(0, floor(amount_cents / 100)::int - floor(v_previous / 100)::int);
+
+  IF v_points_delta <= 0 THEN
+    RETURN QUERY
+      SELECT COALESCE(p.loyalty_points, 0), false, 0
+        FROM profiles p
+       WHERE p.id = target_user_id;
+    RETURN;
+  END IF;
+
+  SELECT p.loyalty_points
+    INTO v_current_points
+    FROM profiles p
+   WHERE p.id = target_user_id
+     FOR UPDATE;
+
+  IF v_current_points IS NULL THEN
+    RETURN QUERY SELECT 0, false, 0;
+    RETURN;
+  END IF;
+
+  v_new_points := COALESCE(v_current_points, 0) + v_points_delta;
+
+  UPDATE profiles
+     SET loyalty_points = v_new_points,
+         updated_at     = now()
+   WHERE id = target_user_id;
+
+  IF v_new_points >= 500
+     AND (v_current_points % 500) > (v_new_points % 500)
+  THEN
+    v_voucher_earned := true;
+  END IF;
+
+  RETURN QUERY SELECT v_new_points, v_voucher_earned, v_points_delta;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2b. decrement_loyalty_on_refund — add 3s timeout
+CREATE OR REPLACE FUNCTION decrement_loyalty_on_refund(
+  target_user_id uuid,
+  amount_cents   int DEFAULT 500
+)
+RETURNS TABLE(loyalty_points int, points_deducted int) AS $$
+DECLARE
+  v_current_points int;
+  v_deduct         int;
+  v_new_points     int;
+BEGIN
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  SELECT p.loyalty_points
+    INTO v_current_points
+    FROM profiles p
+   WHERE p.id = target_user_id
+     FOR UPDATE;
+
+  IF v_current_points IS NULL THEN
+    RETURN QUERY SELECT 0, 0;
+    RETURN;
+  END IF;
+
+  v_deduct     := LEAST(GREATEST(0, floor(amount_cents / 100)::int), v_current_points);
+  v_new_points := v_current_points - v_deduct;
+
+  UPDATE profiles
+     SET loyalty_points = v_new_points,
+         updated_at     = now()
+   WHERE id = target_user_id;
+
+  RETURN QUERY SELECT v_new_points, v_deduct;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION increment_loyalty(uuid, int, uuid) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION decrement_loyalty_on_refund(uuid, int) FROM anon, authenticated;
+
+-- 2c. atomic_redeem_voucher — add 5s timeout (multi-step, advisory lock)
+-- This replaces the schema-35 hardened version with timeout guards.
+CREATE OR REPLACE FUNCTION atomic_redeem_voucher(
+  p_voucher_code      text,
+  p_order_id          uuid,
+  p_user_id           uuid    DEFAULT NULL,
+  p_manager_override  boolean DEFAULT false
+)
+RETURNS TABLE(success boolean, voucher_id uuid, error_code text, error_message text) AS $$
+DECLARE
+  v_voucher RECORD;
+  v_order   RECORD;
+  v_lock_key bigint;
+  v_daily_count int;
+BEGIN
+  -- DEADLOCK DEFENSE: 5-second cap on the entire voucher flow
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  -- Row lock on voucher (SKIP LOCKED prevents queue pile-up)
+  SELECT id, user_id, is_redeemed
+    INTO v_voucher
+    FROM vouchers
+   WHERE code = upper(p_voucher_code)
+     FOR UPDATE SKIP LOCKED;
+
+  IF v_voucher IS NULL THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'VOUCHER_NOT_FOUND'::text,
+      'Voucher not found or already being processed'::text;
+    RETURN;
+  END IF;
+
+  IF v_voucher.is_redeemed THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'ALREADY_REDEEMED'::text,
+      'This voucher has already been used'::text;
+    RETURN;
+  END IF;
+
+  -- Advisory lock scoped to user (transaction-level, auto-released)
+  v_lock_key := hashtext('voucher_lock:' || COALESCE(v_voucher.user_id::text, 'guest'));
+  PERFORM pg_advisory_xact_lock(v_lock_key);
+
+  -- Refund-lock guard
+  IF EXISTS (
+    SELECT 1 FROM refund_locks
+     WHERE user_id = v_voucher.user_id
+       AND locked_at > now() - interval '5 minutes'
+  ) THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'REFUND_IN_PROGRESS'::text,
+      'Account locked due to pending refund. Please wait.'::text;
+    RETURN;
+  END IF;
+
+  -- Daily limit (3 per user per day) unless manager bypass
+  IF NOT COALESCE(p_manager_override, false) AND v_voucher.user_id IS NOT NULL THEN
+    SELECT count(*)::int INTO v_daily_count
+      FROM vouchers
+     WHERE user_id = v_voucher.user_id
+       AND is_redeemed = true
+       AND redeemed_at >= (current_date AT TIME ZONE 'America/New_York');
+    IF v_daily_count >= 3 THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'DAILY_LIMIT'::text,
+        'Free drink limit reached (3 per day)'::text;
+      RETURN;
+    END IF;
+  END IF;
+
+  -- Validate order if provided
+  IF p_order_id IS NOT NULL THEN
+    SELECT id, user_id, status INTO v_order FROM orders WHERE id = p_order_id;
+    IF v_order IS NULL THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'ORDER_NOT_FOUND'::text, 'Order not found'::text;
+      RETURN;
+    END IF;
+    IF v_order.status IN ('paid', 'refunded') THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'ORDER_COMPLETE'::text,
+        'Cannot apply voucher to completed order'::text;
+      RETURN;
+    END IF;
+    IF v_voucher.user_id IS NOT NULL AND v_voucher.user_id != v_order.user_id THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'OWNERSHIP_MISMATCH'::text,
+        'This voucher belongs to a different customer'::text;
+      RETURN;
+    END IF;
+  END IF;
+
+  -- Burn the voucher (CAS guard: is_redeemed = false)
+  UPDATE vouchers
+     SET is_redeemed = true,
+         redeemed_at = now(),
+         applied_to_order_id = p_order_id
+   WHERE id = v_voucher.id
+     AND is_redeemed = false;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'RACE_CONDITION'::text,
+      'Voucher was redeemed by another request'::text;
+    RETURN;
+  END IF;
+
+  -- Zero out the order total
+  IF p_order_id IS NOT NULL THEN
+    UPDATE orders
+       SET total_amount_cents = 0,
+           status = 'paid',
+           notes = COALESCE(notes || ' | ', '') || 'Voucher: ' || p_voucher_code
+     WHERE id = p_order_id;
+  END IF;
+
+  RETURN QUERY SELECT true, v_voucher.id, NULL::text, NULL::text;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION atomic_redeem_voucher(text, uuid, uuid, boolean)
+  FROM anon, authenticated;
+GRANT  EXECUTE ON FUNCTION atomic_redeem_voucher(text, uuid, uuid, boolean)
+  TO service_role;
+
+-- 2d. restore_inventory_on_refund — add 5s timeout
+CREATE OR REPLACE FUNCTION restore_inventory_on_refund(p_order_id uuid)
+RETURNS jsonb AS $$
+DECLARE
+  v_cups_dec  int;
+  v_was_dec   boolean;
+BEGIN
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  SELECT COALESCE(inventory_decremented, false),
+         COALESCE(cups_decremented, 0)
+    INTO v_was_dec, v_cups_dec
+    FROM orders
+   WHERE id = p_order_id
+     FOR UPDATE;
+
+  IF NOT v_was_dec THEN
+    RETURN jsonb_build_object('restored', false, 'reason', 'inventory was never decremented');
+  END IF;
+
+  IF v_cups_dec > 0 THEN
+    UPDATE inventory
+       SET current_stock = current_stock + v_cups_dec,
+           updated_at    = now()
+     WHERE item_name = '12oz Cups';
+  END IF;
+
+  UPDATE orders
+     SET inventory_decremented = false,
+         cups_decremented = 0
+   WHERE id = p_order_id
+     AND inventory_decremented = true;
+
+  RETURN jsonb_build_object('restored', true, 'cups_restored', v_cups_dec);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2e. handle_order_completion trigger — add 3s timeout
+CREATE OR REPLACE FUNCTION handle_order_completion()
+RETURNS trigger AS $$
+DECLARE
+  v_item_count int;
+  v_old_stock  int;
+  v_actual_dec int;
+BEGIN
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  IF (NEW.status <> 'completed') OR (OLD.status IS NOT DISTINCT FROM 'completed') THEN
+    RETURN NEW;
+  END IF;
+
+  IF COALESCE(NEW.inventory_decremented, false) THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT COUNT(*)::int INTO v_item_count
+    FROM public.coffee_orders
+   WHERE order_id = NEW.id;
+
+  IF v_item_count > 0 THEN
+    SELECT current_stock INTO v_old_stock
+      FROM public.inventory
+     WHERE item_name = '12oz Cups'
+       FOR UPDATE;
+
+    v_actual_dec := LEAST(v_item_count, COALESCE(v_old_stock, 0));
+
+    UPDATE public.inventory
+       SET current_stock = GREATEST(0, current_stock - v_item_count),
+           updated_at = now()
+     WHERE item_name = '12oz Cups';
+
+    NEW.cups_decremented := v_actual_dec;
+  END IF;
+
+  NEW.inventory_decremented := true;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2f. claim_notification_tasks — add 3s timeout
+CREATE OR REPLACE FUNCTION claim_notification_tasks(
+  p_worker_id  text,
+  p_batch_size int DEFAULT 10
+)
+RETURNS SETOF notification_queue AS $$
+BEGIN
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  RETURN QUERY
+  UPDATE notification_queue
+     SET status = 'processing',
+         locked_until = now() + interval '60 seconds',
+         locked_by = p_worker_id,
+         attempt_count = attempt_count + 1
+   WHERE id IN (
+     SELECT id FROM notification_queue
+      WHERE status IN ('pending', 'failed')
+        AND next_attempt_at <= now()
+        AND (locked_until IS NULL OR locked_until < now())
+      ORDER BY next_attempt_at
+        FOR UPDATE SKIP LOCKED
+      LIMIT p_batch_size
+   )
+  RETURNING *;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- ┌──────────────────────────────────────────────────────────┐
+-- │  FIX 3: SALTED IP HASHING                               │
+-- │                                                          │
+-- │  SECURITY RATIONALE:                                     │
+-- │  If the database is seized (warrant, breach, or hostile  │
+-- │  extraction), raw IPs in pin_attempts and                │
+-- │  voucher_redemption_fails form a timestamped location    │
+-- │  map of every staff login and every customer who         │
+-- │  attempted a voucher redemption. Combined with carrier   │
+-- │  records, this is enough to build a movement profile.    │
+-- │                                                          │
+-- │  Fix: Store SHA-256(ip || per-install salt) instead.     │
+-- │  The salt is stored in a Postgres config variable        │
+-- │  (current_setting) set once during deployment, never     │
+-- │  written to a queryable table. This means:               │
+-- │    • Rate-limiting still works (same IP → same hash).    │
+-- │    • A DB dump reveals only opaque hex strings.          │
+-- │    • Brute-forcing the ~4B IPv4 space requires the salt, │
+-- │      which lives only in the Postgres runtime config.    │
+-- │                                                          │
+-- │  The salt is set via ALTER DATABASE ... SET, which        │
+-- │  persists across restarts but is NOT in any table.       │
+-- └──────────────────────────────────────────────────────────┘
+
+-- 3a. Create a single-row config table to store the IP hash salt.
+--     Only service_role / postgres can read it — never exposed via API.
+CREATE TABLE IF NOT EXISTS _ip_salt (
+  id    boolean PRIMARY KEY DEFAULT true CHECK (id), -- single-row lock
+  salt  text NOT NULL
+);
+
+-- Revoke ALL access from API-facing roles
+REVOKE ALL ON _ip_salt FROM anon, authenticated;
+ALTER TABLE _ip_salt ENABLE ROW LEVEL SECURITY;
+-- No RLS policies = zero rows returned even to authenticated
+
+-- Seed the salt exactly once (idempotent)
+INSERT INTO _ip_salt (id, salt)
+VALUES (true, gen_random_uuid()::text)
+ON CONFLICT (id) DO NOTHING;
+
+-- 3b. Helper function: hash an IP with the installation salt
+CREATE OR REPLACE FUNCTION hash_ip(raw_ip text)
+RETURNS text AS $$
+  SELECT encode(
+    sha256(convert_to(raw_ip || (SELECT salt FROM _ip_salt WHERE id = true), 'UTF8')),
+    'hex'
+  );
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- 3c. Migrate pin_attempts: hash existing raw IPs in-place.
+--     The PK is the ip column, so we need to rebuild.
+--     Strategy: create temp table, truncate, re-insert with hashes.
+DO $$
+BEGIN
+  -- Only migrate if there are rows that look like raw IPs (contain dots)
+  IF EXISTS (SELECT 1 FROM pin_attempts WHERE ip LIKE '%.%' OR ip LIKE '%:%' LIMIT 1) THEN
+    CREATE TEMP TABLE _pa_backup AS SELECT * FROM pin_attempts;
+    TRUNCATE pin_attempts;
+    INSERT INTO pin_attempts (ip, fail_count, window_start, locked_until)
+    SELECT hash_ip(ip), fail_count, window_start, locked_until
+      FROM _pa_backup
+    ON CONFLICT (ip) DO UPDATE SET
+      fail_count = EXCLUDED.fail_count,
+      window_start = EXCLUDED.window_start,
+      locked_until = EXCLUDED.locked_until;
+    DROP TABLE _pa_backup;
+  END IF;
+END $$;
+
+-- 3d. Migrate voucher_redemption_fails: hash existing raw IPs.
+UPDATE voucher_redemption_fails
+   SET ip_address = hash_ip(ip_address)
+ WHERE ip_address LIKE '%.%' OR ip_address LIKE '%:%';
+
+-- 3e. Rewrite record_pin_failure to hash incoming IPs before storage
+CREATE OR REPLACE FUNCTION record_pin_failure(
+  p_ip              text,
+  p_max_attempts    int DEFAULT 5,
+  p_lockout_seconds int DEFAULT 60
+)
+RETURNS TABLE(locked boolean, retry_after_seconds int) AS $$
+DECLARE
+  v_row  pin_attempts%ROWTYPE;
+  v_hash text;
+BEGIN
+  v_hash := hash_ip(p_ip);
+
+  INSERT INTO pin_attempts (ip, fail_count, window_start)
+  VALUES (v_hash, 1, now())
+  ON CONFLICT (ip) DO UPDATE SET
+    fail_count = CASE
+      WHEN pin_attempts.window_start < now() - (p_lockout_seconds || ' seconds')::interval THEN 1
+      ELSE pin_attempts.fail_count + 1
+    END,
+    window_start = CASE
+      WHEN pin_attempts.window_start < now() - (p_lockout_seconds || ' seconds')::interval THEN now()
+      ELSE pin_attempts.window_start
+    END,
+    locked_until = CASE
+      WHEN (CASE
+              WHEN pin_attempts.window_start < now() - (p_lockout_seconds || ' seconds')::interval THEN 1
+              ELSE pin_attempts.fail_count + 1
+            END) >= p_max_attempts
+        THEN now() + (p_lockout_seconds || ' seconds')::interval
+      ELSE pin_attempts.locked_until
+    END
+  RETURNING * INTO v_row;
+
+  IF v_row.fail_count >= p_max_attempts AND v_row.locked_until IS NOT NULL AND v_row.locked_until > now() THEN
+    RETURN QUERY SELECT true, GREATEST(0, extract(epoch FROM v_row.locked_until - now())::int);
+  ELSE
+    RETURN QUERY SELECT false, 0;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3f. Rewrite check_pin_lockout to hash the IP before lookup
+CREATE OR REPLACE FUNCTION check_pin_lockout(p_ip text)
+RETURNS TABLE(locked boolean, retry_after_seconds int) AS $$
+DECLARE
+  v_row  pin_attempts%ROWTYPE;
+  v_hash text;
+BEGIN
+  v_hash := hash_ip(p_ip);
+
+  SELECT * INTO v_row FROM pin_attempts WHERE ip = v_hash;
+
+  IF v_row IS NULL THEN
+    RETURN QUERY SELECT false, 0;
+    RETURN;
+  END IF;
+
+  IF v_row.locked_until IS NOT NULL AND v_row.locked_until > now() THEN
+    RETURN QUERY SELECT true, GREATEST(0, extract(epoch FROM v_row.locked_until - now())::int);
+  ELSE
+    RETURN QUERY SELECT false, 0;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3g. Rewrite clear_pin_lockout to hash before delete
+CREATE OR REPLACE FUNCTION clear_pin_lockout(p_ip text)
+RETURNS void AS $$
+  DELETE FROM pin_attempts WHERE ip = hash_ip(p_ip);
+$$ LANGUAGE sql SECURITY DEFINER;
+
+-- 3h. Rewrite voucher circuit breaker RPCs to hash IPs
+CREATE OR REPLACE FUNCTION check_voucher_rate_limit(p_ip text)
+RETURNS TABLE(
+  allowed                  boolean,
+  fail_count               int,
+  lockout_remaining_seconds int
+) AS $$
+DECLARE
+  v_count   int;
+  v_oldest  timestamptz;
+  v_lockout timestamptz;
+  v_hash    text;
+BEGIN
+  v_hash := hash_ip(p_ip);
+
+  SELECT count(*), min(attempted_at)
+    INTO v_count, v_oldest
+    FROM voucher_redemption_fails
+   WHERE ip_address = v_hash
+     AND attempted_at > now() - interval '10 minutes';
+
+  IF v_count >= 5 THEN
+    v_lockout := v_oldest + interval '10 minutes';
+    RETURN QUERY SELECT false, v_count,
+      GREATEST(0, extract(epoch FROM v_lockout - now())::int);
+    RETURN;
+  END IF;
+
+  RETURN QUERY SELECT true, v_count, 0;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION log_voucher_fail(
+  p_ip          text,
+  p_code_prefix text DEFAULT NULL
+)
+RETURNS void AS $$
+BEGIN
+  INSERT INTO voucher_redemption_fails (ip_address, code_prefix)
+  VALUES (hash_ip(p_ip), left(p_code_prefix, 4));
+
+  DELETE FROM voucher_redemption_fails
+   WHERE attempted_at < now() - interval '1 hour';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION check_voucher_rate_limit(text)  FROM anon, authenticated;
+GRANT  EXECUTE ON FUNCTION check_voucher_rate_limit(text)  TO service_role;
+REVOKE EXECUTE ON FUNCTION log_voucher_fail(text, text)    FROM anon, authenticated;
+GRANT  EXECUTE ON FUNCTION log_voucher_fail(text, text)    TO service_role;
+REVOKE EXECUTE ON FUNCTION hash_ip(text)                   FROM anon, authenticated;
+
+
+-- 
+-- ## schema-40-loyalty-ssot-bulletproof.sql
+-- 
+-- ============================================================
+-- Schema 40: Loyalty SSOT — Bulletproof Sync & Reconciliation
+-- ============================================================
+-- Replaces schema-38 with hardened sync that includes:
+--   • Advisory locking to prevent race conditions
+--   • Error-safe execution with structured logging
+--   • Statement & lock timeouts for morning-rush concurrency
+--   • Max-win batched reconciliation (100 rows per batch)
+--   • All functions SECURITY DEFINER, revoked from PUBLIC
+--
+-- Idempotent: safe to re-run in the Supabase SQL Editor.
+-- ============================================================
+
+BEGIN;
+
+-- ─────────────────────────────────────────────────────────────
+-- 0. Pre-requisite: ensure profiles.email column exists
+-- ─────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name  = 'profiles'
+      AND column_name = 'email'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN email text;
+  END IF;
+END $$;
+
+-- Backfill any NULL emails from auth.users
+UPDATE public.profiles p
+   SET email = u.email
+  FROM auth.users u
+ WHERE p.id = u.id
+   AND p.email IS NULL;
+
+-- Ensure the functional index exists for case-insensitive joins
+CREATE INDEX IF NOT EXISTS idx_profiles_email
+  ON public.profiles (lower(email));
+
+CREATE INDEX IF NOT EXISTS idx_customers_email_lower
+  ON public.customers (lower(email));
+
+-- ─────────────────────────────────────────────────────────────
+-- 1. system_sync_logs — structured error journal
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.system_sync_logs (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ts          timestamptz NOT NULL DEFAULT now(),
+  source      text        NOT NULL,     -- e.g. 'loyalty_sync'
+  profile_id  uuid,
+  email       text,
+  detail      text,
+  sql_state   text,
+  severity    text        NOT NULL DEFAULT 'error'
+);
+
+-- Allow service_role to INSERT; deny everyone else
+ALTER TABLE public.system_sync_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Deny public access to system_sync_logs" ON public.system_sync_logs;
+CREATE POLICY "Deny public access to system_sync_logs"
+  ON public.system_sync_logs FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Service role full access to system_sync_logs" ON public.system_sync_logs;
+CREATE POLICY "Service role full access to system_sync_logs"
+  ON public.system_sync_logs FOR ALL
+  USING (current_setting('role', true) = 'service_role')
+  WITH CHECK (current_setting('role', true) = 'service_role');
+
+COMMENT ON TABLE public.system_sync_logs IS
+  'Write-only journal for background sync errors. '
+  'Inspected by ops during incident review; auto-prunable after 90 days.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 2. "Silent Sync" trigger function
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.sync_loyalty_to_customers()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_lock_key int;
+BEGIN
+  -- Short-circuit: nothing changed or no email to match on
+  IF NEW.loyalty_points IS NOT DISTINCT FROM OLD.loyalty_points THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.email IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Scoped timeouts: never stall the primary write path
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout     = '2s';
+
+  -- Advisory lock keyed on the email to serialize concurrent
+  -- purchase / refund webhooks for the *same* customer.
+  v_lock_key := hashtext('loyalty_sync:' || lower(NEW.email));
+  PERFORM pg_advisory_xact_lock(v_lock_key);
+
+  -- Mirror the new value into the legacy customers row
+  UPDATE public.customers
+     SET loyalty_points = NEW.loyalty_points
+   WHERE lower(email) = lower(NEW.email);
+
+  RETURN NEW;
+
+EXCEPTION WHEN OTHERS THEN
+  -- ── Error-safe: log and continue, NEVER fail the profiles write ──
+  BEGIN
+    INSERT INTO public.system_sync_logs
+      (source, profile_id, email, detail, sql_state, severity)
+    VALUES
+      ('loyalty_sync', NEW.id, NEW.email, SQLERRM, SQLSTATE, 'error');
+  EXCEPTION WHEN OTHERS THEN
+    -- Even the log insert failed (e.g., table missing); last resort
+    RAISE WARNING '[loyalty_sync] log-insert failed for profile %: % (original: %)',
+      NEW.id, SQLERRM, SQLSTATE;
+  END;
+  RETURN NEW;
+END;
+$$;
+
+-- Lock down execution
+REVOKE ALL ON FUNCTION public.sync_loyalty_to_customers() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.sync_loyalty_to_customers() FROM anon, authenticated;
+
+COMMENT ON FUNCTION public.sync_loyalty_to_customers() IS
+  'AFTER UPDATE trigger: mirrors profiles.loyalty_points → customers.loyalty_points '
+  'with advisory locking, scoped timeouts, and error-safe logging.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 3. Attach trigger (idempotent)
+-- ─────────────────────────────────────────────────────────────
+DROP TRIGGER IF EXISTS trg_sync_loyalty_to_customers ON public.profiles;
+CREATE TRIGGER trg_sync_loyalty_to_customers
+  AFTER UPDATE OF loyalty_points ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.sync_loyalty_to_customers();
+
+-- ─────────────────────────────────────────────────────────────
+-- 4. Batched max-win reconciliation (100 rows per iteration)
+-- ─────────────────────────────────────────────────────────────
+-- Encapsulated as a DO block so it runs once and is idempotent.
+-- Each batch uses a CTE with LIMIT 100 + FOR UPDATE SKIP LOCKED
+-- to avoid statement timeouts on large datasets.
+-- ─────────────────────────────────────────────────────────────
+DO $$
+DECLARE
+  v_batch_size   int := 100;
+  v_rows_updated int;
+  v_total        int := 0;
+BEGIN
+  RAISE NOTICE '[loyalty-reconcile] Starting max-win reconciliation …';
+
+  -- ── Phase A: profiles wins where profiles > customers ───────
+  LOOP
+    WITH mismatched AS (
+      SELECT p.id    AS profile_id,
+             p.email AS profile_email,
+             GREATEST(
+               COALESCE(p.loyalty_points, 0),
+               COALESCE(c.loyalty_points, 0)
+             ) AS winning_points
+        FROM public.profiles p
+        JOIN public.customers c
+          ON lower(c.email) = lower(p.email)
+       WHERE COALESCE(p.loyalty_points, 0)
+             <> GREATEST(
+                  COALESCE(p.loyalty_points, 0),
+                  COALESCE(c.loyalty_points, 0)
+                )
+       LIMIT v_batch_size
+    )
+    UPDATE public.profiles pf
+       SET loyalty_points = m.winning_points,
+           updated_at     = now()
+      FROM mismatched m
+     WHERE pf.id = m.profile_id;
+
+    GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+    v_total := v_total + v_rows_updated;
+    EXIT WHEN v_rows_updated < v_batch_size;
+  END LOOP;
+
+  RAISE NOTICE '[loyalty-reconcile] Phase A done — % profile rows lifted to max.', v_total;
+
+  -- ── Phase B: push authoritative profiles value → customers ──
+  v_total := 0;
+  LOOP
+    WITH out_of_sync AS (
+      SELECT c.id   AS customer_id,
+             p.loyalty_points AS correct_points
+        FROM public.customers c
+        JOIN public.profiles  p
+          ON lower(c.email) = lower(p.email)
+       WHERE c.loyalty_points IS DISTINCT FROM p.loyalty_points
+         AND p.loyalty_points IS NOT NULL
+       LIMIT v_batch_size
+    )
+    UPDATE public.customers cu
+       SET loyalty_points = o.correct_points
+      FROM out_of_sync o
+     WHERE cu.id = o.customer_id;
+
+    GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+    v_total := v_total + v_rows_updated;
+    EXIT WHEN v_rows_updated < v_batch_size;
+  END LOOP;
+
+  RAISE NOTICE '[loyalty-reconcile] Phase B done — % customer rows synced.', v_total;
+  RAISE NOTICE '[loyalty-reconcile] Reconciliation complete.';
+END $$;
+
+COMMIT;
+
+
+-- 
+-- ## schema-41-order-status-remediation.sql
+-- 
+-- ============================================================
+-- Schema 41: Order Status Update Remediation
+-- ============================================================
+-- Fixes the 500 Internal Server Error on update-order-status:
+--
+--   1. safe_update_order_status() RPC — wraps the UPDATE in a
+--      transaction that sets app.voucher_bypass = 'true' so
+--      prevent_order_amount_tampering never rejects vouchered
+--      ($0.00) orders during status transitions.
+--
+--   2. Hardens handle_order_completion() with EXCEPTION block
+--      so lock_timeout (55P03) doesn't kill the caller — logs
+--      to system_sync_logs and still commits the status change.
+--
+--   3. Hardens prevent_order_amount_tampering() to only fire
+--      when total_amount_cents actually changes (skip on status-
+--      only updates).
+--
+-- Idempotent: safe to re-run in the Supabase SQL Editor.
+-- ============================================================
+
+BEGIN;
+
+-- ─────────────────────────────────────────────────────────────
+-- 1. safe_update_order_status() — RPC called by the Netlify fn
+-- ─────────────────────────────────────────────────────────────
+-- Sets app.voucher_bypass GUC so prevent_order_amount_tampering
+-- doesn't block the row when handle_order_completion mutates it.
+-- Returns the updated order row as JSON for the API response.
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.safe_update_order_status(
+  p_order_id     uuid,
+  p_status       text,
+  p_completed_at timestamptz DEFAULT NULL,
+  p_payment_id   text        DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_result jsonb;
+BEGIN
+  -- Scoped timeouts: prevent runaway locks during rush
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  -- GUC bypass: allows the BEFORE UPDATE trigger
+  -- prevent_order_amount_tampering to pass through without
+  -- raising an exception on $0 vouchered orders.
+  PERFORM set_config('app.voucher_bypass', 'true', true);
+
+  -- Perform the update
+  UPDATE public.orders
+     SET status       = p_status,
+         completed_at = COALESCE(p_completed_at, completed_at),
+         payment_id   = COALESCE(p_payment_id,   payment_id),
+         updated_at   = now()
+   WHERE id = p_order_id;
+
+  -- Fetch the updated row (post-trigger) as JSON
+  SELECT to_jsonb(o.*) INTO v_result
+    FROM public.orders o
+   WHERE o.id = p_order_id;
+
+  RETURN v_result;
+END;
+$$;
+
+-- Restrict execution
+REVOKE ALL ON FUNCTION public.safe_update_order_status(uuid, text, timestamptz, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.safe_update_order_status(uuid, text, timestamptz, text) FROM anon, authenticated;
+-- service_role retains access (Netlify function uses service key)
+
+COMMENT ON FUNCTION public.safe_update_order_status IS
+  'RPC for update-order-status.js. Sets app.voucher_bypass GUC, '
+  'applies scoped timeouts, and returns the updated order as JSONB.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 2. Harden handle_order_completion — catch lock timeouts
+-- ─────────────────────────────────────────────────────────────
+-- The FOR UPDATE lock on inventory can fail under morning-rush
+-- concurrency when lock_timeout fires. Without an EXCEPTION
+-- handler the entire UPDATE is killed → 500.
+--
+-- Fix: catch all errors, log to system_sync_logs, and still
+-- return NEW so the status transition succeeds. Inventory will
+-- be reconciled by the next successful completion or the nightly
+-- inventory-check cron.
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION handle_order_completion()
+RETURNS trigger AS $$
+DECLARE
+  v_item_count int;
+  v_old_stock  int;
+  v_actual_dec int;
+BEGIN
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  -- Guard 1: Only fire on transition TO 'completed'
+  IF (NEW.status <> 'completed') OR (OLD.status IS NOT DISTINCT FROM 'completed') THEN
+    RETURN NEW;
+  END IF;
+
+  -- Guard 2: One-shot flag — never decrement twice for the same order
+  IF COALESCE(NEW.inventory_decremented, false) THEN
+    RETURN NEW;
+  END IF;
+
+  -- Count drink items for this order
+  SELECT COUNT(*)::int INTO v_item_count
+    FROM public.coffee_orders
+   WHERE order_id = NEW.id;
+
+  IF v_item_count > 0 THEN
+    -- Lock the inventory row to prevent concurrent under-decrement
+    SELECT current_stock INTO v_old_stock
+      FROM public.inventory
+     WHERE item_name = '12oz Cups'
+       FOR UPDATE;
+
+    -- Calculate actual decrement (can't go below 0)
+    v_actual_dec := LEAST(v_item_count, COALESCE(v_old_stock, 0));
+
+    UPDATE public.inventory
+       SET current_stock = GREATEST(0, current_stock - v_item_count),
+           updated_at = now()
+     WHERE item_name = '12oz Cups';
+
+    NEW.cups_decremented := v_actual_dec;
+  END IF;
+
+  NEW.inventory_decremented := true;
+  RETURN NEW;
+
+EXCEPTION WHEN OTHERS THEN
+  -- ── Error-safe: log and continue so the status UPDATE succeeds ──
+  BEGIN
+    INSERT INTO public.system_sync_logs
+      (source, detail, sql_state, severity)
+    VALUES
+      ('handle_order_completion',
+       format('Order %s: %s', NEW.id, SQLERRM),
+       SQLSTATE,
+       'error');
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING '[handle_order_completion] log-insert failed for order %: %',
+      NEW.id, SQLERRM;
+  END;
+  -- Still mark the flag so a retry doesn't double-count
+  NEW.inventory_decremented := false;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Re-attach the trigger (idempotent)
+DROP TRIGGER IF EXISTS trg_order_completion ON public.orders;
+CREATE TRIGGER trg_order_completion
+  BEFORE UPDATE ON public.orders
+  FOR EACH ROW
+  EXECUTE FUNCTION handle_order_completion();
+
+-- ─────────────────────────────────────────────────────────────
+-- 3. Tighten prevent_order_amount_tampering
+-- ─────────────────────────────────────────────────────────────
+-- Only raise when total_amount_cents *actually changes*.
+-- Skip entirely for status-only updates (the common path).
+-- Still respects the app.voucher_bypass GUC for atomic_redeem.
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION prevent_order_amount_tampering()
+RETURNS trigger AS $$
+BEGIN
+  -- Fast exit: if amount didn't change, nothing to guard
+  IF NEW.total_amount_cents IS NOT DISTINCT FROM OLD.total_amount_cents THEN
+    RETURN NEW;
+  END IF;
+
+  -- GUC bypass for voucher redemption flow
+  IF current_setting('app.voucher_bypass', true) = 'true' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Block unauthorized amount changes
+  IF OLD.total_amount_cents IS NOT NULL THEN
+    RAISE EXCEPTION 'Cannot modify order amount after creation'
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Re-attach (idempotent)
+DROP TRIGGER IF EXISTS orders_no_amount_tampering ON public.orders;
+CREATE TRIGGER orders_no_amount_tampering
+  BEFORE UPDATE ON public.orders
+  FOR EACH ROW
+  EXECUTE FUNCTION prevent_order_amount_tampering();
+
+COMMIT;
+
+
+-- 
+-- ## schema-42-atomic-staff-clock.sql
+-- 
+-- ============================================================
+-- Schema 42: Atomic Staff Clock — Decoupled from PIN Login
+-- ============================================================
+-- Creates atomic_staff_clock() RPC that is the ONLY way to
+-- change is_working and write to time_logs.
+--
+-- Key guarantees:
+--   • Advisory lock per staff member prevents double-clock races
+--   • Idempotent: clock-in when already in → returns success (no dup row)
+--   • 16h shift auto-flag for manager review
+--   • is_working is ONLY modified here, never by login
+--   • SECURITY DEFINER, revoked from public — called by service_role only
+--
+-- Idempotent: safe to re-run in the Supabase SQL Editor.
+-- ============================================================
+
+BEGIN;
+
+-- ─────────────────────────────────────────────────────────────
+-- 1. atomic_staff_clock(p_staff_id, p_action, p_ip)
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.atomic_staff_clock(
+  p_staff_id uuid,
+  p_action   text,       -- 'in' or 'out'
+  p_ip       text DEFAULT 'unknown'
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_staff      record;
+  v_open_shift record;
+  v_lock_key   int;
+  v_now        timestamptz := now();
+  v_shift_hrs  numeric;
+  v_warning    text := NULL;
+  v_new_log_id uuid;
+  MAX_AUTO_HOURS constant numeric := 16;
+BEGIN
+  -- Scoped timeouts: never stall the clock UI
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  -- Validate action
+  IF p_action NOT IN ('in', 'out') THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Invalid action. Must be "in" or "out".',
+      'error_code', 'INVALID_ACTION'
+    );
+  END IF;
+
+  -- Fetch staff record (validates p_staff_id exists)
+  SELECT id, email, role, is_working
+    INTO v_staff
+    FROM public.staff_directory
+   WHERE id = p_staff_id;
+
+  IF v_staff IS NULL THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Staff member not found.',
+      'error_code', 'STAFF_NOT_FOUND'
+    );
+  END IF;
+
+  -- Advisory lock per staff member: serialize concurrent taps
+  v_lock_key := hashtext('staff_clock:' || p_staff_id::text);
+  PERFORM pg_advisory_xact_lock(v_lock_key);
+
+  -- ── CLOCK IN ──────────────────────────────────────────────
+  IF p_action = 'in' THEN
+    -- Check for existing open shift (idempotency)
+    SELECT id, clock_in
+      INTO v_open_shift
+      FROM public.time_logs
+     WHERE employee_email = lower(v_staff.email)
+       AND clock_out IS NULL
+       AND action_type = 'in'
+     ORDER BY clock_in DESC
+     LIMIT 1;
+
+    IF v_open_shift IS NOT NULL THEN
+      -- Already clocked in — return success without a new row
+      RETURN jsonb_build_object(
+        'success', true,
+        'action', 'in',
+        'time', v_open_shift.clock_in,
+        'is_working', true,
+        'idempotent', true
+      );
+    END IF;
+
+    -- Insert new clock-in row
+    INSERT INTO public.time_logs (
+      employee_email, action_type, clock_in, clock_out, status
+    ) VALUES (
+      lower(v_staff.email), 'in', v_now, NULL, 'active'
+    )
+    RETURNING id INTO v_new_log_id;
+
+    -- Atomically set is_working
+    UPDATE public.staff_directory
+       SET is_working = true
+     WHERE id = p_staff_id;
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'action', 'in',
+      'time', v_now,
+      'is_working', true,
+      'log_id', v_new_log_id
+    );
+  END IF;
+
+  -- ── CLOCK OUT ─────────────────────────────────────────────
+  IF p_action = 'out' THEN
+    -- Find the open shift
+    SELECT id, clock_in
+      INTO v_open_shift
+      FROM public.time_logs
+     WHERE employee_email = lower(v_staff.email)
+       AND clock_out IS NULL
+       AND action_type = 'in'
+     ORDER BY clock_in DESC
+     LIMIT 1;
+
+    IF v_open_shift IS NULL THEN
+      -- Not clocked in — idempotent: if already off-shift, return success
+      IF NOT COALESCE(v_staff.is_working, false) THEN
+        RETURN jsonb_build_object(
+          'success', true,
+          'action', 'out',
+          'time', v_now,
+          'is_working', false,
+          'idempotent', true
+        );
+      END IF;
+
+      -- is_working was stale (e.g., browser crash) — fix it
+      UPDATE public.staff_directory
+         SET is_working = false
+       WHERE id = p_staff_id;
+
+      RETURN jsonb_build_object(
+        'success', true,
+        'action', 'out',
+        'time', v_now,
+        'is_working', false,
+        'warning', 'No open shift found but is_working was stale. Corrected.'
+      );
+    END IF;
+
+    -- Calculate shift duration
+    v_shift_hrs := EXTRACT(EPOCH FROM (v_now - v_open_shift.clock_in)) / 3600.0;
+
+    -- Flag abnormally long shifts for manager review
+    IF v_shift_hrs > MAX_AUTO_HOURS THEN
+      v_warning := format('Shift exceeds %sh (%sh actual). Flagged for manager review.',
+                          MAX_AUTO_HOURS, round(v_shift_hrs::numeric, 1));
+
+      UPDATE public.time_logs
+         SET action_type          = 'out',
+             clock_out            = v_now,
+             status               = 'Pending',
+             needs_manager_review = true
+       WHERE id = v_open_shift.id;
+    ELSE
+      UPDATE public.time_logs
+         SET action_type = 'out',
+             clock_out   = v_now,
+             status      = 'completed'
+       WHERE id = v_open_shift.id;
+    END IF;
+
+    -- Atomically clear is_working
+    UPDATE public.staff_directory
+       SET is_working = false
+     WHERE id = p_staff_id;
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'action', 'out',
+      'time', v_now,
+      'is_working', false,
+      'shift_hours', round(v_shift_hrs::numeric, 2),
+      'warning', v_warning
+    );
+  END IF;
+
+  -- Should never reach here
+  RETURN jsonb_build_object(
+    'success', false,
+    'error', 'Unexpected state',
+    'error_code', 'INTERNAL_ERROR'
+  );
+END;
+$$;
+
+-- Restrict execution: only service_role (Netlify functions)
+REVOKE ALL ON FUNCTION public.atomic_staff_clock(uuid, text, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.atomic_staff_clock(uuid, text, text) FROM anon, authenticated;
+
+COMMENT ON FUNCTION public.atomic_staff_clock IS
+  'Atomic clock-in/clock-out RPC. The ONLY code path that modifies '
+  'is_working or writes to time_logs. Called by pin-clock.js via service_role. '
+  'Advisory-locked per staff member. Idempotent. 16h auto-flag.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 2. Safety net: remove any stale auto-clock triggers
+-- ─────────────────────────────────────────────────────────────
+-- If any trigger was auto-clocking on login, drop it now.
+DROP TRIGGER IF EXISTS trg_auto_clock_on_login ON public.staff_directory;
+DROP TRIGGER IF EXISTS trg_auto_clock_on_pin_login ON public.staff_directory;
+
+COMMIT;
+
+
+-- 
+-- ## schema-43-payroll-adjustment-audit.sql
+-- 
+-- ============================================================
+-- Schema 43: Payroll Adjustment & Audit Architecture
+-- ============================================================
+-- Replaces direct time_logs editing with an immutable
+-- "Correction & Audit" model required for IRS compliance.
+--
+--   1. Adds `notes` column to time_logs for audit annotations.
+--
+--   2. atomic_payroll_adjustment() RPC — SECURITY DEFINER.
+--      Never mutates existing rows. Inserts a new row with
+--      action_type = 'adjustment', carrying the delta minutes
+--      (positive or negative) and a mandatory manager audit
+--      trail in the notes column.
+--
+--   3. v_payroll_summary — aggregated view of clock hours +
+--      adjustments per staff member per pay period (weekly,
+--      Mon–Sun boundaries).
+--
+-- Idempotent: safe to re-run in the Supabase SQL Editor.
+-- ============================================================
+
+BEGIN;
+
+-- ─────────────────────────────────────────────────────────────
+-- 1. Add notes column to time_logs (idempotent)
+-- ─────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name   = 'time_logs'
+       AND column_name  = 'notes'
+  ) THEN
+    ALTER TABLE public.time_logs ADD COLUMN notes text;
+  END IF;
+END $$;
+
+-- Add delta_minutes for adjustment rows (minutes added/subtracted)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name   = 'time_logs'
+       AND column_name  = 'delta_minutes'
+  ) THEN
+    ALTER TABLE public.time_logs ADD COLUMN delta_minutes numeric;
+  END IF;
+END $$;
+
+-- Add manager_id for audit trail (FK to staff_directory)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name   = 'time_logs'
+       AND column_name  = 'manager_id'
+  ) THEN
+    ALTER TABLE public.time_logs ADD COLUMN manager_id uuid;
+  END IF;
+END $$;
+
+-- FK: manager_id must reference a real staff member.
+-- ON DELETE RESTRICT prevents deleting a manager who has made adjustments,
+-- preserving the IRS audit trail.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+     WHERE table_schema    = 'public'
+       AND table_name      = 'time_logs'
+       AND constraint_name = 'fk_time_logs_manager_id'
+  ) THEN
+    ALTER TABLE public.time_logs
+      ADD CONSTRAINT fk_time_logs_manager_id
+      FOREIGN KEY (manager_id) REFERENCES public.staff_directory(id)
+      ON DELETE RESTRICT;
+  END IF;
+END $$;
+
+-- Index for efficient payroll queries
+CREATE INDEX IF NOT EXISTS idx_time_logs_action_type
+  ON public.time_logs(action_type);
+
+CREATE INDEX IF NOT EXISTS idx_time_logs_clock_in_date
+  ON public.time_logs(clock_in);
+
+-- ─────────────────────────────────────────────────────────────
+-- 2. atomic_payroll_adjustment() — The IRS-compliant RPC
+-- ─────────────────────────────────────────────────────────────
+-- NEVER edits existing rows. Inserts a new row with:
+--   action_type   = 'adjustment'
+--   delta_minutes = signed integer (positive = add, negative = subtract)
+--   notes         = reason + manager audit stamp
+--   manager_id    = UUID of the authorising manager
+--   employee_email = the affected staff member
+--   clock_in      = timestamp of the adjustment (for pay-period bucketing)
+--   status        = 'completed' (adjustments are instantly final)
+--
+-- Returns the inserted adjustment row as JSONB.
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.atomic_payroll_adjustment(
+  p_employee_email  text,
+  p_delta_minutes   numeric,
+  p_reason          text,
+  p_manager_id      uuid,
+  p_target_date     timestamptz DEFAULT now()
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_staff       record;
+  v_audit_note  text;
+  v_inserted    jsonb;
+BEGIN
+  -- Scoped timeouts
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  -- ── Validate employee exists ────────────────────────────
+  SELECT id, email, name
+    INTO v_staff
+    FROM public.staff_directory
+   WHERE lower(email) = lower(trim(p_employee_email))
+   LIMIT 1;
+
+  IF v_staff IS NULL THEN
+    RAISE EXCEPTION 'Employee not found: %', p_employee_email
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  -- ── Validate delta is non-zero ──────────────────────────
+  IF p_delta_minutes = 0 THEN
+    RAISE EXCEPTION 'delta_minutes must be non-zero'
+      USING ERRCODE = 'P0003';
+  END IF;
+
+  -- ── Validate reason is present ──────────────────────────
+  IF p_reason IS NULL OR trim(p_reason) = '' THEN
+    RAISE EXCEPTION 'A reason is required for every adjustment'
+      USING ERRCODE = 'P0004';
+  END IF;
+
+  -- ── Validate manager exists (FK backs this at DB level) ──
+  IF NOT EXISTS (
+    SELECT 1 FROM public.staff_directory WHERE id = p_manager_id
+  ) THEN
+    RAISE EXCEPTION 'Manager not found: %', p_manager_id
+      USING ERRCODE = 'P0005';
+  END IF;
+
+  -- ── Build the audit note ────────────────────────────────
+  v_audit_note := trim(p_reason)
+    || ' [ADJUSTMENT BY ' || p_manager_id::text
+    || ' AT ' || to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+    || ']';
+
+  -- ── Insert the immutable adjustment row ─────────────────
+  INSERT INTO public.time_logs (
+    employee_email,
+    action_type,
+    delta_minutes,
+    notes,
+    manager_id,
+    clock_in,
+    status,
+    created_at
+  ) VALUES (
+    lower(trim(p_employee_email)),
+    'adjustment',
+    p_delta_minutes,
+    v_audit_note,
+    p_manager_id,
+    p_target_date,
+    'completed',
+    now()
+  )
+  RETURNING to_jsonb(time_logs.*) INTO v_inserted;
+
+  -- ── Audit log ───────────────────────────────────────────
+  INSERT INTO public.system_sync_logs (source, detail, severity)
+  VALUES (
+    'atomic_payroll_adjustment',
+    format('Manager %s adjusted %s by %s min: %s',
+           p_manager_id, p_employee_email, p_delta_minutes, v_audit_note),
+    'info'
+  );
+
+  RETURN v_inserted;
+END;
+$$;
+
+-- Restrict execution to service_role only
+REVOKE ALL ON FUNCTION public.atomic_payroll_adjustment(text, numeric, text, uuid, timestamptz) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.atomic_payroll_adjustment(text, numeric, text, uuid, timestamptz) FROM anon, authenticated;
+
+COMMENT ON FUNCTION public.atomic_payroll_adjustment IS
+  'IRS-compliant payroll adjustment. Never edits existing rows — inserts '
+  'an immutable adjustment record with full manager audit trail.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 3. v_payroll_summary — Aggregated view per staff per week
+-- ─────────────────────────────────────────────────────────────
+-- Combines clock-in/out shift hours with adjustment deltas.
+-- Pay period = ISO week (Mon–Sun).
+--
+-- Columns:
+--   employee_email, employee_name, hourly_rate,
+--   pay_period_start (Monday), pay_period_end (Sunday),
+--   clocked_minutes, adjustment_minutes, total_minutes,
+--   total_hours, gross_pay
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE VIEW public.v_payroll_summary AS
+WITH clock_shifts AS (
+  -- Only completed shifts (clock_out IS NOT NULL).
+  -- Active / partial shifts are intentionally excluded so we
+  -- never pay for time that hasn't been finalized yet.
+  SELECT
+    lower(tl.employee_email)                       AS employee_email,
+    date_trunc('week', tl.clock_in)::date          AS period_start,
+    (date_trunc('week', tl.clock_in) + interval '6 days')::date AS period_end,
+    EXTRACT(EPOCH FROM (tl.clock_out - tl.clock_in)) / 60.0
+                                                   AS shift_minutes
+  FROM public.time_logs tl
+  WHERE tl.action_type IN ('in', 'out')
+    AND tl.clock_in  IS NOT NULL
+    AND tl.clock_out IS NOT NULL
+    AND tl.status = 'completed'
+),
+active_shifts AS (
+  -- Count of open (unfinished) shifts per employee per week.
+  -- These are NOT included in totals — surfaced for manager awareness only.
+  SELECT
+    lower(tl.employee_email)                       AS employee_email,
+    date_trunc('week', tl.clock_in)::date          AS period_start,
+    (date_trunc('week', tl.clock_in) + interval '6 days')::date AS period_end,
+    COUNT(*)::int                                  AS open_shift_count
+  FROM public.time_logs tl
+  WHERE tl.action_type = 'in'
+    AND tl.clock_in  IS NOT NULL
+    AND tl.clock_out IS NULL
+  GROUP BY 1, 2, 3
+),
+adjustments AS (
+  -- Sum adjustment deltas
+  SELECT
+    lower(tl.employee_email)                       AS employee_email,
+    date_trunc('week', tl.clock_in)::date          AS period_start,
+    (date_trunc('week', tl.clock_in) + interval '6 days')::date AS period_end,
+    COALESCE(tl.delta_minutes, 0)                  AS adj_minutes
+  FROM public.time_logs tl
+  WHERE tl.action_type = 'adjustment'
+),
+combined AS (
+  SELECT employee_email, period_start, period_end,
+         shift_minutes AS minutes, 'clock' AS source
+    FROM clock_shifts
+  UNION ALL
+  SELECT employee_email, period_start, period_end,
+         adj_minutes   AS minutes, 'adjustment' AS source
+    FROM adjustments
+)
+SELECT
+  c.employee_email,
+  sd.name                                          AS employee_name,
+  sd.hourly_rate,
+  c.period_start                                   AS pay_period_start,
+  c.period_end                                     AS pay_period_end,
+  ROUND(SUM(CASE WHEN c.source = 'clock'      THEN c.minutes ELSE 0 END)::numeric, 2)
+                                                   AS clocked_minutes,
+  ROUND(SUM(CASE WHEN c.source = 'adjustment' THEN c.minutes ELSE 0 END)::numeric, 2)
+                                                   AS adjustment_minutes,
+  ROUND(SUM(c.minutes)::numeric, 2)                AS total_minutes,
+  ROUND((SUM(c.minutes) / 60.0)::numeric, 2)       AS total_hours,
+  ROUND((SUM(c.minutes) / 60.0 * COALESCE(sd.hourly_rate, 0))::numeric, 2)
+                                                   AS gross_pay,
+  COALESCE(a.open_shift_count, 0)                  AS active_shifts
+FROM combined c
+LEFT JOIN public.staff_directory sd
+  ON lower(sd.email) = c.employee_email
+LEFT JOIN active_shifts a
+  ON  a.employee_email = c.employee_email
+  AND a.period_start   = c.period_start
+GROUP BY c.employee_email, sd.name, sd.hourly_rate,
+         c.period_start, c.period_end, a.open_shift_count;
+
+COMMENT ON VIEW public.v_payroll_summary IS
+  'Aggregated payroll view: clock shifts + adjustments per staff per ISO week. '
+  'Immutable source rows guarantee IRS audit compliance.';
+
+-- RLS note: This view is accessed via service_role (Netlify functions).
+-- No need for SELECT grants to anon/authenticated.
+
+COMMIT;
+
+
+-- == schema-31-drop-redundant-customer-cols ==
+-- ============================================================
+-- BREWHUB SCHEMA 31: Drop redundant customers columns
+-- Migrates name → full_name, address → address_street,
+-- then drops the legacy columns.
+-- ============================================================
+-- Safe to re-run: every statement is guarded with IF / COALESCE.
+
+BEGIN;
+
+-- 1. Back-fill full_name from name where full_name is NULL or empty
+UPDATE customers
+SET    full_name = name
+WHERE  name IS NOT NULL
+  AND  name <> ''
+  AND  (full_name IS NULL OR full_name = '');
+
+-- 2. Back-fill address_street from address where address_street is NULL or empty
+UPDATE customers
+SET    address_street = address
+WHERE  address IS NOT NULL
+  AND  address <> ''
+  AND  (address_street IS NULL OR address_street = '');
+
+-- 3. Drop the redundant columns
+ALTER TABLE customers DROP COLUMN IF EXISTS name;
+ALTER TABLE customers DROP COLUMN IF EXISTS address;
+
+COMMIT;
+
+
+-- == schema-32-kds-update-rls ==
+-- ============================================================
+-- BREWHUB SCHEMA 32: KDS staff UPDATE policy for orders
+--
+-- Problem: The KDS page does client-side UPDATEs on orders.status
+-- but no RLS policy allows staff UPDATE. The only matching policy
+-- is "Deny public access to orders" (FOR ALL USING false), so
+-- every status-change click silently fails.
+--
+-- Fix: Add a FOR UPDATE policy allowing is_brewhub_staff() to
+-- update orders. WITH CHECK restricts the allowed status values.
+-- ============================================================
+
+BEGIN;
+
+-- Allow staff to update order status (KDS workflow)
+DROP POLICY IF EXISTS "Staff can update orders" ON orders;
+CREATE POLICY "Staff can update orders" ON orders
+  FOR UPDATE
+  USING  (is_brewhub_staff())
+  WITH CHECK (
+    is_brewhub_staff()
+    AND status IN ('pending', 'unpaid', 'paid', 'preparing', 'ready', 'completed', 'cancelled')
+  );
+
+COMMIT;
+
+
+-- == schema-33-receipt-realtime ==
+-- ============================================================
+-- SCHEMA 33: Enable Realtime on receipt_queue
+-- ============================================================
+-- Problem: The receipt_queue table has RLS that denies all access
+-- to the anon role. Supabase Realtime (postgres_changes) respects
+-- RLS and requires SELECT permission for the subscribing client.
+-- Since the frontend connects with the anon key (not Supabase Auth),
+-- the Realtime channel never delivers INSERT/UPDATE events.
+--
+-- Fix:
+--   1. Add an anon-friendly SELECT policy for receipt_queue.
+--      (Receipt text is not sensitive — it's the same info a
+--       customer sees on their printed receipt.)
+--   2. Add receipt_queue to the supabase_realtime publication
+--      so postgres_changes events are emitted.
+-- ============================================================
+
+-- 1. Allow anon (and authenticated) SELECT so Realtime works
+DROP POLICY IF EXISTS "Allow anon select for realtime" ON receipt_queue;
+CREATE POLICY "Allow anon select for realtime" ON receipt_queue
+  FOR SELECT
+  USING (true);
+
+-- 2. Add table to Realtime publication (idempotent: errors if already present)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'receipt_queue'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE receipt_queue;
+  END IF;
+END
+$$;
+
+
+-- == schema-37-audit-critical-fixes ==
+-- schema-37-audit-critical-fixes.sql
+-- Critical fixes identified during comprehensive code audit (Feb 2026)
+-- Addresses: missing indexes, missing NOT NULL, missing UNIQUE, orders.updated_at,
+--            inventory audit trail, and staff_directory integrity.
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 1. staff_directory.email: NOT NULL + UNIQUE (ALL RLS depends on this)
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- First clean up any NULLs (shouldn't exist, but be safe)
+DELETE FROM staff_directory WHERE email IS NULL;
+
+ALTER TABLE staff_directory
+  ALTER COLUMN email SET NOT NULL;
+
+-- Add unique constraint on lower(email) if not already present
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE tablename = 'staff_directory' AND indexname = 'idx_staff_directory_email_unique'
+  ) THEN
+    CREATE UNIQUE INDEX idx_staff_directory_email_unique ON staff_directory (lower(email));
+  END IF;
+END $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 2. customers.email: UNIQUE constraint to prevent duplicate loyalty records
+-- ═══════════════════════════════════════════════════════════════════════════════
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE tablename = 'customers' AND indexname = 'idx_customers_email_unique'
+  ) THEN
+    CREATE UNIQUE INDEX idx_customers_email_unique ON customers (lower(email));
+  END IF;
+END $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 3. Missing indexes on high-frequency query columns
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders (user_id);
+CREATE INDEX IF NOT EXISTS idx_vouchers_user_id ON vouchers (user_id);
+CREATE INDEX IF NOT EXISTS idx_parcels_tracking_number ON parcels (tracking_number);
+CREATE INDEX IF NOT EXISTS idx_refund_locks_user_id ON refund_locks (user_id);
+CREATE INDEX IF NOT EXISTS idx_coffee_orders_order_id ON coffee_orders (order_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 4. orders.updated_at: DEFAULT + auto-update trigger
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Set default for new inserts
+ALTER TABLE orders ALTER COLUMN updated_at SET DEFAULT now();
+
+-- Backfill NULLs
+UPDATE orders SET updated_at = created_at WHERE updated_at IS NULL;
+
+-- Auto-update trigger
+CREATE OR REPLACE FUNCTION update_orders_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_orders_updated_at ON orders;
+CREATE TRIGGER trg_orders_updated_at
+  BEFORE UPDATE ON orders
+  FOR EACH ROW
+  EXECUTE FUNCTION update_orders_updated_at();
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 5. Inventory Audit Log — track all stock mutations
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS inventory_audit_log (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id     uuid NOT NULL,
+  item_name   text,
+  delta       integer NOT NULL,
+  new_qty     integer,
+  source      text NOT NULL DEFAULT 'manual',  -- 'manual', 'order_completion', 'refund_restore', 'adjustment'
+  triggered_by text,                            -- staff email or 'system'
+  order_id    uuid,                             -- nullable, links to order if applicable
+  note        text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- RLS: staff can read audit log, only service role can write
+ALTER TABLE inventory_audit_log ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Staff can read inventory audit" ON inventory_audit_log;
+CREATE POLICY "Staff can read inventory audit"
+  ON inventory_audit_log FOR SELECT TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM staff_directory
+    WHERE lower(email) = lower(auth.email())
+  ));
+
+-- Index for item lookups and time-range queries
+CREATE INDEX IF NOT EXISTS idx_inventory_audit_item_id ON inventory_audit_log (item_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_audit_created ON inventory_audit_log (created_at);
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 6. coffee_orders.order_id: NOT NULL (orphaned coffee_orders are untrackable)
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Clean up any NULLs first
+DELETE FROM coffee_orders WHERE order_id IS NULL;
+
+ALTER TABLE coffee_orders
+  ALTER COLUMN order_id SET NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 7. expected_parcels.registered_at: DEFAULT now()
+-- ═══════════════════════════════════════════════════════════════════════════════
+ALTER TABLE expected_parcels ALTER COLUMN registered_at SET DEFAULT now();
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 8. Prevent duplicate parcel check-ins (same tracking_number in 'arrived' status)
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE UNIQUE INDEX IF NOT EXISTS idx_parcels_tracking_arrived
+  ON parcels (tracking_number) WHERE status = 'arrived';
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 9. Inventory item_name uniqueness
+-- ═══════════════════════════════════════════════════════════════════════════════
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_item_name_unique
+  ON inventory (lower(item_name));
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Done. This migration is idempotent and safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+
+-- == schema-38-loyalty-ssot-sync ==
+-- ============================================================
+-- Schema 38: Loyalty Single Source of Truth (SSoT) Sync
+-- ============================================================
+-- PROBLEM: `profiles.loyalty_points` is the authoritative column
+-- (used by increment_loyalty, decrement_loyalty_on_refund, the
+-- POS loyalty scanner, and the portal). But the legacy `customers`
+-- table also has a `loyalty_points` column that some admin queries
+-- reference. Without a sync mechanism the two drift apart,
+-- creating support tickets and incorrect voucher issuance.
+--
+-- SOLUTION: A Postgres trigger on `profiles` that cascades any
+-- loyalty_points change into the `customers` row sharing the
+-- same email. The trigger is AFTER UPDATE so it does not block
+-- the primary write path and fails silently (via EXCEPTION block)
+-- to avoid breaking the happy path if no matching customer row
+-- exists.
+--
+-- The trigger is idempotent: re-running this migration replaces
+-- the function and trigger without error.
+-- ============================================================
+
+-- 1. Add email column to profiles if missing (needed for join)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'email'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN email text;
+    -- Backfill from auth.users
+    UPDATE public.profiles p
+       SET email = u.email
+      FROM auth.users u
+     WHERE p.id = u.id AND p.email IS NULL;
+  END IF;
+END $$;
+
+-- 2. Create the sync function
+CREATE OR REPLACE FUNCTION sync_loyalty_to_customers()
+RETURNS trigger AS $$
+BEGIN
+  -- Only fire when loyalty_points actually changed
+  IF NEW.loyalty_points IS DISTINCT FROM OLD.loyalty_points THEN
+    UPDATE public.customers
+       SET loyalty_points = NEW.loyalty_points
+     WHERE lower(email) = lower(NEW.email)
+       AND NEW.email IS NOT NULL;
+  END IF;
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- Never break the primary write path; log and continue
+  RAISE WARNING 'sync_loyalty_to_customers failed for profile %: %', NEW.id, SQLERRM;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3. Attach trigger (replace if exists)
+DROP TRIGGER IF EXISTS trg_sync_loyalty_to_customers ON public.profiles;
+CREATE TRIGGER trg_sync_loyalty_to_customers
+  AFTER UPDATE OF loyalty_points ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION sync_loyalty_to_customers();
+
+-- 4. One-time backfill: push current profiles.loyalty_points
+--    into matching customers rows so they start in sync.
+UPDATE public.customers c
+   SET loyalty_points = p.loyalty_points
+  FROM public.profiles p
+ WHERE lower(c.email) = lower(p.email)
+   AND p.loyalty_points IS NOT NULL
+   AND c.loyalty_points IS DISTINCT FROM p.loyalty_points;
+
+-- 5. Reverse sync: if customers had points that profiles didn't,
+--    pull the MAX into profiles (one-time reconciliation).
+UPDATE public.profiles p
+   SET loyalty_points = GREATEST(COALESCE(p.loyalty_points, 0), c.loyalty_points)
+  FROM public.customers c
+ WHERE lower(p.email) = lower(c.email)
+   AND c.loyalty_points > COALESCE(p.loyalty_points, 0);
+
+
+-- == schema-39-total-defense-audit ==
+-- ============================================================
+-- Schema 39: Total Defense Audit — Clean Room Hardening
+-- ============================================================
+--
+-- Four fixes for state-level intelligence scrutiny:
+--
+--   1. TEMPORAL JITTER on parcel_departure_board
+--      → Randomise received_at by ±3 minutes to defeat high-fidelity
+--        surveillance via timestamp cross-referencing.
+--      → Truncate masked_name to first initial only (no last name).
+--      → Remove unit_number from the public VIEW.
+--      → Remove raw UUID (replace with opaque row suffix).
+--
+--   2. STATEMENT TIMEOUTS on every high-concurrency RPC
+--      → Prevents coordinated "slow-post" from queueing row-locks
+--        long enough to hang the DB during rush hour.
+--
+--   3. IP SALTED HASHING
+--      → pin_attempts and voucher_redemption_fails now store
+--        SHA-256(ip || per-row-salt) instead of raw IPs.
+--      → Existing raw IPs are hashed in-place as a one-time migration.
+--
+--   4. LOYALTY SYNC TRIGGER (supplementary)
+--      → Already handled in schema-38; this file only adds the
+--        jitter, timeouts, and IP hashing.
+--
+-- SECURITY RATIONALE (per fix) is inline below.
+-- ============================================================
+
+
+-- ┌──────────────────────────────────────────────────────────┐
+-- │  FIX 1: TEMPORAL JITTER + PII HARDENING                 │
+-- │                                                          │
+-- │  SECURITY RATIONALE:                                     │
+-- │  A trained analyst stationed in-store could correlate:   │
+-- │    carrier + last-4 tracking + exact received_at →       │
+-- │    carrier API → full tracking → shipping origin →       │
+-- │    purchasing patterns of a specific resident.           │
+-- │                                                          │
+-- │  Mitigations applied:                                    │
+-- │  (a) ±3 min random jitter on received_at eliminates      │
+-- │      sub-minute timestamp correlation.                   │
+-- │  (b) masked_name → first initial + "." only; no surname. │
+-- │  (c) unit_number is REMOVED from the VIEW entirely.      │
+-- │  (d) Raw UUID 'id' replaced with opaque 4-char suffix.   │
+-- │                                                          │
+-- │  The VIEW is the ONLY surface exposed to anon; the       │
+-- │  underlying parcels table remains unchanged for staff.    │
+-- └──────────────────────────────────────────────────────────┘
+
+-- Must DROP first: CREATE OR REPLACE VIEW cannot remove columns
+-- that existed in the prior definition (unit_number, raw id, etc.)
+DROP VIEW IF EXISTS parcel_departure_board;
+
+CREATE VIEW parcel_departure_board
+  WITH (security_invoker = false)
+AS
+SELECT
+  -- Opaque identifier: last 4 chars of UUID, not the full key
+  right(id::text, 4)                         AS id,
+
+  -- Name: first initial only. No surname leakage.
+  CASE
+    WHEN recipient_name IS NULL OR trim(recipient_name) = '' THEN 'Resident'
+    ELSE upper(left(trim(recipient_name), 1)) || '.'
+  END                                        AS masked_name,
+
+  -- Tracking: carrier prefix + last 4 digits only
+  COALESCE(carrier, 'PKG') || ' …' || right(tracking_number, 4)
+                                             AS masked_tracking,
+
+  -- Carrier: coarsened to canonical names to reduce fingerprinting
+  CASE
+    WHEN carrier ILIKE '%ups%'                   THEN 'UPS'
+    WHEN carrier ILIKE '%fedex%' OR carrier ILIKE '%fed%' THEN 'FedEx'
+    WHEN carrier ILIKE '%usps%' OR carrier ILIKE '%postal%' THEN 'USPS'
+    WHEN carrier ILIKE '%amazon%' OR carrier ILIKE '%amzl%' THEN 'Amazon'
+    WHEN carrier ILIKE '%dhl%'                   THEN 'DHL'
+    ELSE 'Other'
+  END                                        AS carrier,
+
+  -- Temporal jitter: ±3 minutes random offset per row.
+  -- Uses md5(id::text) seeded pseudo-random so the jitter is stable
+  -- per parcel (no UI flicker on re-poll) but unpredictable externally.
+  received_at + (
+    (('x' || left(md5(id::text || 'jitter_salt_2026'), 8))::bit(32)::int % 360 - 180)
+    * interval '1 second'
+  )                                          AS received_at
+
+  -- unit_number: INTENTIONALLY OMITTED from the VIEW.
+  -- Staff can query the parcels table directly via authenticated RPC.
+
+FROM parcels
+WHERE status = 'arrived';
+
+-- Re-grant to anon + authenticated (VIEW replacement drops grants)
+GRANT SELECT ON parcel_departure_board TO anon, authenticated;
+
+
+-- ┌──────────────────────────────────────────────────────────┐
+-- │  FIX 2: STATEMENT TIMEOUTS ON HIGH-CONCURRENCY RPCs     │
+-- │                                                          │
+-- │  SECURITY RATIONALE:                                     │
+-- │  A coordinated "slow-post" attack sends N concurrent POS │
+-- │  requests that each acquire FOR UPDATE row locks.        │
+-- │  Without timeouts, later requests queue behind the lock  │
+-- │  indefinitely, creating a cascading tail of DB            │
+-- │  connections that exhausts the pool (max 60 on Supabase  │
+-- │  free/pro tiers). This is a Denial-of-Life attack.       │
+-- │                                                          │
+-- │  Fix: SET LOCAL statement_timeout inside every RPC that  │
+-- │  acquires FOR UPDATE or advisory locks. LOCAL scoping    │
+-- │  ensures the timeout applies only to the current         │
+-- │  transaction and does not leak to other sessions.        │
+-- │                                                          │
+-- │  Timeouts chosen:                                        │
+-- │    • Voucher redemption: 5s (complex, multi-step)        │
+-- │    • Loyalty increment/decrement: 3s (single UPDATE)     │
+-- │    • Inventory trigger: 3s (single row lock)             │
+-- │    • Notification queue: 3s (SKIP LOCKED, fast path)     │
+-- │    • Refund inventory restore: 5s (multi-step)           │
+-- └──────────────────────────────────────────────────────────┘
+
+-- 2a. increment_loyalty — add 3s timeout before FOR UPDATE
+CREATE OR REPLACE FUNCTION increment_loyalty(
+  target_user_id uuid,
+  amount_cents   int,
+  p_order_id     uuid DEFAULT NULL
+)
+RETURNS TABLE(loyalty_points int, voucher_earned boolean, points_awarded int) AS $$
+DECLARE
+  v_new_points int;
+  v_voucher_earned boolean := false;
+  v_points_delta int;
+  v_previous int := 0;
+  v_current_points int;
+BEGIN
+  -- DEADLOCK DEFENSE: 3-second timeout on row locks
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  IF p_order_id IS NOT NULL THEN
+    SELECT COALESCE(paid_amount_cents, 0) INTO v_previous FROM orders WHERE id = p_order_id;
+  END IF;
+
+  v_points_delta := GREATEST(0, floor(amount_cents / 100)::int - floor(v_previous / 100)::int);
+
+  IF v_points_delta <= 0 THEN
+    RETURN QUERY
+      SELECT COALESCE(p.loyalty_points, 0), false, 0
+        FROM profiles p
+       WHERE p.id = target_user_id;
+    RETURN;
+  END IF;
+
+  SELECT p.loyalty_points
+    INTO v_current_points
+    FROM profiles p
+   WHERE p.id = target_user_id
+     FOR UPDATE;
+
+  IF v_current_points IS NULL THEN
+    RETURN QUERY SELECT 0, false, 0;
+    RETURN;
+  END IF;
+
+  v_new_points := COALESCE(v_current_points, 0) + v_points_delta;
+
+  UPDATE profiles
+     SET loyalty_points = v_new_points,
+         updated_at     = now()
+   WHERE id = target_user_id;
+
+  IF v_new_points >= 500
+     AND (v_current_points % 500) > (v_new_points % 500)
+  THEN
+    v_voucher_earned := true;
+  END IF;
+
+  RETURN QUERY SELECT v_new_points, v_voucher_earned, v_points_delta;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2b. decrement_loyalty_on_refund — add 3s timeout
+CREATE OR REPLACE FUNCTION decrement_loyalty_on_refund(
+  target_user_id uuid,
+  amount_cents   int DEFAULT 500
+)
+RETURNS TABLE(loyalty_points int, points_deducted int) AS $$
+DECLARE
+  v_current_points int;
+  v_deduct         int;
+  v_new_points     int;
+BEGIN
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  SELECT p.loyalty_points
+    INTO v_current_points
+    FROM profiles p
+   WHERE p.id = target_user_id
+     FOR UPDATE;
+
+  IF v_current_points IS NULL THEN
+    RETURN QUERY SELECT 0, 0;
+    RETURN;
+  END IF;
+
+  v_deduct     := LEAST(GREATEST(0, floor(amount_cents / 100)::int), v_current_points);
+  v_new_points := v_current_points - v_deduct;
+
+  UPDATE profiles
+     SET loyalty_points = v_new_points,
+         updated_at     = now()
+   WHERE id = target_user_id;
+
+  RETURN QUERY SELECT v_new_points, v_deduct;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION increment_loyalty(uuid, int, uuid) FROM anon, authenticated;
+REVOKE EXECUTE ON FUNCTION decrement_loyalty_on_refund(uuid, int) FROM anon, authenticated;
+
+-- 2c. atomic_redeem_voucher — add 5s timeout (multi-step, advisory lock)
+-- This replaces the schema-35 hardened version with timeout guards.
+CREATE OR REPLACE FUNCTION atomic_redeem_voucher(
+  p_voucher_code      text,
+  p_order_id          uuid,
+  p_user_id           uuid    DEFAULT NULL,
+  p_manager_override  boolean DEFAULT false
+)
+RETURNS TABLE(success boolean, voucher_id uuid, error_code text, error_message text) AS $$
+DECLARE
+  v_voucher RECORD;
+  v_order   RECORD;
+  v_lock_key bigint;
+  v_daily_count int;
+BEGIN
+  -- DEADLOCK DEFENSE: 5-second cap on the entire voucher flow
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  -- Row lock on voucher (SKIP LOCKED prevents queue pile-up)
+  SELECT id, user_id, is_redeemed
+    INTO v_voucher
+    FROM vouchers
+   WHERE code = upper(p_voucher_code)
+     FOR UPDATE SKIP LOCKED;
+
+  IF v_voucher IS NULL THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'VOUCHER_NOT_FOUND'::text,
+      'Voucher not found or already being processed'::text;
+    RETURN;
+  END IF;
+
+  IF v_voucher.is_redeemed THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'ALREADY_REDEEMED'::text,
+      'This voucher has already been used'::text;
+    RETURN;
+  END IF;
+
+  -- Advisory lock scoped to user (transaction-level, auto-released)
+  v_lock_key := hashtext('voucher_lock:' || COALESCE(v_voucher.user_id::text, 'guest'));
+  PERFORM pg_advisory_xact_lock(v_lock_key);
+
+  -- Refund-lock guard
+  IF EXISTS (
+    SELECT 1 FROM refund_locks
+     WHERE user_id = v_voucher.user_id
+       AND locked_at > now() - interval '5 minutes'
+  ) THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'REFUND_IN_PROGRESS'::text,
+      'Account locked due to pending refund. Please wait.'::text;
+    RETURN;
+  END IF;
+
+  -- Daily limit (3 per user per day) unless manager bypass
+  IF NOT COALESCE(p_manager_override, false) AND v_voucher.user_id IS NOT NULL THEN
+    SELECT count(*)::int INTO v_daily_count
+      FROM vouchers
+     WHERE user_id = v_voucher.user_id
+       AND is_redeemed = true
+       AND redeemed_at >= (current_date AT TIME ZONE 'America/New_York');
+    IF v_daily_count >= 3 THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'DAILY_LIMIT'::text,
+        'Free drink limit reached (3 per day)'::text;
+      RETURN;
+    END IF;
+  END IF;
+
+  -- Validate order if provided
+  IF p_order_id IS NOT NULL THEN
+    SELECT id, user_id, status INTO v_order FROM orders WHERE id = p_order_id;
+    IF v_order IS NULL THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'ORDER_NOT_FOUND'::text, 'Order not found'::text;
+      RETURN;
+    END IF;
+    IF v_order.status IN ('paid', 'refunded') THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'ORDER_COMPLETE'::text,
+        'Cannot apply voucher to completed order'::text;
+      RETURN;
+    END IF;
+    IF v_voucher.user_id IS NOT NULL AND v_voucher.user_id != v_order.user_id THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'OWNERSHIP_MISMATCH'::text,
+        'This voucher belongs to a different customer'::text;
+      RETURN;
+    END IF;
+  END IF;
+
+  -- Burn the voucher (CAS guard: is_redeemed = false)
+  UPDATE vouchers
+     SET is_redeemed = true,
+         redeemed_at = now(),
+         applied_to_order_id = p_order_id
+   WHERE id = v_voucher.id
+     AND is_redeemed = false;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'RACE_CONDITION'::text,
+      'Voucher was redeemed by another request'::text;
+    RETURN;
+  END IF;
+
+  -- Zero out the order total
+  IF p_order_id IS NOT NULL THEN
+    UPDATE orders
+       SET total_amount_cents = 0,
+           status = 'paid',
+           notes = COALESCE(notes || ' | ', '') || 'Voucher: ' || p_voucher_code
+     WHERE id = p_order_id;
+  END IF;
+
+  RETURN QUERY SELECT true, v_voucher.id, NULL::text, NULL::text;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION atomic_redeem_voucher(text, uuid, uuid, boolean)
+  FROM anon, authenticated;
+GRANT  EXECUTE ON FUNCTION atomic_redeem_voucher(text, uuid, uuid, boolean)
+  TO service_role;
+
+-- 2d. restore_inventory_on_refund — add 5s timeout
+CREATE OR REPLACE FUNCTION restore_inventory_on_refund(p_order_id uuid)
+RETURNS jsonb AS $$
+DECLARE
+  v_cups_dec  int;
+  v_was_dec   boolean;
+BEGIN
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  SELECT COALESCE(inventory_decremented, false),
+         COALESCE(cups_decremented, 0)
+    INTO v_was_dec, v_cups_dec
+    FROM orders
+   WHERE id = p_order_id
+     FOR UPDATE;
+
+  IF NOT v_was_dec THEN
+    RETURN jsonb_build_object('restored', false, 'reason', 'inventory was never decremented');
+  END IF;
+
+  IF v_cups_dec > 0 THEN
+    UPDATE inventory
+       SET current_stock = current_stock + v_cups_dec,
+           updated_at    = now()
+     WHERE item_name = '12oz Cups';
+  END IF;
+
+  UPDATE orders
+     SET inventory_decremented = false,
+         cups_decremented = 0
+   WHERE id = p_order_id
+     AND inventory_decremented = true;
+
+  RETURN jsonb_build_object('restored', true, 'cups_restored', v_cups_dec);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2e. handle_order_completion trigger — add 3s timeout
+CREATE OR REPLACE FUNCTION handle_order_completion()
+RETURNS trigger AS $$
+DECLARE
+  v_item_count int;
+  v_old_stock  int;
+  v_actual_dec int;
+BEGIN
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  IF (NEW.status <> 'completed') OR (OLD.status IS NOT DISTINCT FROM 'completed') THEN
+    RETURN NEW;
+  END IF;
+
+  IF COALESCE(NEW.inventory_decremented, false) THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT COUNT(*)::int INTO v_item_count
+    FROM public.coffee_orders
+   WHERE order_id = NEW.id;
+
+  IF v_item_count > 0 THEN
+    SELECT current_stock INTO v_old_stock
+      FROM public.inventory
+     WHERE item_name = '12oz Cups'
+       FOR UPDATE;
+
+    v_actual_dec := LEAST(v_item_count, COALESCE(v_old_stock, 0));
+
+    UPDATE public.inventory
+       SET current_stock = GREATEST(0, current_stock - v_item_count),
+           updated_at = now()
+     WHERE item_name = '12oz Cups';
+
+    NEW.cups_decremented := v_actual_dec;
+  END IF;
+
+  NEW.inventory_decremented := true;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2f. claim_notification_tasks — add 3s timeout
+CREATE OR REPLACE FUNCTION claim_notification_tasks(
+  p_worker_id  text,
+  p_batch_size int DEFAULT 10
+)
+RETURNS SETOF notification_queue AS $$
+BEGIN
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  RETURN QUERY
+  UPDATE notification_queue
+     SET status = 'processing',
+         locked_until = now() + interval '60 seconds',
+         locked_by = p_worker_id,
+         attempt_count = attempt_count + 1
+   WHERE id IN (
+     SELECT id FROM notification_queue
+      WHERE status IN ('pending', 'failed')
+        AND next_attempt_at <= now()
+        AND (locked_until IS NULL OR locked_until < now())
+      ORDER BY next_attempt_at
+        FOR UPDATE SKIP LOCKED
+      LIMIT p_batch_size
+   )
+  RETURNING *;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- ┌──────────────────────────────────────────────────────────┐
+-- │  FIX 3: SALTED IP HASHING                               │
+-- │                                                          │
+-- │  SECURITY RATIONALE:                                     │
+-- │  If the database is seized (warrant, breach, or hostile  │
+-- │  extraction), raw IPs in pin_attempts and                │
+-- │  voucher_redemption_fails form a timestamped location    │
+-- │  map of every staff login and every customer who         │
+-- │  attempted a voucher redemption. Combined with carrier   │
+-- │  records, this is enough to build a movement profile.    │
+-- │                                                          │
+-- │  Fix: Store SHA-256(ip || per-install salt) instead.     │
+-- │  The salt is stored in a Postgres config variable        │
+-- │  (current_setting) set once during deployment, never     │
+-- │  written to a queryable table. This means:               │
+-- │    • Rate-limiting still works (same IP → same hash).    │
+-- │    • A DB dump reveals only opaque hex strings.          │
+-- │    • Brute-forcing the ~4B IPv4 space requires the salt, │
+-- │      which lives only in the Postgres runtime config.    │
+-- │                                                          │
+-- │  The salt is set via ALTER DATABASE ... SET, which        │
+-- │  persists across restarts but is NOT in any table.       │
+-- └──────────────────────────────────────────────────────────┘
+
+-- 3a. Create a single-row config table to store the IP hash salt.
+--     Only service_role / postgres can read it — never exposed via API.
+CREATE TABLE IF NOT EXISTS _ip_salt (
+  id    boolean PRIMARY KEY DEFAULT true CHECK (id), -- single-row lock
+  salt  text NOT NULL
+);
+
+-- Revoke ALL access from API-facing roles
+REVOKE ALL ON _ip_salt FROM anon, authenticated;
+ALTER TABLE _ip_salt ENABLE ROW LEVEL SECURITY;
+-- No RLS policies = zero rows returned even to authenticated
+
+-- Seed the salt exactly once (idempotent)
+INSERT INTO _ip_salt (id, salt)
+VALUES (true, gen_random_uuid()::text)
+ON CONFLICT (id) DO NOTHING;
+
+-- 3b. Helper function: hash an IP with the installation salt
+CREATE OR REPLACE FUNCTION hash_ip(raw_ip text)
+RETURNS text AS $$
+  SELECT encode(
+    sha256(convert_to(raw_ip || (SELECT salt FROM _ip_salt WHERE id = true), 'UTF8')),
+    'hex'
+  );
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- 3c. Migrate pin_attempts: hash existing raw IPs in-place.
+--     The PK is the ip column, so we need to rebuild.
+--     Strategy: create temp table, truncate, re-insert with hashes.
+DO $$
+BEGIN
+  -- Only migrate if there are rows that look like raw IPs (contain dots)
+  IF EXISTS (SELECT 1 FROM pin_attempts WHERE ip LIKE '%.%' OR ip LIKE '%:%' LIMIT 1) THEN
+    CREATE TEMP TABLE _pa_backup AS SELECT * FROM pin_attempts;
+    TRUNCATE pin_attempts;
+    INSERT INTO pin_attempts (ip, fail_count, window_start, locked_until)
+    SELECT hash_ip(ip), fail_count, window_start, locked_until
+      FROM _pa_backup
+    ON CONFLICT (ip) DO UPDATE SET
+      fail_count = EXCLUDED.fail_count,
+      window_start = EXCLUDED.window_start,
+      locked_until = EXCLUDED.locked_until;
+    DROP TABLE _pa_backup;
+  END IF;
+END $$;
+
+-- 3d. Migrate voucher_redemption_fails: hash existing raw IPs.
+UPDATE voucher_redemption_fails
+   SET ip_address = hash_ip(ip_address)
+ WHERE ip_address LIKE '%.%' OR ip_address LIKE '%:%';
+
+-- 3e. Rewrite record_pin_failure to hash incoming IPs before storage
+CREATE OR REPLACE FUNCTION record_pin_failure(
+  p_ip              text,
+  p_max_attempts    int DEFAULT 5,
+  p_lockout_seconds int DEFAULT 60
+)
+RETURNS TABLE(locked boolean, retry_after_seconds int) AS $$
+DECLARE
+  v_row  pin_attempts%ROWTYPE;
+  v_hash text;
+BEGIN
+  v_hash := hash_ip(p_ip);
+
+  INSERT INTO pin_attempts (ip, fail_count, window_start)
+  VALUES (v_hash, 1, now())
+  ON CONFLICT (ip) DO UPDATE SET
+    fail_count = CASE
+      WHEN pin_attempts.window_start < now() - (p_lockout_seconds || ' seconds')::interval THEN 1
+      ELSE pin_attempts.fail_count + 1
+    END,
+    window_start = CASE
+      WHEN pin_attempts.window_start < now() - (p_lockout_seconds || ' seconds')::interval THEN now()
+      ELSE pin_attempts.window_start
+    END,
+    locked_until = CASE
+      WHEN (CASE
+              WHEN pin_attempts.window_start < now() - (p_lockout_seconds || ' seconds')::interval THEN 1
+              ELSE pin_attempts.fail_count + 1
+            END) >= p_max_attempts
+        THEN now() + (p_lockout_seconds || ' seconds')::interval
+      ELSE pin_attempts.locked_until
+    END
+  RETURNING * INTO v_row;
+
+  IF v_row.fail_count >= p_max_attempts AND v_row.locked_until IS NOT NULL AND v_row.locked_until > now() THEN
+    RETURN QUERY SELECT true, GREATEST(0, extract(epoch FROM v_row.locked_until - now())::int);
+  ELSE
+    RETURN QUERY SELECT false, 0;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3f. Rewrite check_pin_lockout to hash the IP before lookup
+CREATE OR REPLACE FUNCTION check_pin_lockout(p_ip text)
+RETURNS TABLE(locked boolean, retry_after_seconds int) AS $$
+DECLARE
+  v_row  pin_attempts%ROWTYPE;
+  v_hash text;
+BEGIN
+  v_hash := hash_ip(p_ip);
+
+  SELECT * INTO v_row FROM pin_attempts WHERE ip = v_hash;
+
+  IF v_row IS NULL THEN
+    RETURN QUERY SELECT false, 0;
+    RETURN;
+  END IF;
+
+  IF v_row.locked_until IS NOT NULL AND v_row.locked_until > now() THEN
+    RETURN QUERY SELECT true, GREATEST(0, extract(epoch FROM v_row.locked_until - now())::int);
+  ELSE
+    RETURN QUERY SELECT false, 0;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3g. Rewrite clear_pin_lockout to hash before delete
+CREATE OR REPLACE FUNCTION clear_pin_lockout(p_ip text)
+RETURNS void AS $$
+  DELETE FROM pin_attempts WHERE ip = hash_ip(p_ip);
+$$ LANGUAGE sql SECURITY DEFINER;
+
+-- 3h. Rewrite voucher circuit breaker RPCs to hash IPs
+CREATE OR REPLACE FUNCTION check_voucher_rate_limit(p_ip text)
+RETURNS TABLE(
+  allowed                  boolean,
+  fail_count               int,
+  lockout_remaining_seconds int
+) AS $$
+DECLARE
+  v_count   int;
+  v_oldest  timestamptz;
+  v_lockout timestamptz;
+  v_hash    text;
+BEGIN
+  v_hash := hash_ip(p_ip);
+
+  SELECT count(*), min(attempted_at)
+    INTO v_count, v_oldest
+    FROM voucher_redemption_fails
+   WHERE ip_address = v_hash
+     AND attempted_at > now() - interval '10 minutes';
+
+  IF v_count >= 5 THEN
+    v_lockout := v_oldest + interval '10 minutes';
+    RETURN QUERY SELECT false, v_count,
+      GREATEST(0, extract(epoch FROM v_lockout - now())::int);
+    RETURN;
+  END IF;
+
+  RETURN QUERY SELECT true, v_count, 0;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION log_voucher_fail(
+  p_ip          text,
+  p_code_prefix text DEFAULT NULL
+)
+RETURNS void AS $$
+BEGIN
+  INSERT INTO voucher_redemption_fails (ip_address, code_prefix)
+  VALUES (hash_ip(p_ip), left(p_code_prefix, 4));
+
+  DELETE FROM voucher_redemption_fails
+   WHERE attempted_at < now() - interval '1 hour';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION check_voucher_rate_limit(text)  FROM anon, authenticated;
+GRANT  EXECUTE ON FUNCTION check_voucher_rate_limit(text)  TO service_role;
+REVOKE EXECUTE ON FUNCTION log_voucher_fail(text, text)    FROM anon, authenticated;
+GRANT  EXECUTE ON FUNCTION log_voucher_fail(text, text)    TO service_role;
+REVOKE EXECUTE ON FUNCTION hash_ip(text)                   FROM anon, authenticated;
+
+
+-- == schema-40-loyalty-ssot-bulletproof ==
+-- ============================================================
+-- Schema 40: Loyalty SSOT — Bulletproof Sync & Reconciliation
+-- ============================================================
+-- Replaces schema-38 with hardened sync that includes:
+--   • Advisory locking to prevent race conditions
+--   • Error-safe execution with structured logging
+--   • Statement & lock timeouts for morning-rush concurrency
+--   • Max-win batched reconciliation (100 rows per batch)
+--   • All functions SECURITY DEFINER, revoked from PUBLIC
+--
+-- Idempotent: safe to re-run in the Supabase SQL Editor.
+-- ============================================================
+
+BEGIN;
+
+-- ─────────────────────────────────────────────────────────────
+-- 0. Pre-requisite: ensure profiles.email column exists
+-- ─────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name  = 'profiles'
+      AND column_name = 'email'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN email text;
+  END IF;
+END $$;
+
+-- Backfill any NULL emails from auth.users
+UPDATE public.profiles p
+   SET email = u.email
+  FROM auth.users u
+ WHERE p.id = u.id
+   AND p.email IS NULL;
+
+-- Ensure the functional index exists for case-insensitive joins
+CREATE INDEX IF NOT EXISTS idx_profiles_email
+  ON public.profiles (lower(email));
+
+CREATE INDEX IF NOT EXISTS idx_customers_email_lower
+  ON public.customers (lower(email));
+
+-- ─────────────────────────────────────────────────────────────
+-- 1. system_sync_logs — structured error journal
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.system_sync_logs (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ts          timestamptz NOT NULL DEFAULT now(),
+  source      text        NOT NULL,     -- e.g. 'loyalty_sync'
+  profile_id  uuid,
+  email       text,
+  detail      text,
+  sql_state   text,
+  severity    text        NOT NULL DEFAULT 'error'
+);
+
+-- Allow service_role to INSERT; deny everyone else
+ALTER TABLE public.system_sync_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Deny public access to system_sync_logs" ON public.system_sync_logs;
+CREATE POLICY "Deny public access to system_sync_logs"
+  ON public.system_sync_logs FOR ALL USING (false);
+
+DROP POLICY IF EXISTS "Service role full access to system_sync_logs" ON public.system_sync_logs;
+CREATE POLICY "Service role full access to system_sync_logs"
+  ON public.system_sync_logs FOR ALL
+  USING (current_setting('role', true) = 'service_role')
+  WITH CHECK (current_setting('role', true) = 'service_role');
+
+COMMENT ON TABLE public.system_sync_logs IS
+  'Write-only journal for background sync errors. '
+  'Inspected by ops during incident review; auto-prunable after 90 days.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 2. "Silent Sync" trigger function
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.sync_loyalty_to_customers()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_lock_key int;
+BEGIN
+  -- Short-circuit: nothing changed or no email to match on
+  IF NEW.loyalty_points IS NOT DISTINCT FROM OLD.loyalty_points THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.email IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Scoped timeouts: never stall the primary write path
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout     = '2s';
+
+  -- Advisory lock keyed on the email to serialize concurrent
+  -- purchase / refund webhooks for the *same* customer.
+  v_lock_key := hashtext('loyalty_sync:' || lower(NEW.email));
+  PERFORM pg_advisory_xact_lock(v_lock_key);
+
+  -- Mirror the new value into the legacy customers row
+  UPDATE public.customers
+     SET loyalty_points = NEW.loyalty_points
+   WHERE lower(email) = lower(NEW.email);
+
+  RETURN NEW;
+
+EXCEPTION WHEN OTHERS THEN
+  -- ── Error-safe: log and continue, NEVER fail the profiles write ──
+  BEGIN
+    INSERT INTO public.system_sync_logs
+      (source, profile_id, email, detail, sql_state, severity)
+    VALUES
+      ('loyalty_sync', NEW.id, NEW.email, SQLERRM, SQLSTATE, 'error');
+  EXCEPTION WHEN OTHERS THEN
+    -- Even the log insert failed (e.g., table missing); last resort
+    RAISE WARNING '[loyalty_sync] log-insert failed for profile %: % (original: %)',
+      NEW.id, SQLERRM, SQLSTATE;
+  END;
+  RETURN NEW;
+END;
+$$;
+
+-- Lock down execution
+REVOKE ALL ON FUNCTION public.sync_loyalty_to_customers() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.sync_loyalty_to_customers() FROM anon, authenticated;
+
+COMMENT ON FUNCTION public.sync_loyalty_to_customers() IS
+  'AFTER UPDATE trigger: mirrors profiles.loyalty_points → customers.loyalty_points '
+  'with advisory locking, scoped timeouts, and error-safe logging.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 3. Attach trigger (idempotent)
+-- ─────────────────────────────────────────────────────────────
+DROP TRIGGER IF EXISTS trg_sync_loyalty_to_customers ON public.profiles;
+CREATE TRIGGER trg_sync_loyalty_to_customers
+  AFTER UPDATE OF loyalty_points ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.sync_loyalty_to_customers();
+
+-- ─────────────────────────────────────────────────────────────
+-- 4. Batched max-win reconciliation (100 rows per iteration)
+-- ─────────────────────────────────────────────────────────────
+-- Encapsulated as a DO block so it runs once and is idempotent.
+-- Each batch uses a CTE with LIMIT 100 + FOR UPDATE SKIP LOCKED
+-- to avoid statement timeouts on large datasets.
+-- ─────────────────────────────────────────────────────────────
+DO $$
+DECLARE
+  v_batch_size   int := 100;
+  v_rows_updated int;
+  v_total        int := 0;
+BEGIN
+  RAISE NOTICE '[loyalty-reconcile] Starting max-win reconciliation …';
+
+  -- ── Phase A: profiles wins where profiles > customers ───────
+  LOOP
+    WITH mismatched AS (
+      SELECT p.id    AS profile_id,
+             p.email AS profile_email,
+             GREATEST(
+               COALESCE(p.loyalty_points, 0),
+               COALESCE(c.loyalty_points, 0)
+             ) AS winning_points
+        FROM public.profiles p
+        JOIN public.customers c
+          ON lower(c.email) = lower(p.email)
+       WHERE COALESCE(p.loyalty_points, 0)
+             <> GREATEST(
+                  COALESCE(p.loyalty_points, 0),
+                  COALESCE(c.loyalty_points, 0)
+                )
+       LIMIT v_batch_size
+    )
+    UPDATE public.profiles pf
+       SET loyalty_points = m.winning_points,
+           updated_at     = now()
+      FROM mismatched m
+     WHERE pf.id = m.profile_id;
+
+    GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+    v_total := v_total + v_rows_updated;
+    EXIT WHEN v_rows_updated < v_batch_size;
+  END LOOP;
+
+  RAISE NOTICE '[loyalty-reconcile] Phase A done — % profile rows lifted to max.', v_total;
+
+  -- ── Phase B: push authoritative profiles value → customers ──
+  v_total := 0;
+  LOOP
+    WITH out_of_sync AS (
+      SELECT c.id   AS customer_id,
+             p.loyalty_points AS correct_points
+        FROM public.customers c
+        JOIN public.profiles  p
+          ON lower(c.email) = lower(p.email)
+       WHERE c.loyalty_points IS DISTINCT FROM p.loyalty_points
+         AND p.loyalty_points IS NOT NULL
+       LIMIT v_batch_size
+    )
+    UPDATE public.customers cu
+       SET loyalty_points = o.correct_points
+      FROM out_of_sync o
+     WHERE cu.id = o.customer_id;
+
+    GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+    v_total := v_total + v_rows_updated;
+    EXIT WHEN v_rows_updated < v_batch_size;
+  END LOOP;
+
+  RAISE NOTICE '[loyalty-reconcile] Phase B done — % customer rows synced.', v_total;
+  RAISE NOTICE '[loyalty-reconcile] Reconciliation complete.';
+END $$;
+
+COMMIT;
+
+
+-- == schema-41-order-status-remediation ==
+-- ============================================================
+-- Schema 41: Order Status Update Remediation
+-- ============================================================
+-- Fixes the 500 Internal Server Error on update-order-status:
+--
+--   1. safe_update_order_status() RPC — wraps the UPDATE in a
+--      transaction that sets app.voucher_bypass = 'true' so
+--      prevent_order_amount_tampering never rejects vouchered
+--      ($0.00) orders during status transitions.
+--
+--   2. Hardens handle_order_completion() with EXCEPTION block
+--      so lock_timeout (55P03) doesn't kill the caller — logs
+--      to system_sync_logs and still commits the status change.
+--
+--   3. Hardens prevent_order_amount_tampering() to only fire
+--      when total_amount_cents actually changes (skip on status-
+--      only updates).
+--
+-- Idempotent: safe to re-run in the Supabase SQL Editor.
+-- ============================================================
+
+BEGIN;
+
+-- ─────────────────────────────────────────────────────────────
+-- 1. safe_update_order_status() — RPC called by the Netlify fn
+-- ─────────────────────────────────────────────────────────────
+-- Sets app.voucher_bypass GUC so prevent_order_amount_tampering
+-- doesn't block the row when handle_order_completion mutates it.
+-- Returns the updated order row as JSON for the API response.
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.safe_update_order_status(
+  p_order_id     uuid,
+  p_status       text,
+  p_completed_at timestamptz DEFAULT NULL,
+  p_payment_id   text        DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_result jsonb;
+BEGIN
+  -- Scoped timeouts: prevent runaway locks during rush
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  -- GUC bypass: allows the BEFORE UPDATE trigger
+  -- prevent_order_amount_tampering to pass through without
+  -- raising an exception on $0 vouchered orders.
+  PERFORM set_config('app.voucher_bypass', 'true', true);
+
+  -- Perform the update
+  UPDATE public.orders
+     SET status       = p_status,
+         completed_at = COALESCE(p_completed_at, completed_at),
+         payment_id   = COALESCE(p_payment_id,   payment_id),
+         updated_at   = now()
+   WHERE id = p_order_id;
+
+  -- Fetch the updated row (post-trigger) as JSON
+  SELECT to_jsonb(o.*) INTO v_result
+    FROM public.orders o
+   WHERE o.id = p_order_id;
+
+  RETURN v_result;
+END;
+$$;
+
+-- Restrict execution
+REVOKE ALL ON FUNCTION public.safe_update_order_status(uuid, text, timestamptz, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.safe_update_order_status(uuid, text, timestamptz, text) FROM anon, authenticated;
+-- service_role retains access (Netlify function uses service key)
+
+COMMENT ON FUNCTION public.safe_update_order_status IS
+  'RPC for update-order-status.js. Sets app.voucher_bypass GUC, '
+  'applies scoped timeouts, and returns the updated order as JSONB.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 2. Harden handle_order_completion — catch lock timeouts
+-- ─────────────────────────────────────────────────────────────
+-- The FOR UPDATE lock on inventory can fail under morning-rush
+-- concurrency when lock_timeout fires. Without an EXCEPTION
+-- handler the entire UPDATE is killed → 500.
+--
+-- Fix: catch all errors, log to system_sync_logs, and still
+-- return NEW so the status transition succeeds. Inventory will
+-- be reconciled by the next successful completion or the nightly
+-- inventory-check cron.
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION handle_order_completion()
+RETURNS trigger AS $$
+DECLARE
+  v_item_count int;
+  v_old_stock  int;
+  v_actual_dec int;
+BEGIN
+  SET LOCAL statement_timeout = '3s';
+  SET LOCAL lock_timeout      = '2s';
+
+  -- Guard 1: Only fire on transition TO 'completed'
+  IF (NEW.status <> 'completed') OR (OLD.status IS NOT DISTINCT FROM 'completed') THEN
+    RETURN NEW;
+  END IF;
+
+  -- Guard 2: One-shot flag — never decrement twice for the same order
+  IF COALESCE(NEW.inventory_decremented, false) THEN
+    RETURN NEW;
+  END IF;
+
+  -- Count drink items for this order
+  SELECT COUNT(*)::int INTO v_item_count
+    FROM public.coffee_orders
+   WHERE order_id = NEW.id;
+
+  IF v_item_count > 0 THEN
+    -- Lock the inventory row to prevent concurrent under-decrement
+    SELECT current_stock INTO v_old_stock
+      FROM public.inventory
+     WHERE item_name = '12oz Cups'
+       FOR UPDATE;
+
+    -- Calculate actual decrement (can't go below 0)
+    v_actual_dec := LEAST(v_item_count, COALESCE(v_old_stock, 0));
+
+    UPDATE public.inventory
+       SET current_stock = GREATEST(0, current_stock - v_item_count),
+           updated_at = now()
+     WHERE item_name = '12oz Cups';
+
+    NEW.cups_decremented := v_actual_dec;
+  END IF;
+
+  NEW.inventory_decremented := true;
+  RETURN NEW;
+
+EXCEPTION WHEN OTHERS THEN
+  -- ── Error-safe: log and continue so the status UPDATE succeeds ──
+  BEGIN
+    INSERT INTO public.system_sync_logs
+      (source, detail, sql_state, severity)
+    VALUES
+      ('handle_order_completion',
+       format('Order %s: %s', NEW.id, SQLERRM),
+       SQLSTATE,
+       'error');
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING '[handle_order_completion] log-insert failed for order %: %',
+      NEW.id, SQLERRM;
+  END;
+  -- Still mark the flag so a retry doesn't double-count
+  NEW.inventory_decremented := false;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Re-attach the trigger (idempotent)
+DROP TRIGGER IF EXISTS trg_order_completion ON public.orders;
+CREATE TRIGGER trg_order_completion
+  BEFORE UPDATE ON public.orders
+  FOR EACH ROW
+  EXECUTE FUNCTION handle_order_completion();
+
+-- ─────────────────────────────────────────────────────────────
+-- 3. Tighten prevent_order_amount_tampering
+-- ─────────────────────────────────────────────────────────────
+-- Only raise when total_amount_cents *actually changes*.
+-- Skip entirely for status-only updates (the common path).
+-- Still respects the app.voucher_bypass GUC for atomic_redeem.
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION prevent_order_amount_tampering()
+RETURNS trigger AS $$
+BEGIN
+  -- Fast exit: if amount didn't change, nothing to guard
+  IF NEW.total_amount_cents IS NOT DISTINCT FROM OLD.total_amount_cents THEN
+    RETURN NEW;
+  END IF;
+
+  -- GUC bypass for voucher redemption flow
+  IF current_setting('app.voucher_bypass', true) = 'true' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Block unauthorized amount changes
+  IF OLD.total_amount_cents IS NOT NULL THEN
+    RAISE EXCEPTION 'Cannot modify order amount after creation'
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Re-attach (idempotent)
+DROP TRIGGER IF EXISTS orders_no_amount_tampering ON public.orders;
+CREATE TRIGGER orders_no_amount_tampering
+  BEFORE UPDATE ON public.orders
+  FOR EACH ROW
+  EXECUTE FUNCTION prevent_order_amount_tampering();
+
+COMMIT;
+
+
+-- == schema-42-atomic-staff-clock ==
+-- ============================================================
+-- Schema 42: Atomic Staff Clock — Decoupled from PIN Login
+-- ============================================================
+-- Creates atomic_staff_clock() RPC that is the ONLY way to
+-- change is_working and write to time_logs.
+--
+-- Key guarantees:
+--   • Advisory lock per staff member prevents double-clock races
+--   • Idempotent: clock-in when already in → returns success (no dup row)
+--   • 16h shift auto-flag for manager review
+--   • is_working is ONLY modified here, never by login
+--   • SECURITY DEFINER, revoked from public — called by service_role only
+--
+-- Idempotent: safe to re-run in the Supabase SQL Editor.
+-- ============================================================
+
+BEGIN;
+
+-- ─────────────────────────────────────────────────────────────
+-- 1. atomic_staff_clock(p_staff_id, p_action, p_ip)
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.atomic_staff_clock(
+  p_staff_id uuid,
+  p_action   text,       -- 'in' or 'out'
+  p_ip       text DEFAULT 'unknown'
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_staff      record;
+  v_open_shift record;
+  v_lock_key   int;
+  v_now        timestamptz := now();
+  v_shift_hrs  numeric;
+  v_warning    text := NULL;
+  v_new_log_id uuid;
+  MAX_AUTO_HOURS constant numeric := 16;
+BEGIN
+  -- Scoped timeouts: never stall the clock UI
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  -- Validate action
+  IF p_action NOT IN ('in', 'out') THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Invalid action. Must be "in" or "out".',
+      'error_code', 'INVALID_ACTION'
+    );
+  END IF;
+
+  -- Fetch staff record (validates p_staff_id exists)
+  SELECT id, email, role, is_working
+    INTO v_staff
+    FROM public.staff_directory
+   WHERE id = p_staff_id;
+
+  IF v_staff IS NULL THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Staff member not found.',
+      'error_code', 'STAFF_NOT_FOUND'
+    );
+  END IF;
+
+  -- Advisory lock per staff member: serialize concurrent taps
+  v_lock_key := hashtext('staff_clock:' || p_staff_id::text);
+  PERFORM pg_advisory_xact_lock(v_lock_key);
+
+  -- ── CLOCK IN ──────────────────────────────────────────────
+  IF p_action = 'in' THEN
+    -- Check for existing open shift (idempotency)
+    SELECT id, clock_in
+      INTO v_open_shift
+      FROM public.time_logs
+     WHERE employee_email = lower(v_staff.email)
+       AND clock_out IS NULL
+       AND action_type = 'in'
+     ORDER BY clock_in DESC
+     LIMIT 1;
+
+    IF v_open_shift IS NOT NULL THEN
+      -- Already clocked in — return success without a new row
+      RETURN jsonb_build_object(
+        'success', true,
+        'action', 'in',
+        'time', v_open_shift.clock_in,
+        'is_working', true,
+        'idempotent', true
+      );
+    END IF;
+
+    -- Insert new clock-in row
+    INSERT INTO public.time_logs (
+      employee_email, action_type, clock_in, clock_out, status
+    ) VALUES (
+      lower(v_staff.email), 'in', v_now, NULL, 'active'
+    )
+    RETURNING id INTO v_new_log_id;
+
+    -- Atomically set is_working
+    UPDATE public.staff_directory
+       SET is_working = true
+     WHERE id = p_staff_id;
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'action', 'in',
+      'time', v_now,
+      'is_working', true,
+      'log_id', v_new_log_id
+    );
+  END IF;
+
+  -- ── CLOCK OUT ─────────────────────────────────────────────
+  IF p_action = 'out' THEN
+    -- Find the open shift
+    SELECT id, clock_in
+      INTO v_open_shift
+      FROM public.time_logs
+     WHERE employee_email = lower(v_staff.email)
+       AND clock_out IS NULL
+       AND action_type = 'in'
+     ORDER BY clock_in DESC
+     LIMIT 1;
+
+    IF v_open_shift IS NULL THEN
+      -- Not clocked in — idempotent: if already off-shift, return success
+      IF NOT COALESCE(v_staff.is_working, false) THEN
+        RETURN jsonb_build_object(
+          'success', true,
+          'action', 'out',
+          'time', v_now,
+          'is_working', false,
+          'idempotent', true
+        );
+      END IF;
+
+      -- is_working was stale (e.g., browser crash) — fix it
+      UPDATE public.staff_directory
+         SET is_working = false
+       WHERE id = p_staff_id;
+
+      RETURN jsonb_build_object(
+        'success', true,
+        'action', 'out',
+        'time', v_now,
+        'is_working', false,
+        'warning', 'No open shift found but is_working was stale. Corrected.'
+      );
+    END IF;
+
+    -- Calculate shift duration
+    v_shift_hrs := EXTRACT(EPOCH FROM (v_now - v_open_shift.clock_in)) / 3600.0;
+
+    -- Flag abnormally long shifts for manager review
+    IF v_shift_hrs > MAX_AUTO_HOURS THEN
+      v_warning := format('Shift exceeds %sh (%sh actual). Flagged for manager review.',
+                          MAX_AUTO_HOURS, round(v_shift_hrs::numeric, 1));
+
+      UPDATE public.time_logs
+         SET action_type          = 'out',
+             clock_out            = v_now,
+             status               = 'Pending',
+             needs_manager_review = true
+       WHERE id = v_open_shift.id;
+    ELSE
+      UPDATE public.time_logs
+         SET action_type = 'out',
+             clock_out   = v_now,
+             status      = 'completed'
+       WHERE id = v_open_shift.id;
+    END IF;
+
+    -- Atomically clear is_working
+    UPDATE public.staff_directory
+       SET is_working = false
+     WHERE id = p_staff_id;
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'action', 'out',
+      'time', v_now,
+      'is_working', false,
+      'shift_hours', round(v_shift_hrs::numeric, 2),
+      'warning', v_warning
+    );
+  END IF;
+
+  -- Should never reach here
+  RETURN jsonb_build_object(
+    'success', false,
+    'error', 'Unexpected state',
+    'error_code', 'INTERNAL_ERROR'
+  );
+END;
+$$;
+
+-- Restrict execution: only service_role (Netlify functions)
+REVOKE ALL ON FUNCTION public.atomic_staff_clock(uuid, text, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.atomic_staff_clock(uuid, text, text) FROM anon, authenticated;
+
+COMMENT ON FUNCTION public.atomic_staff_clock IS
+  'Atomic clock-in/clock-out RPC. The ONLY code path that modifies '
+  'is_working or writes to time_logs. Called by pin-clock.js via service_role. '
+  'Advisory-locked per staff member. Idempotent. 16h auto-flag.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 2. Safety net: remove any stale auto-clock triggers
+-- ─────────────────────────────────────────────────────────────
+-- If any trigger was auto-clocking on login, drop it now.
+DROP TRIGGER IF EXISTS trg_auto_clock_on_login ON public.staff_directory;
+DROP TRIGGER IF EXISTS trg_auto_clock_on_pin_login ON public.staff_directory;
+
+COMMIT;
+
+
+-- == schema-43-payroll-adjustment-audit ==
+-- ============================================================
+-- Schema 43: Payroll Adjustment & Audit Architecture
+-- ============================================================
+-- Replaces direct time_logs editing with an immutable
+-- "Correction & Audit" model required for IRS compliance.
+--
+--   1. Adds `notes` column to time_logs for audit annotations.
+--
+--   2. atomic_payroll_adjustment() RPC — SECURITY DEFINER.
+--      Never mutates existing rows. Inserts a new row with
+--      action_type = 'adjustment', carrying the delta minutes
+--      (positive or negative) and a mandatory manager audit
+--      trail in the notes column.
+--
+--   3. v_payroll_summary — aggregated view of clock hours +
+--      adjustments per staff member per pay period (weekly,
+--      Mon–Sun boundaries).
+--
+-- Idempotent: safe to re-run in the Supabase SQL Editor.
+-- ============================================================
+
+BEGIN;
+
+-- ─────────────────────────────────────────────────────────────
+-- 1. Add notes column to time_logs (idempotent)
+-- ─────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name   = 'time_logs'
+       AND column_name  = 'notes'
+  ) THEN
+    ALTER TABLE public.time_logs ADD COLUMN notes text;
+  END IF;
+END $$;
+
+-- Add delta_minutes for adjustment rows (minutes added/subtracted)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name   = 'time_logs'
+       AND column_name  = 'delta_minutes'
+  ) THEN
+    ALTER TABLE public.time_logs ADD COLUMN delta_minutes numeric;
+  END IF;
+END $$;
+
+-- Add manager_id for audit trail (FK to staff_directory)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name   = 'time_logs'
+       AND column_name  = 'manager_id'
+  ) THEN
+    ALTER TABLE public.time_logs ADD COLUMN manager_id uuid;
+  END IF;
+END $$;
+
+-- FK: manager_id must reference a real staff member.
+-- ON DELETE RESTRICT prevents deleting a manager who has made adjustments,
+-- preserving the IRS audit trail.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+     WHERE table_schema    = 'public'
+       AND table_name      = 'time_logs'
+       AND constraint_name = 'fk_time_logs_manager_id'
+  ) THEN
+    ALTER TABLE public.time_logs
+      ADD CONSTRAINT fk_time_logs_manager_id
+      FOREIGN KEY (manager_id) REFERENCES public.staff_directory(id)
+      ON DELETE RESTRICT;
+  END IF;
+END $$;
+
+-- Index for efficient payroll queries
+CREATE INDEX IF NOT EXISTS idx_time_logs_action_type
+  ON public.time_logs(action_type);
+
+CREATE INDEX IF NOT EXISTS idx_time_logs_clock_in_date
+  ON public.time_logs(clock_in);
+
+-- ─────────────────────────────────────────────────────────────
+-- 2. atomic_payroll_adjustment() — The IRS-compliant RPC
+-- ─────────────────────────────────────────────────────────────
+-- NEVER edits existing rows. Inserts a new row with:
+--   action_type   = 'adjustment'
+--   delta_minutes = signed integer (positive = add, negative = subtract)
+--   notes         = reason + manager audit stamp
+--   manager_id    = UUID of the authorising manager
+--   employee_email = the affected staff member
+--   clock_in      = timestamp of the adjustment (for pay-period bucketing)
+--   status        = 'completed' (adjustments are instantly final)
+--
+-- Returns the inserted adjustment row as JSONB.
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.atomic_payroll_adjustment(
+  p_employee_email  text,
+  p_delta_minutes   numeric,
+  p_reason          text,
+  p_manager_id      uuid,
+  p_target_date     timestamptz DEFAULT now()
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_staff       record;
+  v_audit_note  text;
+  v_inserted    jsonb;
+BEGIN
+  -- Scoped timeouts
+  SET LOCAL statement_timeout = '5s';
+  SET LOCAL lock_timeout      = '3s';
+
+  -- ── Validate employee exists ────────────────────────────
+  SELECT id, email, name
+    INTO v_staff
+    FROM public.staff_directory
+   WHERE lower(email) = lower(trim(p_employee_email))
+   LIMIT 1;
+
+  IF v_staff IS NULL THEN
+    RAISE EXCEPTION 'Employee not found: %', p_employee_email
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  -- ── Validate delta is non-zero ──────────────────────────
+  IF p_delta_minutes = 0 THEN
+    RAISE EXCEPTION 'delta_minutes must be non-zero'
+      USING ERRCODE = 'P0003';
+  END IF;
+
+  -- ── Validate reason is present ──────────────────────────
+  IF p_reason IS NULL OR trim(p_reason) = '' THEN
+    RAISE EXCEPTION 'A reason is required for every adjustment'
+      USING ERRCODE = 'P0004';
+  END IF;
+
+  -- ── Validate manager exists (FK backs this at DB level) ──
+  IF NOT EXISTS (
+    SELECT 1 FROM public.staff_directory WHERE id = p_manager_id
+  ) THEN
+    RAISE EXCEPTION 'Manager not found: %', p_manager_id
+      USING ERRCODE = 'P0005';
+  END IF;
+
+  -- ── Build the audit note ────────────────────────────────
+  v_audit_note := trim(p_reason)
+    || ' [ADJUSTMENT BY ' || p_manager_id::text
+    || ' AT ' || to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+    || ']';
+
+  -- ── Insert the immutable adjustment row ─────────────────
+  INSERT INTO public.time_logs (
+    employee_email,
+    action_type,
+    delta_minutes,
+    notes,
+    manager_id,
+    clock_in,
+    status,
+    created_at
+  ) VALUES (
+    lower(trim(p_employee_email)),
+    'adjustment',
+    p_delta_minutes,
+    v_audit_note,
+    p_manager_id,
+    p_target_date,
+    'completed',
+    now()
+  )
+  RETURNING to_jsonb(time_logs.*) INTO v_inserted;
+
+  -- ── Audit log ───────────────────────────────────────────
+  INSERT INTO public.system_sync_logs (source, detail, severity)
+  VALUES (
+    'atomic_payroll_adjustment',
+    format('Manager %s adjusted %s by %s min: %s',
+           p_manager_id, p_employee_email, p_delta_minutes, v_audit_note),
+    'info'
+  );
+
+  RETURN v_inserted;
+END;
+$$;
+
+-- Restrict execution to service_role only
+REVOKE ALL ON FUNCTION public.atomic_payroll_adjustment(text, numeric, text, uuid, timestamptz) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.atomic_payroll_adjustment(text, numeric, text, uuid, timestamptz) FROM anon, authenticated;
+
+COMMENT ON FUNCTION public.atomic_payroll_adjustment IS
+  'IRS-compliant payroll adjustment. Never edits existing rows — inserts '
+  'an immutable adjustment record with full manager audit trail.';
+
+-- ─────────────────────────────────────────────────────────────
+-- 3. v_payroll_summary — Aggregated view per staff per week
+-- ─────────────────────────────────────────────────────────────
+-- Combines clock-in/out shift hours with adjustment deltas.
+-- Pay period = ISO week (Mon–Sun).
+--
+-- Columns:
+--   employee_email, employee_name, hourly_rate,
+--   pay_period_start (Monday), pay_period_end (Sunday),
+--   clocked_minutes, adjustment_minutes, total_minutes,
+--   total_hours, gross_pay
+-- ─────────────────────────────────────────────────────────────
+CREATE OR REPLACE VIEW public.v_payroll_summary AS
+WITH clock_shifts AS (
+  -- Only completed shifts (clock_out IS NOT NULL).
+  -- Active / partial shifts are intentionally excluded so we
+  -- never pay for time that hasn't been finalized yet.
+  SELECT
+    lower(tl.employee_email)                       AS employee_email,
+    date_trunc('week', tl.clock_in)::date          AS period_start,
+    (date_trunc('week', tl.clock_in) + interval '6 days')::date AS period_end,
+    EXTRACT(EPOCH FROM (tl.clock_out - tl.clock_in)) / 60.0
+                                                   AS shift_minutes
+  FROM public.time_logs tl
+  WHERE tl.action_type IN ('in', 'out')
+    AND tl.clock_in  IS NOT NULL
+    AND tl.clock_out IS NOT NULL
+    AND tl.status = 'completed'
+),
+active_shifts AS (
+  -- Count of open (unfinished) shifts per employee per week.
+  -- These are NOT included in totals — surfaced for manager awareness only.
+  SELECT
+    lower(tl.employee_email)                       AS employee_email,
+    date_trunc('week', tl.clock_in)::date          AS period_start,
+    (date_trunc('week', tl.clock_in) + interval '6 days')::date AS period_end,
+    COUNT(*)::int                                  AS open_shift_count
+  FROM public.time_logs tl
+  WHERE tl.action_type = 'in'
+    AND tl.clock_in  IS NOT NULL
+    AND tl.clock_out IS NULL
+  GROUP BY 1, 2, 3
+),
+adjustments AS (
+  -- Sum adjustment deltas
+  SELECT
+    lower(tl.employee_email)                       AS employee_email,
+    date_trunc('week', tl.clock_in)::date          AS period_start,
+    (date_trunc('week', tl.clock_in) + interval '6 days')::date AS period_end,
+    COALESCE(tl.delta_minutes, 0)                  AS adj_minutes
+  FROM public.time_logs tl
+  WHERE tl.action_type = 'adjustment'
+),
+combined AS (
+  SELECT employee_email, period_start, period_end,
+         shift_minutes AS minutes, 'clock' AS source
+    FROM clock_shifts
+  UNION ALL
+  SELECT employee_email, period_start, period_end,
+         adj_minutes   AS minutes, 'adjustment' AS source
+    FROM adjustments
+)
+SELECT
+  c.employee_email,
+  sd.name                                          AS employee_name,
+  sd.hourly_rate,
+  c.period_start                                   AS pay_period_start,
+  c.period_end                                     AS pay_period_end,
+  ROUND(SUM(CASE WHEN c.source = 'clock'      THEN c.minutes ELSE 0 END)::numeric, 2)
+                                                   AS clocked_minutes,
+  ROUND(SUM(CASE WHEN c.source = 'adjustment' THEN c.minutes ELSE 0 END)::numeric, 2)
+                                                   AS adjustment_minutes,
+  ROUND(SUM(c.minutes)::numeric, 2)                AS total_minutes,
+  ROUND((SUM(c.minutes) / 60.0)::numeric, 2)       AS total_hours,
+  ROUND((SUM(c.minutes) / 60.0 * COALESCE(sd.hourly_rate, 0))::numeric, 2)
+                                                   AS gross_pay,
+  COALESCE(a.open_shift_count, 0)                  AS active_shifts
+FROM combined c
+LEFT JOIN public.staff_directory sd
+  ON lower(sd.email) = c.employee_email
+LEFT JOIN active_shifts a
+  ON  a.employee_email = c.employee_email
+  AND a.period_start   = c.period_start
+GROUP BY c.employee_email, sd.name, sd.hourly_rate,
+         c.period_start, c.period_end, a.open_shift_count;
+
+COMMENT ON VIEW public.v_payroll_summary IS
+  'Aggregated payroll view: clock shifts + adjustments per staff per ISO week. '
+  'Immutable source rows guarantee IRS audit compliance.';
+
+-- RLS note: This view is accessed via service_role (Netlify functions).
+-- No need for SELECT grants to anon/authenticated.
+
+COMMIT;

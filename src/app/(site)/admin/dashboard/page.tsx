@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useOpsSession } from '@/components/OpsGate';
 import { BarChart3, Users, DollarSign, Package, RefreshCw } from 'lucide-react';
 
 export default function ManagerDashboard() {
+  const { token } = useOpsSession();
   const [stats, setStats] = useState({ revenue: 0, orders: 0, labor: 0, activeStaff: 0 });
   const [inventory, setInventory] = useState<any[]>([]);
   const [payroll, setPayroll] = useState<any[]>([]);
@@ -28,52 +30,62 @@ export default function ManagerDashboard() {
   }
 
   async function loadSalesReport() {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch('/.netlify/functions/sales-report', {
-      headers: { 'Authorization': `Bearer ${session?.access_token}` }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setStats(prev => ({ ...prev, revenue: data.gross_revenue, orders: data.total_orders }));
+    try {
+      const res = await fetch('/.netlify/functions/sales-report', {
+        headers: { 'Authorization': `Bearer ${token}`, 'X-BrewHub-Action': 'true' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStats(prev => ({ ...prev, revenue: data.gross_revenue, orders: data.total_orders }));
+      }
+    } catch (err) {
+      console.error('[ADMIN] Sales report load failed');
     }
   }
 
   async function loadStaffStats() {
-    const { data } = await supabase.from('staff_directory').select('*');
-    if (data) {
-      const active = data.filter(s => s.is_working);
-      const labor = active.reduce((acc, s) => acc + (parseFloat(s.hourly_rate) || 0), 0);
-      setStats(prev => ({ ...prev, activeStaff: active.length, labor }));
+    try {
+      const res = await fetch('/.netlify/functions/get-manager-stats', {
+        headers: { 'Authorization': `Bearer ${token}`, 'X-BrewHub-Action': 'true' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStats(prev => ({
+          ...prev,
+          activeStaff: data.activeStaff ?? prev.activeStaff,
+          labor: data.estimatedLabor ?? prev.labor
+        }));
+      }
+    } catch (err) {
+      console.error('[ADMIN] Staff stats load failed');
     }
   }
 
   async function loadInventory() {
-    // Logic from inventory-check.js
-    const { data } = await supabase.from('inventory').select('*').limit(5);
-    if (data) setInventory(data);
+    try {
+      const res = await fetch('/.netlify/functions/get-inventory', {
+        headers: { 'Authorization': `Bearer ${token}`, 'X-BrewHub-Action': 'true' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInventory(Array.isArray(data) ? data.slice(0, 5) : []);
+      }
+    } catch (err) {
+      console.error('[ADMIN] Inventory load failed');
+    }
   }
 
   async function loadPayroll() {
-    // Logic pairs 'in' and 'out' action_types from time_logs
-    const { data: staff } = await supabase.from('staff_directory').select('*');
-    const { data: logs } = await supabase.from('time_logs').select('*').order('created_at', { ascending: true });
-    
-    if (staff && logs) {
-      const tally = staff.map(emp => {
-        let totalHours = 0;
-        let startTime: any = null;
-        const empLogs = logs.filter(l => l.employee_email === emp.email);
-        
-        empLogs.forEach(log => {
-          if (log.action_type?.toLowerCase() === 'in') startTime = new Date(log.created_at);
-          else if (log.action_type?.toLowerCase() === 'out' && startTime) {
-            totalHours += (new Date(log.created_at).getTime() - startTime.getTime()) / 3600000;
-            startTime = null;
-          }
-        });
-        return { ...emp, totalHours, earned: totalHours * (emp.hourly_rate || 0) };
+    try {
+      const res = await fetch('/.netlify/functions/get-payroll', {
+        headers: { 'Authorization': `Bearer ${token}`, 'X-BrewHub-Action': 'true' }
       });
-      setPayroll(tally);
+      if (res.ok) {
+        const data = await res.json();
+        setPayroll(Array.isArray(data) ? data : (data.payroll || []));
+      }
+    } catch (err) {
+      console.error('[ADMIN] Payroll load failed');
     }
   }
 

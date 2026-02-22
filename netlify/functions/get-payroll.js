@@ -20,6 +20,45 @@ exports.handler = async (event) => {
 
   try {
     const params = event.queryStringParameters || {};
+
+    // ── view=summary: return aggregated data from v_payroll_summary ──
+    if (params.view === 'summary') {
+      const startDate = params.start;
+      const endDate = params.end;
+
+      // Build query — optionally filtered by pay period range
+      let query = supabase
+        .from('v_payroll_summary')
+        .select('*')
+        .order('pay_period_start', { ascending: false });
+
+      if (startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+        query = query.gte('pay_period_start', startDate);
+      }
+      if (endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+        query = query.lte('pay_period_end', endDate);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      // Also fetch open shifts for the "Open Shifts" card
+      const { data: openShifts, error: openErr } = await supabase
+        .from('time_logs')
+        .select('id, employee_email, clock_in, created_at')
+        .eq('action_type', 'in')
+        .is('clock_out', null)
+        .order('clock_in', { ascending: false });
+
+      if (openErr) throw openErr;
+
+      return json(200, {
+        summary: data || [],
+        openShifts: openShifts || [],
+      });
+    }
+
+    // ── Default: raw staff + logs for client-side calculation ──
     const startDate = params.start;
     const endDate = params.end;
 

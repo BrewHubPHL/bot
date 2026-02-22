@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { publicBucket } = require('./_token-bucket');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY);
@@ -26,6 +27,19 @@ exports.handler = async (event) => {
     // Handle CORS preflight
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };
+    }
+
+    // Per-IP rate limiting
+    const clientIp = event.headers['x-nf-client-connection-ip']
+      || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+      || 'unknown';
+    const ipLimit = publicBucket.consume('shop:' + clientIp);
+    if (!ipLimit.allowed) {
+      return {
+        statusCode: 429,
+        headers: { ...headers, 'Retry-After': String(Math.ceil(ipLimit.retryAfterMs / 1000)) },
+        body: JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
+      };
     }
 
     // Public endpoint - no auth required for browsing shop products

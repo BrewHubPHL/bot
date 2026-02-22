@@ -106,7 +106,26 @@ interface PayrollRow {
   missedPunch: boolean;
   missedPunchClockIn: string | null; // ISO timestamp of the open clock-in
 }
+interface PayrollSummaryRow {
+  employee_email: string;
+  employee_name: string | null;
+  hourly_rate: number | null;
+  pay_period_start: string;
+  pay_period_end: string;
+  clocked_minutes: number;
+  adjustment_minutes: number;
+  total_minutes: number;
+  total_hours: number;
+  gross_pay: number;
+  active_shifts: number;
+}
 
+interface OpenShiftRow {
+  id: string;
+  employee_email: string;
+  clock_in: string;
+  created_at: string;
+}
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
@@ -272,6 +291,11 @@ export default function PayrollSection() {
   const [payroll, setPayroll] = useState<PayrollRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // ---- Payroll Summary (v_payroll_summary) state ----------------
+  const [summaryRows, setSummaryRows] = useState<PayrollSummaryRow[]>([]);
+  const [openShifts, setOpenShifts] = useState<OpenShiftRow[]>([]);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+
   // ---- Fix clock-out state --------------------------------------
   const [fixingEmail, setFixingEmail] = useState<string | null>(null);
   const [fixTime, setFixTime] = useState("");
@@ -333,9 +357,31 @@ export default function PayrollSection() {
     setLoading(false);
   }, [startDate, endDate, token]);
 
+  // ---- Fetch summary view ----------------------------------------
+  const fetchSummary = useCallback(async () => {
+    if (!token) { setSummaryLoading(false); return; }
+    setSummaryLoading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/get-payroll?view=summary&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error("Summary fetch failed");
+      const data = await res.json();
+      setSummaryRows(data.summary ?? []);
+      setOpenShifts(data.openShifts ?? []);
+    } catch (err) {
+      console.error("Summary fetch failed:", err);
+      setSummaryRows([]);
+      setOpenShifts([]);
+    }
+    setSummaryLoading(false);
+  }, [startDate, endDate, token]);
+
   useEffect(() => {
     fetchPayroll();
-  }, [fetchPayroll]);
+    fetchSummary();
+  }, [fetchPayroll, fetchSummary]);
 
   // ---- Summary totals -------------------------------------------
   const totalRegular = payroll.reduce((s, r) => s + r.regularHours, 0);
@@ -373,8 +419,9 @@ export default function PayrollSection() {
       setFixTime("");
       setTimeout(() => setFixSuccess(""), 4000);
 
-      // Refresh payroll data
+      // Refresh both payroll data and summary
       fetchPayroll();
+      fetchSummary();
     } catch (err: unknown) {
       setFixError(err instanceof Error ? err.message : "Failed to fix clock-out");
     } finally {
@@ -473,6 +520,136 @@ export default function PayrollSection() {
       {fixError && (
         <div className="mb-3 flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2 text-red-400 text-sm">
           ✕ {fixError}
+        </div>
+      )}
+
+      {/* ── Open Shifts Card ── */}
+      {openShifts.length > 0 && !summaryLoading && (
+        <div className="mb-3 bg-[#1a1a1a] border border-amber-500/30 rounded-xl p-4">
+          <h3 className="text-sm font-bold text-amber-400 mb-3 flex items-center gap-2">
+            <span>⏱</span>
+            Open Shifts — {openShifts.length} Unfinalised
+          </h3>
+          <p className="text-xs text-gray-400 mb-3">
+            These employees are still clocked in. Their hours will <strong className="text-white">not</strong> count
+            toward payroll totals until the shift is closed.
+          </p>
+          <div className="space-y-2">
+            {openShifts.map((os) => {
+              const clockInDate = new Date(os.clock_in);
+              const hoursAgo = Math.round((Date.now() - clockInDate.getTime()) / 3_600_000);
+              const isAlerted = hoursAgo >= 16;
+              return (
+                <div key={os.id} className="flex items-center justify-between gap-3 bg-[#111] rounded-lg px-4 py-2 border border-[#333]">
+                  <div className="min-w-0">
+                    <span className="font-semibold text-sm truncate">{os.employee_email}</span>
+                    <span className="text-xs text-gray-500 ml-2">
+                      Clocked in{" "}
+                      <span className={isAlerted ? "text-red-400 font-bold" : "text-amber-400 font-semibold"}>
+                        {clockInDate.toLocaleString("en-US", {
+                          timeZone: SHOP_TZ,
+                          weekday: "short", month: "short", day: "numeric",
+                          hour: "2-digit", minute: "2-digit", hour12: true,
+                        })}
+                      </span>
+                      {" "}({hoursAgo}h ago)
+                    </span>
+                    {isAlerted && (
+                      <span className="ml-2 inline-block text-[10px] font-bold uppercase tracking-wide
+                                       bg-red-500/20 text-red-400 border border-red-500/30 rounded px-2 py-0.5">
+                        Likely Missed
+                      </span>
+                    )}
+                  </div>
+                  {fixingEmail === os.employee_email ? (
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <input
+                        type="datetime-local"
+                        value={fixTime}
+                        onChange={(e) => setFixTime(e.target.value)}
+                        min={utcToEasternDatetimeLocal(os.clock_in)}
+                        className="bg-[#111] border border-[#444] rounded px-2 py-1 text-xs text-white
+                                   focus:outline-none focus:ring-1 focus:ring-amber-500 w-[200px]"
+                      />
+                      <button
+                        type="button"
+                        disabled={!fixTime || fixBusy}
+                        onClick={() => handleFixClockOut(os.employee_email)}
+                        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40
+                                   text-white text-[10px] font-bold px-3 py-1.5 rounded transition-colors"
+                      >
+                        {fixBusy ? "Saving…" : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setFixingEmail(null); setFixTime(""); setFixError(""); }}
+                        className="text-gray-500 hover:text-white text-[10px] px-2 py-1 rounded
+                                   border border-[#333] transition-colors"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setFixingEmail(os.employee_email); setFixError(""); }}
+                      className="flex-shrink-0 text-[11px] font-semibold text-amber-400 hover:text-amber-300
+                                 border border-amber-500/30 rounded px-3 py-1 transition-colors"
+                    >
+                      Fix Clock-Out
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Weekly Summary (from v_payroll_summary) ── */}
+      {summaryRows.length > 0 && !summaryLoading && (
+        <div className="mb-3 bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden">
+          <div className="px-6 py-3 border-b border-[#333] flex items-center justify-between">
+            <h3 className="text-sm font-bold text-[#f5f5f5] flex items-center gap-2">
+              <span>📊</span> Weekly Pay Period Summary
+            </h3>
+            <span className="text-[10px] text-gray-500">From v_payroll_summary — excludes active shifts</span>
+          </div>
+          <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-2 px-6 py-2 text-xs font-bold uppercase tracking-wider text-gray-500 bg-[#222]">
+            <span>Staff</span>
+            <span>Period</span>
+            <span>Clocked</span>
+            <span>Adjustments</span>
+            <span>Total Hours</span>
+            <span>Gross Pay</span>
+          </div>
+          {summaryRows.map((row, idx) => (
+            <div
+              key={`${row.employee_email}-${row.pay_period_start}-${idx}`}
+              className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr] gap-2 px-6 py-2.5 border-t border-[#222] items-center text-sm"
+            >
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{row.employee_name || row.employee_email}</div>
+                <div className="text-xs text-gray-500 truncate">{row.employee_email}</div>
+                {row.active_shifts > 0 && (
+                  <span className="inline-block mt-0.5 text-[10px] font-bold uppercase tracking-wide
+                                   bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-2 py-0.5">
+                    {row.active_shifts} open shift{row.active_shifts > 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-gray-400">
+                {row.pay_period_start}<br/>
+                <span className="text-gray-600">→</span> {row.pay_period_end}
+              </div>
+              <div>{(row.clocked_minutes / 60).toFixed(1)} h</div>
+              <div className={row.adjustment_minutes !== 0 ? "text-amber-400 font-semibold" : "text-gray-500"}>
+                {row.adjustment_minutes > 0 ? "+" : ""}{(row.adjustment_minutes / 60).toFixed(1)} h
+              </div>
+              <div className="font-semibold">{row.total_hours.toFixed(1)} h</div>
+              <div className="text-green-400 font-semibold">${row.gross_pay.toFixed(2)}</div>
+            </div>
+          ))}
         </div>
       )}
 

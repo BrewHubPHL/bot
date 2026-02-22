@@ -43,7 +43,7 @@ function formatTime(date: Date): string {
 }
 
 /* ─── OpsGate Component ──────────────────────────────── */
-export default function OpsGate({ children }: { children: ReactNode }) {
+export default function OpsGate({ children, requireManager = false }: { children: ReactNode; requireManager?: boolean }) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -287,6 +287,24 @@ export default function OpsGate({ children }: { children: ReactNode }) {
 
   /* ─── Authenticated: show page content ─── */
   if (session) {
+    // Manager gate: block non-managers from manager-only pages
+    const isManager = session.staff.role === "manager" || session.staff.role === "admin";
+    if (requireManager && !isManager) {
+      return (
+        <div className="min-h-screen bg-black flex flex-col items-center justify-center px-4 text-center">
+          <Lock className="w-12 h-12 text-red-400 mb-4" />
+          <h1 className="text-xl font-bold text-white mb-2">Manager Access Required</h1>
+          <p className="text-zinc-400 text-sm mb-6">This page is restricted to managers and administrators.</p>
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm rounded-lg transition-colors"
+          >
+            Switch Account
+          </button>
+        </div>
+      );
+    }
+
     return (
       <OpsSessionContext.Provider value={session}>
         {/* Persistent header bar */}

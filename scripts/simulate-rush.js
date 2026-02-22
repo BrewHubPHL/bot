@@ -18,7 +18,8 @@
 
 require('dotenv').config();
 const crypto = require('crypto');
-const fetch = require('node-fetch');
+// Node 18+ has native fetch — no need for node-fetch
+// const fetch = require('node-fetch');
 
 // ---------------------------------------------------------------------------
 // CONFIG

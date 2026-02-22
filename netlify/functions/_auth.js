@@ -29,13 +29,19 @@ function getJwtIat(token) {
 }
 
 async function authorize(event, options = {}) {
-  const { requireManager = false, allowServiceSecret = false, maxTokenAgeMinutes = null, requirePin = false } = options;
+  const { requireManager = false, allowServiceSecret = false, maxTokenAgeMinutes = null, requirePin = false, allowManagerIPBypass = false } = options;
 
   const clientIP = getClientIP(event);
-  if (!isIPAllowed(clientIP)) {
+  const ipAllowed = isIPAllowed(clientIP);
+
+  // If IP is blocked and manager bypass is NOT requested, fail immediately
+  if (!ipAllowed && !allowManagerIPBypass) {
     console.error(`[IP BLOCKED] ${redactIP(clientIP)}`);
     return { ok: false, response: json(403, { error: 'Access denied: Unauthorized IP' }) };
   }
+  // If IP is blocked but manager bypass IS requested, we defer the check
+  // until after token verification so we can inspect the role.
+  const ipCheckDeferred = !ipAllowed && allowManagerIPBypass;
 
   if (allowServiceSecret) {
     const secret = event.headers?.['x-brewhub-secret'];
@@ -97,6 +103,13 @@ async function authorize(event, options = {}) {
       }
 
       const isManager = staff.role === 'manager' || staff.role === 'admin';
+
+      // Deferred IP check: if IP was blocked and bypass was requested, enforce now for non-managers
+      if (ipCheckDeferred && !isManager) {
+        console.error(`[IP BLOCKED] Non-manager PIN user from unauthorized IP: ${redactIP(clientIP)}`);
+        return { ok: false, response: json(403, { error: 'Access denied: Unauthorized IP' }) };
+      }
+
       if (requireManager && !isManager) return { ok: false, response: json(403, { error: 'Manager access required' }) };
 
       return { ok: true, via: 'pin', user: { email, id: payload.staffId }, role: staff.role };
@@ -152,6 +165,13 @@ async function authorize(event, options = {}) {
     }
 
     const isManager = staff.role === 'manager' || staff.role === 'admin';
+
+    // Deferred IP check: if IP was blocked and bypass was requested, enforce now for non-managers
+    if (ipCheckDeferred && !isManager) {
+      console.error(`[IP BLOCKED] Non-manager JWT user from unauthorized IP: ${redactIP(clientIP)}`);
+      return { ok: false, response: json(403, { error: 'Access denied: Unauthorized IP' }) };
+    }
+
     if (requireManager && !isManager) {
       console.error(`[AUTH BLOCKED] Staff attempted manager action: ${email}`);
       return { ok: false, response: json(403, { error: 'Manager access required' }) };

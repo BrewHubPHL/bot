@@ -1,5 +1,6 @@
 const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
+const { createHash } = require('crypto');
 const { authorize } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 
@@ -71,6 +72,13 @@ exports.handler = async (event) => {
     }
 
     // 6. Create Terminal Checkout
+    // Deterministic idempotency key: prevents duplicate charges on retry
+    // Same orderId + deviceId always produces the same key
+    const idempotencyKey = createHash('sha256')
+      .update(`${orderId}:terminal:${terminalDeviceId}`)
+      .digest('hex')
+      .slice(0, 32);
+
     const response = await client.terminal.checkouts.create({
       checkout: {
         amountMoney: {
@@ -86,7 +94,7 @@ exports.handler = async (event) => {
         },
         referenceId: orderId // Links Square transaction to Supabase order ID
       },
-      idempotencyKey: require('crypto').randomBytes(12).toString('hex')
+      idempotencyKey
     });
 
     return {

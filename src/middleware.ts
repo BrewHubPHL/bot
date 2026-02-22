@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
  * HttpOnly + Secure + SameSite=Strict.
  */
 
-const OPS_PATHS = ["/kds", "/pos", "/scanner", "/manager", "/staff-hub"];
+const OPS_PATHS = ["/kds", "/pos", "/scanner", "/manager", "/staff-hub", "/admin"];
 
 function isOpsRoute(pathname: string): boolean {
   // Match /kds, /pos, /scanner, /manager (Next.js removes the (ops) group prefix)

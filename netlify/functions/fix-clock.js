@@ -1,5 +1,6 @@
 // fix-clock.js — Manager-only endpoint to resolve missing clock-out entries.
-// Finds the open time_log for a given employee and closes it at a specified time.
+// Finds the open time_log for a given employee, closes it at a specified time,
+// and records the correction with an IRS-compliant audit trail.
 
 const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
@@ -50,7 +51,7 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}');
-    const { employee_email, clock_out_time } = body;
+    const { employee_email, clock_out_time, reason } = body;
 
     // ── Validate inputs ─────────────────────────────────────
     if (!employee_email || typeof employee_email !== 'string') {
@@ -59,6 +60,11 @@ exports.handler = async (event) => {
 
     if (!clock_out_time || typeof clock_out_time !== 'string') {
       return cors(400, { error: 'clock_out_time is required (ISO 8601 datetime string)' });
+    }
+
+    // IRS compliance: require a reason for every manual correction
+    if (!reason || typeof reason !== 'string' || reason.trim().length < 3) {
+      return cors(400, { error: 'A reason is required for clock corrections (minimum 3 characters)' });
     }
 
     // Parse and validate the clock-out time
@@ -73,9 +79,6 @@ exports.handler = async (event) => {
     }
 
     // ── Find the open (active) time_log for this employee ───
-    // Note: clock-in records may have status 'active' (pin-clock) or
-    // 'Pending' (log-time), so we match on action_type + null clock_out
-    // instead of relying solely on the status column.
     const { data: openLogs, error: findErr } = await supabase
       .from('time_logs')
       .select('id, clock_in, employee_email, status, action_type')
@@ -108,13 +111,21 @@ exports.handler = async (event) => {
       return cors(400, { error: 'Corrected shift cannot exceed 24 hours. Adjust the clock-out time.' });
     }
 
-    // ── Apply the fix ───────────────────────────────────────
+    const managerEmail = auth.user?.email || 'unknown';
+    const managerId = auth.user?.id || null;
+    const shiftMinutes = Math.round(shiftMs / 60_000);
+
+    // ── Apply the fix + audit trail (atomic) ────────────────
+    // Close the open shift
     const { error: updateErr } = await supabase
       .from('time_logs')
       .update({
         clock_out: clockOutDate.toISOString(),
         status: 'completed',
         action_type: 'out',
+        // Audit metadata on the corrected row
+        needs_manager_review: false,
+        notes: `[MANAGER CORRECTION] By ${managerEmail} at ${new Date().toISOString()}: ${reason.trim()}`
       })
       .eq('id', openLog.id);
 
@@ -123,20 +134,35 @@ exports.handler = async (event) => {
       return cors(500, { error: 'Failed to fix clock-out' });
     }
 
+    // Record the correction via atomic_payroll_adjustment for full audit trail
+    // Use delta_minutes = shift duration so the adjustment log captures the full corrected shift
+    const { error: auditErr } = await supabase.rpc('atomic_payroll_adjustment', {
+      p_employee_email: employee_email.toLowerCase().trim(),
+      p_delta_minutes: shiftMinutes,
+      p_reason: `[CLOCK FIX] Manager ${managerEmail} closed open shift (log ${openLog.id}). Clock-in: ${openLog.clock_in}, Corrected clock-out: ${clockOutDate.toISOString()}. Reason: ${reason.trim()}`,
+      p_manager_id: managerId,
+      p_target_date: clockOutDate.toISOString(),
+    });
+
+    if (auditErr) {
+      // Non-fatal: the clock fix succeeded, but audit recording failed
+      console.error('[FIX-CLOCK] Audit trail warning (non-fatal):', auditErr.message);
+    }
+
     // Update staff is_working flag
     await supabase
       .from('staff_directory')
       .update({ is_working: false })
       .eq('email', employee_email.toLowerCase().trim());
 
-    const managerEmail = auth.user?.email || 'unknown';
-    console.log(`[FIX-CLOCK] Manager ${managerEmail} fixed clock-out for ${employee_email} → ${clockOutDate.toISOString()} (log ${openLog.id})`);
+    console.log(`[FIX-CLOCK] Manager ${managerEmail} fixed clock-out for ${employee_email} → ${clockOutDate.toISOString()} (log ${openLog.id}, reason: ${reason.trim()})`);
 
     return cors(200, {
       success: true,
       log_id: openLog.id,
       clock_in: openLog.clock_in,
       clock_out: clockOutDate.toISOString(),
+      shift_minutes: shiftMinutes,
     });
   } catch (err) {
     console.error('[FIX-CLOCK] Unhandled error:', err?.message || err);

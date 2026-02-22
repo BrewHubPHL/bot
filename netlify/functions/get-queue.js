@@ -6,6 +6,7 @@
  * No auth required — intended for a lobby/counter display screen.
  */
 const { createClient } = require('@supabase/supabase-js');
+const { publicBucket } = require('./_token-bucket');
 
 exports.handler = async (event) => {
   const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
@@ -17,6 +18,19 @@ exports.handler = async (event) => {
 
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
+  }
+
+  // Per-IP rate limiting
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = publicBucket.consume('queue:' + clientIp);
+  if (!ipLimit.allowed) {
+    return {
+      statusCode: 429,
+      headers: { ...headers, 'Retry-After': String(Math.ceil(ipLimit.retryAfterMs / 1000)) },
+      body: JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
+    };
   }
 
   if (event.httpMethod !== 'GET') {

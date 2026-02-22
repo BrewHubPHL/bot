@@ -77,4 +77,10 @@ const ttsBucket = createTokenBucket({ capacity: 10, refillRate: 2, refillInterva
 const chatBucket = createTokenBucket({ capacity: 8, refillRate: 1, refillIntervalMs: 1000 });
 const orderBucket = createTokenBucket({ capacity: 3, refillRate: 1, refillIntervalMs: 5000 });
 
-module.exports = { createTokenBucket, ttsBucket, chatBucket, orderBucket };
+// Public endpoints: 30 requests per IP per 60s (generous for legit browsing)
+const publicBucket = createTokenBucket({ capacity: 30, refillRate: 1, refillIntervalMs: 2000 });
+
+// Merch checkout: 5 payment attempts per IP per 30s
+const merchPayBucket = createTokenBucket({ capacity: 5, refillRate: 1, refillIntervalMs: 6000 });
+
+module.exports = { createTokenBucket, ttsBucket, chatBucket, orderBucket, publicBucket, merchPayBucket };

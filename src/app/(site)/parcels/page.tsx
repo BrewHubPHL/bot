@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
 export default function ParcelsPage() {
@@ -8,30 +8,39 @@ export default function ParcelsPage() {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+
+  // Require Supabase JWT — redirect unauthenticated users
+  useEffect(() => {
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.email) {
+        // Not authenticated — redirect to portal login
+        window.location.href = "/portal?redirect=/parcels";
+        return;
+      }
+      setUserEmail(session.user.email);
+      setAuthChecking(false);
+    }
+    checkAuth();
+  }, []);
 
   async function handleLookup(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setResults([]);
-    if (!query) {
-      setError("Please enter your email or unit number.");
+    if (!userEmail) {
+      setError("You must be logged in to search parcels.");
       return;
     }
     setLoading(true);
 
-    // Sanitize query: strip PostgREST filter operators and wildcards to prevent injection
-    const sanitized = query.replace(/[.,()\\"*%_]/g, "").trim();
-    if (sanitized.length < 3) {
-      setError("Please enter at least 3 characters.");
-      setLoading(false);
-      return;
-    }
-
-    // Search parcels by email or unit number (safe: operators stripped above)
+    // Only search parcels belonging to the authenticated user's email
     const { data, error: fetchError } = await supabase
       .from("parcels")
       .select("id, tracking_number, carrier, recipient_name, unit_number, status, received_at, picked_up_at")
-      .or(`recipient_phone.ilike.%${sanitized}%,recipient_name.ilike.%${sanitized}%,unit_number.ilike.%${sanitized}%,recipient_email.ilike.%${sanitized}%,tracking_number.ilike.%${sanitized}%`)
+      .ilike("recipient_email", userEmail)
       .order("received_at", { ascending: false })
       .limit(20);
     if (fetchError) {
@@ -40,6 +49,14 @@ export default function ParcelsPage() {
       setResults(data || []);
     }
     setLoading(false);
+  }
+
+  if (authChecking) {
+    return (
+      <main className="max-w-2xl mx-auto px-4 py-10 text-stone-900 bg-white rounded-md shadow-md">
+        <p className="text-center text-stone-500 py-20">Verifying your identity…</p>
+      </main>
+    );
   }
 
   return (
@@ -51,18 +68,11 @@ export default function ParcelsPage() {
         </div>
         <Link href="/" className="text-stone-500 hover:text-stone-900">Home</Link>
       </header>
-      <h1 className="font-playfair text-2xl mb-4">Parcel Pickup &amp; Package Hub</h1>
-      <p className="mb-6 text-stone-600">Pick up packages at BrewHub PHL in Point Breeze, South Philadelphia (19146). Secure parcel holding, delivery acceptance, and mailbox rentals. Your neighborhood package hub.</p>
-      <form onSubmit={handleLookup} className="mb-6 flex gap-2">
-        <input
-          type="text"
-          placeholder="Enter your email, name, or unit #"
-          className="flex-1 p-3 border border-stone-200 rounded"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-        />
-        <button type="submit" className="bg-stone-900 text-white px-4 py-2 rounded font-bold" disabled={loading}>
-          {loading ? "Searching..." : "Lookup"}
+      <h1 className="font-playfair text-2xl mb-4">Your Parcels</h1>
+      <p className="mb-6 text-stone-600">Viewing parcels for <strong>{userEmail}</strong>. Pick up packages at BrewHub PHL in Point Breeze, South Philadelphia (19146).</p>
+      <form onSubmit={handleLookup} className="mb-6">
+        <button type="submit" className="bg-stone-900 text-white px-6 py-3 rounded font-bold w-full" disabled={loading}>
+          {loading ? "Loading..." : "Load My Parcels"}
         </button>
       </form>
       {error && <div className="bg-red-100 text-red-800 p-3 rounded mb-4">{error}</div>}

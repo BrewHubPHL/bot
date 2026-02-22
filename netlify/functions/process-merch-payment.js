@@ -1,8 +1,9 @@
 const { SquareClient, SquareEnvironment } = require('square');
 const { createClient } = require('@supabase/supabase-js');
-const { randomUUID } = require('crypto');
+const { randomUUID, createHmac } = require('crypto');
 const { checkQuota } = require('./_usage');
 const { requireCsrfHeader } = require('./_csrf');
+const { merchPayBucket } = require('./_token-bucket');
 
 const square = new SquareClient({
   token: process.env.SQUARE_PRODUCTION_TOKEN,
@@ -14,11 +15,18 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// Allowed origins for payment requests
+const ALLOWED_ORIGINS = [
+  process.env.SITE_URL || 'https://brewhubphl.com',
+  'https://brewhubphl.com',
+  'https://www.brewhubphl.com',
+].filter(Boolean);
+
 exports.handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com',
-    'Access-Control-Allow-Headers': 'Content-Type, X-BrewHub-Action',
+    'Access-Control-Allow-Headers': 'Content-Type, X-BrewHub-Action, Authorization',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   };
 
@@ -35,7 +43,34 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  // Rate limiting
+  // Origin validation — reject requests not originating from our site
+  const origin = (event.headers['origin'] || '').replace(/\/$/, '');
+  const referer = (event.headers['referer'] || '');
+  const isValidOrigin = ALLOWED_ORIGINS.some(allowed =>
+    origin === allowed || referer.startsWith(allowed)
+  );
+  // Allow localhost for development
+  const isLocalDev = origin.includes('localhost') || referer.includes('localhost');
+  if (!isValidOrigin && !isLocalDev) {
+    console.warn(`[MERCH-PAY] Rejected: origin=${origin} referer=${referer}`);
+    return { statusCode: 403, headers, body: JSON.stringify({ error: 'Invalid request origin' }) };
+  }
+
+  // Per-IP rate limiting — prevent payment abuse from a single source
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = merchPayBucket.consume(clientIp);
+  if (!ipLimit.allowed) {
+    console.warn(`[MERCH-PAY] IP rate limited: ${clientIp}`);
+    return {
+      statusCode: 429,
+      headers: { ...headers, 'Retry-After': String(Math.ceil(ipLimit.retryAfterMs / 1000)) },
+      body: JSON.stringify({ error: 'Too many payment attempts. Please wait a moment.' }),
+    };
+  }
+
+  // Daily quota rate limiting
   const isUnderLimit = await checkQuota('square_checkout');
   if (!isUnderLimit) {
     return { 

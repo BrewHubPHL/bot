@@ -29,8 +29,11 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return { ...csrfBlock, headers: { ...csrfBlock.headers, ...corsHeaders } };
 
-  // Authenticate using centralized authorize() — requires PIN token
-  const auth = await authorize(event, { requirePin: true });
+  // Authenticate using centralized authorize() — requires PIN token.
+  // allowManagerIPBypass: managers/admins can clock from any network
+  // (e.g., checking stats from ThinkPad at home). Non-managers are
+  // still IP-gated by authorize() via ALLOWED_IPS.
+  const auth = await authorize(event, { requirePin: true, allowManagerIPBypass: true });
   if (!auth.ok) {
     return { ...auth.response, headers: { ...auth.response.headers, ...corsHeaders } };
   }
@@ -46,116 +49,89 @@ exports.handler = async (event) => {
       };
     }
 
-    const staffEmail = auth.user.email;
-    const now = new Date().toISOString();
+    // ── IP ENFORCEMENT (with manager bypass) ───────────────────
+    // The centralized authorize() already enforces ALLOWED_IPS for
+    // all staff. For clock operations specifically, we add an extra
+    // layer: managers/admins can clock from ANY IP (off-network stats
+    // check from ThinkPad, etc.), but baristas/staff must be on-site.
+    const ip = event.headers['x-nf-client-connection-ip']
+      || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+      || 'unknown';
 
-    if (action === 'in') {
-      // Check if already clocked in
-      const { data: openLog } = await supabase
-        .from('time_logs')
-        .select('id')
-        .eq('employee_email', staffEmail)
-        .eq('status', 'active')
-        .is('clock_out', null)
-        .limit(1);
+    const isManagerRole = auth.role === 'manager' || auth.role === 'admin';
 
-      if (openLog && openLog.length > 0) {
+    if (!isManagerRole) {
+      // Double-check IP for non-manager clock operations
+      const allowedRaw = process.env.ALLOWED_IPS || '';
+      const allowedIPs = allowedRaw.split(',').map(s => s.trim()).filter(Boolean);
+      const LOCAL_IPS = ['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1'];
+      const isLocal = LOCAL_IPS.includes(ip);
+      const isWildcard = allowedRaw.trim() === '*';
+
+      if (allowedIPs.length > 0 && !isLocal && !isWildcard && !allowedIPs.includes(ip)) {
+        console.warn(`[PIN-CLOCK] IP blocked for non-manager clock: ${ip}`);
         return {
-          statusCode: 409,
+          statusCode: 403,
           headers: corsHeaders,
-          body: JSON.stringify({ error: 'Already clocked in. Clock out first.' })
+          body: JSON.stringify({ error: 'Clock operations are only available from the shop network.' })
         };
       }
+    }
 
-      // Insert clock-in record
-      const { error: insertErr } = await supabase
-        .from('time_logs')
-        .insert({
-          employee_email: staffEmail,
-          action_type: 'in',
-          clock_in: now,
-          status: 'active',
-        });
-
-      if (insertErr) {
-        console.error('[PIN-CLOCK] Insert error:', insertErr);
-        return {
-          statusCode: 500,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: 'Failed to clock in' })
-        };
+    // ── CALL ATOMIC RPC ────────────────────────────────────────
+    // atomic_staff_clock handles:
+    //   • IP allowlist enforcement (manager bypass built in)
+    //   • Idempotency (already clocked in/out → success, no duplicate row)
+    //   • Atomic time_logs INSERT/UPDATE + staff_directory.is_working toggle
+    //   • 16h shift flag for manager review
+    const { data: result, error: rpcError } = await supabase.rpc(
+      'atomic_staff_clock',
+      {
+        p_staff_id: auth.user.id,
+        p_action:   action,
+        p_ip:       ip,
       }
+    );
 
-      // Update is_working flag
-      await supabase
-        .from('staff_directory')
-        .update({ is_working: true })
-        .eq('email', staffEmail);
-
-      console.log(`[PIN-CLOCK] ${staffEmail} clocked IN`);
+    if (rpcError) {
+      console.error('[PIN-CLOCK] RPC error:', rpcError);
       return {
-        statusCode: 200,
+        statusCode: 500,
         headers: corsHeaders,
-        body: JSON.stringify({ success: true, action: 'in', time: now })
+        body: JSON.stringify({ error: 'Clock operation failed' })
       };
     }
 
-    if (action === 'out') {
-      // Find the active clock-in entry
-      const { data: activeLog, error: findErr } = await supabase
-        .from('time_logs')
-        .select('id, clock_in')
-        .eq('employee_email', staffEmail)
-        .eq('status', 'active')
-        .is('clock_out', null)
-        .order('clock_in', { ascending: false })
-        .limit(1);
+    // RPC returns { success, action, time, error, warning, is_working }
+    const row = result;
+    if (!row || !row.success) {
+      // Map specific RPC error codes to HTTP statuses
+      const errCode = row?.error_code;
+      const httpStatus = errCode === 'IP_BLOCKED' ? 403
+        : errCode === 'ALREADY_CLOCKED_IN' || errCode === 'NOT_CLOCKED_IN' ? 409
+        : 422;
 
-      if (findErr) {
-        console.error('[PIN-CLOCK] Find error:', findErr);
-        return {
-          statusCode: 500,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: 'Failed to find active shift' })
-        };
-      }
-
-      if (!activeLog || activeLog.length === 0) {
-        return {
-          statusCode: 409,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: 'Not currently clocked in.' })
-        };
-      }
-
-      // Update with clock_out time
-      const { error: updateErr } = await supabase
-        .from('time_logs')
-        .update({ clock_out: now, status: 'completed', action_type: 'out' })
-        .eq('id', activeLog[0].id);
-
-      if (updateErr) {
-        console.error('[PIN-CLOCK] Update error:', updateErr);
-        return {
-          statusCode: 500,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: 'Failed to clock out' })
-        };
-      }
-
-      // Update is_working flag
-      await supabase
-        .from('staff_directory')
-        .update({ is_working: false })
-        .eq('email', staffEmail);
-
-      console.log(`[PIN-CLOCK] ${staffEmail} clocked OUT`);
       return {
-        statusCode: 200,
+        statusCode: httpStatus,
         headers: corsHeaders,
-        body: JSON.stringify({ success: true, action: 'out', time: now })
+        body: JSON.stringify({ error: row?.error || 'Clock operation failed' })
       };
     }
+
+    console.log(`[PIN-CLOCK] ${auth.user.email} clocked ${action.toUpperCase()}${row.warning ? ` (${row.warning})` : ''}`);
+
+    return {
+      statusCode: 200,
+      headers: corsHeaders,
+      body: JSON.stringify({
+        success: true,
+        action: row.action,
+        time: row.time,
+        is_working: row.is_working,
+        ...(row.warning ? { warning: row.warning } : {}),
+      })
+    };
+
   } catch (err) {
     console.error('[PIN-CLOCK] Error:', err);
     return {

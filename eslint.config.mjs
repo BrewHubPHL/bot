@@ -10,7 +10,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    "netlify/**",
+    // netlify/** no longer ignored — serverless functions are now linted
   ]),
 ]);
 

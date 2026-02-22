@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 /* ─── Existing manager components ────────────────────────── */
-import StatsGrid from "@/app/(site)/components/manager/StatsGrid";
+import DashboardOverhaul from "@/app/(site)/components/manager/DashboardOverhaul";
 import RecentActivity from "@/app/(site)/components/manager/RecentActivity";
 import CatalogManager from "@/app/(site)/components/manager/CatalogManager";
 import PayrollSection from "@/app/(site)/components/manager/PayrollSection";
@@ -96,7 +96,7 @@ export default function ManagerDashboard() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         {activeTab === "overview" && (
           <div className="space-y-2">
-            <StatsGrid />
+            <DashboardOverhaul />
             <ReceiptRoll />
             <RecentActivity />
           </div>

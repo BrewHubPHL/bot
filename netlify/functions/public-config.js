@@ -1,5 +1,6 @@
 // Public config endpoint for client-side Square SDK
 // Only exposes values that are safe to be public
+const { publicBucket } = require('./_token-bucket');
 
 // --- Strict CORS allowlist ---
 const ALLOWED_ORIGINS = [
@@ -24,6 +25,19 @@ exports.handler = async (event) => {
 
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
+  }
+
+  // Per-IP rate limiting
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = publicBucket.consume('config:' + clientIp);
+  if (!ipLimit.allowed) {
+    return {
+      statusCode: 429,
+      headers: { ...headers, 'Retry-After': String(Math.ceil(ipLimit.retryAfterMs / 1000)) },
+      body: JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
+    };
   }
 
   return {

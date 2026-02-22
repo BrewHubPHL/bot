@@ -212,7 +212,10 @@ exports.handler = async (event) => {
           name: matchedStaff.full_name || matchedStaff.name,
           email: matchedStaff.email,
           role: matchedStaff.role,
-          is_working: matchedStaff.is_working,
+          // DECOUPLED: Login never implies clock-in. Everyone starts Off-Duty.
+          // The real is_working flag is set ONLY by an explicit clock-in action
+          // via pin-clock.js → atomic_staff_clock RPC.
+          is_working: false,
         },
       }),
     };
