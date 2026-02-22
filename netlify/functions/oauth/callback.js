@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { SquareClient, SquareEnvironment } = require('square');
+const { oauthBucket } = require('../_token-bucket');
 
 // Initialize Supabase using your production environment variables
 const supabase = createClient(
@@ -25,6 +26,15 @@ function safeCompare(a, b) {
 }
 
 exports.handler = async (event) => {
+  // Per-IP rate limit on OAuth callback
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = oauthBucket.consume('oauth-cb:' + clientIp);
+  if (!ipLimit.allowed) {
+    return { statusCode: 429, body: JSON.stringify({ error: 'Too many requests.' }) };
+  }
+
   // Extract the authorization code and state sent by Square
   const { code, state } = event.queryStringParameters || {};
 

@@ -3,6 +3,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { randomUUID } = require('crypto');
 const { checkQuota } = require('./_usage');
 const { requireCsrfHeader } = require('./_csrf');
+const { merchPayBucket } = require('./_token-bucket');
 
 const square = new SquareClient({
   token: process.env.SQUARE_PRODUCTION_TOKEN,
@@ -22,7 +23,16 @@ exports.handler = async (event) => {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   };
 
-  // Wallet Protection: Rate limit public checkout creation
+  // Per-IP burst rate limit (prevents single IP from burning daily quota)
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = merchPayBucket.consume('checkout:' + clientIp);
+  if (!ipLimit.allowed) {
+    return { statusCode: 429, headers: { ...corsHeaders, 'Retry-After': String(Math.ceil(ipLimit.retryAfterMs / 1000)) }, body: 'Too many checkout requests. Please slow down.' };
+  }
+
+  // Daily quota limit: prevent Denial-of-Wallet
   const isUnderLimit = await checkQuota('square_checkout');
   if (!isUnderLimit) {
     return { statusCode: 429, headers: corsHeaders, body: "Too many checkout requests. Please try again in a few minutes." };

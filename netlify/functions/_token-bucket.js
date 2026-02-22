@@ -83,4 +83,10 @@ const publicBucket = createTokenBucket({ capacity: 30, refillRate: 1, refillInte
 // Merch checkout: 5 payment attempts per IP per 30s
 const merchPayBucket = createTokenBucket({ capacity: 5, refillRate: 1, refillIntervalMs: 6000 });
 
-module.exports = { createTokenBucket, ttsBucket, chatBucket, orderBucket, publicBucket, merchPayBucket };
+// Form submissions (applications, customer creation): 3 per IP per 60s
+const formBucket = createTokenBucket({ capacity: 3, refillRate: 1, refillIntervalMs: 20000 });
+
+// OAuth flow: 5 per IP per 60s (prevent state-flooding)
+const oauthBucket = createTokenBucket({ capacity: 5, refillRate: 1, refillIntervalMs: 12000 });
+
+module.exports = { createTokenBucket, ttsBucket, chatBucket, orderBucket, publicBucket, merchPayBucket, formBucket, oauthBucket };

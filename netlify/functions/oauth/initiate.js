@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const { oauthBucket } = require('../_token-bucket');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -10,6 +11,15 @@ const SQUARE_APP_ID = process.env.SQUARE_APP_ID;
 const SQUARE_AUTHORIZE_URL = 'https://connect.squareup.com/oauth2/authorize';
 
 exports.handler = async (event) => {
+  // Per-IP rate limit on OAuth initiation
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = oauthBucket.consume('oauth-init:' + clientIp);
+  if (!ipLimit.allowed) {
+    return { statusCode: 429, body: JSON.stringify({ error: 'Too many requests. Please slow down.' }) };
+  }
+
   // Only managers should be starting OAuth — require auth header
   const authHeader = event.headers?.authorization;
   if (!authHeader) {

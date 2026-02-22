@@ -22,6 +22,7 @@ exports.handler = async (event) => {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': corsOrigin(event),
         'Vary': 'Origin',
+        'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
     };
 
     // Handle CORS preflight

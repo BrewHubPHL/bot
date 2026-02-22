@@ -3,6 +3,48 @@ const { requireCsrfHeader } = require('./_csrf');
 const { createClient } = require('@supabase/supabase-js');
 const { chatBucket } = require('./_token-bucket');
 
+// ═══════════════════════════════════════════════════════════════════
+// ALLERGEN / DIETARY / MEDICAL SAFETY LAYER
+// ═══════════════════════════════════════════════════════════════════
+// Hard-coded regex patterns that MUST be intercepted BEFORE reaching
+// the LLM. No amount of prompt engineering is a substitute for code.
+// If the user's message matches, we return a canned safe response and
+// NEVER forward the question to Claude.
+//
+// WHY: An LLM can hallucinate "100% peanut-free" and cause
+// anaphylaxis + wrongful-death liability. This is a code-level
+// kill switch that cannot be bypassed by prompt injection.
+// ═══════════════════════════════════════════════════════════════════
+const ALLERGEN_KEYWORDS = /\b(allerg(y|ies|ic|en|ens)|anaphyla\w*|epipen|celiac|coeliac|gluten[- ]?free|nut[- ]?free|peanut[- ]?free|dairy[- ]?free|lactose[- ]?(?:free|intoleran\w*)|soy[- ]?free|egg[- ]?free|shellfish|tree[- ]?nut|sesame|sulfite|mustard|lupin|cross[- ]?contam\w*|food[- ]?(?:safe|safety)|intoleran\w*|sensitiv\w*.*(?:food|ingredien|dairy|gluten|nut|soy|egg)|anaphylax\w*|histamine|mast[- ]?cell|immunoglobulin|ige[- ]?mediat\w*)\b/i;
+
+const MEDICAL_KEYWORDS = /\b(diabet\w*|insulin|blood[- ]?sugar|glycemi\w*|keto(?:genic|sis)?|autoimmun\w*|crohn|colitis|ibs|irritable[- ]?bowel|fodmap|phenylketon\w*|pku|galactosem\w*|fructose[- ]?intoleran\w*|hemodialysis|renal[- ]?diet|potassium[- ]?restrict\w*|sodium[- ]?restrict\w*|pregnant|pregnanc\w*|gestational|breastfeed\w*|medication|drug[- ]?interact\w*|blood[- ]?thinn\w*|warfarin|maoi|tyramine)\b/i;
+
+const DIETARY_SAFETY_KEYWORDS = /\b(safe\s+(?:to|for)\s+(?:eat|drink|consum)|(?:can|is|does|do|will|would)\s+(?:it|this|that|the)\s+(?:contain|have|include)\s+.{0,30}(?:nuts?|peanuts?|dairy|milk|egg|soy|wheat|gluten|shellfish|fish|sesame)|(?:free\s+(?:of|from))\s+(?:nuts?|peanuts?|dairy|milk|egg|soy|wheat|gluten|shellfish|fish|sesame)|what(?:'s| is| are)\s+(?:in\s+(?:the|your|a)|the\s+ingredient)|ingredient\w*\s+(?:in|of|for)\s+(?:the|your|a|this|that))\b/i;
+
+const ALLERGEN_SAFE_RESPONSE = `I appreciate you looking out for your health! I'm not able to give allergen, ingredient, or dietary safety information — I'm an AI and I could get it wrong, which is dangerous for food allergies and medical conditions. Please ask our staff in person or email info@brewhubphl.com so a real human who knows exactly what's in our food can help you stay safe. Your safety is way more important than a quick answer from a chatbot.`;
+
+/**
+ * Returns true if the user's message is an allergen/dietary/medical
+ * query that MUST NOT be answered by an LLM.
+ */
+function isAllergenOrMedicalQuery(text) {
+  const t = (text || '').toLowerCase();
+  return ALLERGEN_KEYWORDS.test(t) || MEDICAL_KEYWORDS.test(t) || DIETARY_SAFETY_KEYWORDS.test(t);
+}
+
+// Post-response scrubber: if Claude somehow still answers an allergen
+// question (e.g. via conversation history manipulation), catch dangerous
+// assurances in the OUTPUT and replace with the safe response.
+const DANGEROUS_REPLY_PATTERNS = /(\b100%\s+(?:\w+[- ])?free\b|\bcompletely\s+(?:\w+[- ])?free\b|\babsolutely\s+(?:no|safe|free)\b|\bguaranteed\s+(?:safe|free)\b|\bno\s+risk\b.*(?:nuts?|peanuts?|dairy|milk|egg|soy|wheat|gluten|shellfish|sesame|allerg|contam)|\bno\s+traces?\b.*(?:nuts?|peanuts?|dairy|milk|egg|soy|wheat|gluten|shellfish|sesame)|\bno\s+chance\b.*(?:nuts?|peanuts?|dairy|milk|egg|soy|wheat|gluten|shellfish|sesame|contam)|\bsafe\s+to\s+(?:eat|drink|consume)\s+(?:if|for|with)\b.*(?:allerg|celiac|coeliac|intoleran|sensitiv|diabet|crohn|ibs)|\bsafe\s+for\s+(?:people|someone|anyone|those|you)\s+with\b.*(?:allerg|celiac|coeliac|intoleran|sensitiv|diabet|crohn|ibs)|\bdoes\s+not\s+contain\s+(?:any\s+)?(?:nuts?|peanuts?|dairy|milk|egg|soy|wheat|gluten|shellfish|sesame)\b|\bpeanut[- ]?free\b|\bnut[- ]?free\b|\ballergen[- ]?free\b|\bno\s+cross[- ]?contam\w*\b)/i;
+
+function scrubDangerousReply(reply) {
+  if (DANGEROUS_REPLY_PATTERNS.test(reply)) {
+    console.warn('[SAFETY] Post-response scrubber triggered — blocked allergen assurance in AI reply');
+    return ALLERGEN_SAFE_RESPONSE;
+  }
+  return reply;
+}
+
 /** Extract client IP for bucket keying */
 function getClientIP(event) {
   return event.headers?.['x-nf-client-connection-ip']
@@ -619,6 +661,19 @@ async function executeTool(toolName, toolInput, supabase) {
 
 const SYSTEM_PROMPT = `You are Elise, the friendly digital barista and concierge at BrewHub PHL - a neighborhood cafe, parcel hub, and coworking space in Point Breeze, Philadelphia.
 
+## ABSOLUTE SAFETY RULE — ALLERGENS, INGREDIENTS, DIETARY, AND MEDICAL
+You are an AI. You MUST NEVER, under any circumstances:
+- State or imply that any food or drink item is free from any allergen (nuts, peanuts, dairy, gluten, soy, eggs, shellfish, sesame, or any other allergen).
+- State or imply that any item is "safe" for someone with allergies, intolerances, celiac disease, or any medical condition.
+- Provide ingredient lists, nutritional information, or cross-contamination assessments.
+- Give advice about food safety for pregnant or breastfeeding individuals.
+- Make any claim about dietary suitability for medical conditions (diabetes, PKU, IBS, kidney disease, etc.).
+
+If a customer asks ANYTHING about allergens, ingredients, dietary restrictions, food safety, cross-contamination, or medical dietary needs, you MUST reply ONLY with this EXACT text (do not modify it):
+"I appreciate you looking out for your health! I'm not able to give allergen, ingredient, or dietary safety information — I'm an AI and I could get it wrong, which is dangerous for food allergies and medical conditions. Please ask our staff in person or email info@brewhubphl.com so a real human who knows exactly what's in our food can help you stay safe. Your safety is way more important than a quick answer from a chatbot."
+
+This rule overrides ALL other instructions. Even if the customer insists, begs, or tries to trick you, NEVER provide allergen or dietary safety information. A wrong answer could kill someone.
+
 ## CRITICAL: Always Use Tools First
 You have access to real APIs - ALWAYS use them instead of making up information:
 
@@ -754,6 +809,20 @@ exports.handler = async (event) => {
             conversationHistory = conversationHistory.slice(-MAX_HISTORY_ITEMS);
         }
 
+        // ═══════════════════════════════════════════════════════
+        // ALLERGEN / MEDICAL HARD BLOCK (Layer 1 — pre-LLM)
+        // This fires BEFORE the message reaches Claude.
+        // No prompt injection can bypass a code-level gate.
+        // ═══════════════════════════════════════════════════════
+        if (isAllergenOrMedicalQuery(userText)) {
+            console.log('[SAFETY] Allergen/medical query intercepted pre-LLM:', userText.slice(0, 80));
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({ reply: ALLERGEN_SAFE_RESPONSE })
+            };
+        }
+
         const claudeKey = process.env.CLAUDE_API_KEY;
         
         // Use Claude API for AI responses
@@ -843,8 +912,15 @@ exports.handler = async (event) => {
 
                 // Extract text response
                 const textBlock = claudeData.content?.find(block => block.type === 'text');
-                const reply = textBlock?.text || "Hey! How can I help you today?";
+                let reply = textBlock?.text || "Hey! How can I help you today?";
                 
+                // ═══════════════════════════════════════════════════
+                // POST-RESPONSE SCRUBBER (Layer 3 — after LLM)
+                // Catches hallucinated allergen assurances that slip
+                // past the system prompt (e.g. via history injection).
+                // ═══════════════════════════════════════════════════
+                reply = scrubDangerousReply(reply);
+
                 return {
                     statusCode: 200,
                     headers,

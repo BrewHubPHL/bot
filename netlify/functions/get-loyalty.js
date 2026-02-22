@@ -12,6 +12,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { checkQuota } = require('./_usage');
+const { publicBucket } = require('./_token-bucket');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -53,7 +54,16 @@ exports.handler = async (event) => {
     return json(401, { success: false, error: 'Invalid or missing API key' });
   }
 
-  // Rate limit to prevent Denial-of-Wallet
+  // Per-IP burst rate limit
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = publicBucket.consume('loyalty:' + clientIp);
+  if (!ipLimit.allowed) {
+    return json(429, { success: false, error: 'Too many requests. Please slow down.' });
+  }
+
+  // Daily quota limit to prevent Denial-of-Wallet
   const hasQuota = await checkQuota('loyalty_lookup');
   if (!hasQuota) {
     return json(429, { success: false, error: 'Rate limit reached. Try again later.' });

@@ -1,10 +1,20 @@
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
+const { publicBucket } = require('./_token-bucket');
 
 exports.handler = async (event) => {
   // 1. Only allow POST requests (standard for ElevenLabs tools)
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: "Method Not Allowed" };
+  }
+
+  // Per-IP rate limit
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = publicBucket.consume('waitlist:' + clientIp);
+  if (!ipLimit.allowed) {
+    return { statusCode: 429, body: JSON.stringify({ result: 'Too many requests. Please slow down.' }) };
   }
 
   // API key authentication — reject unauthenticated calls

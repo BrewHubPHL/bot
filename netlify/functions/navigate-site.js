@@ -8,6 +8,8 @@
  * - destination: Where to navigate (menu, shop, loyalty, parcels, etc.)
  */
 
+const { publicBucket } = require('./_token-bucket');
+
 const SITE_PAGES = {
   'menu': { url: 'https://brewhubphl.com/cafe', description: 'View our cafe menu and place an order' },
   'cafe': { url: 'https://brewhubphl.com/cafe', description: 'View our cafe menu and place an order' },
@@ -58,6 +60,7 @@ function json(status, data, event) {
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       'Vary': 'Origin',
+      'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
     },
     body: JSON.stringify(data),
   };
@@ -66,6 +69,15 @@ function json(status, data, event) {
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return json(200, {}, event);
+  }
+
+  // Per-IP rate limit
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = publicBucket.consume('nav:' + clientIp);
+  if (!ipLimit.allowed) {
+    return json(429, { success: false, error: 'Too many requests.' }, event);
   }
 
   // Parse destination from query string or body

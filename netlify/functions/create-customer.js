@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { sanitizeInput } = require('./_sanitize');
+const { formBucket } = require('./_token-bucket');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -20,6 +21,15 @@ exports.handler = async (event) => {
 
   if (event.httpMethod !== 'POST') {
     return json(405, { error: 'Method Not Allowed' });
+  }
+
+  // Per-IP rate limit
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = formBucket.consume('customer:' + clientIp);
+  if (!ipLimit.allowed) {
+    return json(429, { error: 'Too many requests. Please slow down.' });
   }
 
   // CSRF protection

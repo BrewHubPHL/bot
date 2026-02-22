@@ -29,6 +29,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { checkQuota } = require('./_usage');
+const { orderBucket } = require('./_token-bucket');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -142,7 +143,19 @@ exports.handler = async (event) => {
     });
   }
 
-  // Rate limit to prevent Denial-of-Wallet
+  // Per-IP burst rate limit (prevents single IP from burning daily quota)
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const ipLimit = orderBucket.consume('ai-order:' + clientIp);
+  if (!ipLimit.allowed) {
+    return json(429, {
+      success: false,
+      error: 'Too many order requests. Please slow down.',
+    });
+  }
+
+  // Daily quota limit to prevent Denial-of-Wallet
   const hasQuota = await checkQuota('ai_order');
   if (!hasQuota) {
     return json(429, { success: false, error: 'Order rate limit reached. Try again later.' });

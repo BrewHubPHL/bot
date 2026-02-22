@@ -71,6 +71,7 @@ exports.handler = async (event) => {
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
+    'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
   };
 
   // Handle CORS preflight
