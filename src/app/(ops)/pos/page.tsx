@@ -6,7 +6,8 @@ import { useOpsSession } from "@/components/OpsGate";
 import {
   Coffee, CupSoda, Croissant, ShoppingCart, Plus, Minus, Trash2, X,
   ChevronRight, Clock, CheckCircle2, Loader2, CreditCard, Monitor,
-  AlertTriangle, RotateCcw, ScanLine, UserCheck, Ticket, Video, VideoOff
+  AlertTriangle, RotateCcw, ScanLine, UserCheck, Ticket, Video, VideoOff,
+  Gift, WifiOff, RefreshCw
 } from "lucide-react";
 
 /* ─── Types ────────────────────────────────────────────────────── */
@@ -119,6 +120,11 @@ export default function POSPage() {
   const [orderSuccess, setOrderSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Voucher redemption
+  const [voucherPhase, setVoucherPhase] = useState<"idle" | "redeeming" | "success" | "network-error" | "error">("idle");
+  const [voucherError, setVoucherError] = useState("");
+  const [voucherRetryCode, setVoucherRetryCode] = useState<string | null>(null);
+
   // Loyalty scanner
   const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomer | null>(null);
   const [loyaltyModalOpen, setLoyaltyModalOpen] = useState(false);
@@ -190,6 +196,9 @@ export default function POSPage() {
     setErrorMsg("");
     setIsSubmitting(false);
     setLoyaltyCustomer(null);
+    setVoucherPhase("idle");
+    setVoucherError("");
+    setVoucherRetryCode(null);
   }, []);
 
   /* ─── Builder panel ──────────────────────────────────────────── */
@@ -497,11 +506,131 @@ export default function POSPage() {
     }
   };
 
+  /* ─── Step 3: Use Free Drink Voucher ──────────────────────────── */
+  const handleUseVoucher = async (voucherCode?: string) => {
+    if (!createdOrderId || !loyaltyCustomer) return;
+    const code = voucherCode || loyaltyCustomer.vouchers[0]?.code;
+    if (!code) return;
+
+    setVoucherPhase("redeeming");
+    setVoucherError("");
+    setVoucherRetryCode(code);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000); // 12s timeout
+
+    try {
+      const token = getAccessToken();
+      const resp = await fetch("/.netlify/functions/redeem-voucher", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({
+          code,
+          orderId: createdOrderId,
+          managerOverride: false,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (resp.ok) {
+        // Voucher burned, order is free
+        setVoucherPhase("success");
+        setTicketPhase("paid");
+        setTerminalStatus("🎟️ Free drink applied!");
+        // Remove the redeemed voucher from local state
+        setLoyaltyCustomer((prev) =>
+          prev ? { ...prev, vouchers: prev.vouchers.filter((v) => v.code !== code) } : prev
+        );
+        setTimeout(() => {
+          setCart([]);
+          setTicketPhase("building");
+          setCreatedOrderId(null);
+          setTerminalStatus("");
+          setVoucherPhase("idle");
+          setVoucherRetryCode(null);
+        }, 4000);
+        haptic("success");
+        return;
+      }
+
+      const body = await resp.json().catch(() => ({}));
+
+      // ALREADY_REDEEMED → the first request DID succeed, response just got lost.
+      // Treat as success (idempotent by hash — no double burn).
+      if (body.code === "ALREADY_REDEEMED") {
+        setVoucherPhase("success");
+        setTicketPhase("paid");
+        setTerminalStatus("🎟️ Free drink applied! (confirmed on retry)");
+        setLoyaltyCustomer((prev) =>
+          prev ? { ...prev, vouchers: prev.vouchers.filter((v) => v.code !== code) } : prev
+        );
+        setTimeout(() => {
+          setCart([]);
+          setTicketPhase("building");
+          setCreatedOrderId(null);
+          setTerminalStatus("");
+          setVoucherPhase("idle");
+          setVoucherRetryCode(null);
+        }, 4000);
+        haptic("success");
+        return;
+      }
+
+      // DAILY_LIMIT — actionable, no retry
+      if (body.code === "DAILY_LIMIT") {
+        setVoucherPhase("error");
+        setVoucherError(body.error || "Daily limit reached (3 per day)");
+        haptic("error");
+        return;
+      }
+
+      // Other server error
+      setVoucherPhase("error");
+      setVoucherError(body.error || "Voucher redemption failed");
+      haptic("error");
+    } catch (err: unknown) {
+      clearTimeout(timeout);
+      // AbortError (timeout) or TypeError (offline) → network issue
+      const isNetwork =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof TypeError);
+
+      if (isNetwork) {
+        setVoucherPhase("network-error");
+        setVoucherError("Connection lost. The voucher may have been applied — tap Retry to check.");
+        haptic("error");
+      } else {
+        setVoucherPhase("error");
+        setVoucherError(err instanceof Error ? err.message : "Redemption failed");
+        haptic("error");
+      }
+    }
+  };
+
+  const handleVoucherRetry = () => {
+    if (voucherRetryCode) handleUseVoucher(voucherRetryCode);
+  };
+
+  const dismissVoucherError = () => {
+    setVoucherPhase("idle");
+    setVoucherError("");
+    setVoucherRetryCode(null);
+  };
+
   /* ─── Reset from error ───────────────────────────────────────── */
   const handleRetry = () => {
     setTicketPhase("building");
     setErrorMsg("");
     setTerminalStatus("");
+    setVoucherPhase("idle");
+    setVoucherError("");
+    setVoucherRetryCode(null);
   };
 
   /* ─── Render ─────────────────────────────────────────────────── */
@@ -824,6 +953,69 @@ export default function POSPage() {
                 <p className="text-xs text-emerald-400 font-mono text-center mb-2">
                   Order #{createdOrderId.slice(0, 6).toUpperCase()} on KDS
                 </p>
+              )}
+
+              <button
+                onClick={handlePayOnTerminal}
+                className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+              >
+                <Monitor size={16} /> Pay on Terminal
+              </button>
+
+              {/* Use Free Drink Voucher — shown when loyalty customer has unredeemed vouchers */}
+              {loyaltyCustomer && loyaltyCustomer.vouchers.length > 0 && voucherPhase === "idle" && (
+                <button
+                  onClick={() => handleUseVoucher()}
+                  className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  <Gift size={16} /> Use Free Drink
+                </button>
+              )}
+
+              {/* Voucher redeeming spinner */}
+              {voucherPhase === "redeeming" && (
+                <div className="flex items-center justify-center gap-2 py-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                  <Loader2 size={16} className="animate-spin text-amber-400" />
+                  <span className="text-amber-300 text-xs font-semibold">Applying free drink…</span>
+                </div>
+              )}
+
+              {/* Voucher network error — retry safe (idempotent by hash) */}
+              {voucherPhase === "network-error" && (
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                    <WifiOff size={14} className="text-orange-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-orange-300">{voucherError}</p>
+                  </div>
+                  <button
+                    onClick={handleVoucherRetry}
+                    className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                  >
+                    <RefreshCw size={14} /> Retry Free Drink
+                  </button>
+                  <button
+                    onClick={dismissVoucherError}
+                    className="w-full py-2 text-xs text-stone-600 hover:text-stone-400 transition-colors text-center"
+                  >
+                    Skip — pay another way
+                  </button>
+                </div>
+              )}
+
+              {/* Voucher non-network error (daily limit, not found, etc.) */}
+              {voucherPhase === "error" && (
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                    <AlertTriangle size={14} className="text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-300">{voucherError}</p>
+                  </div>
+                  <button
+                    onClick={dismissVoucherError}
+                    className="w-full py-2 text-xs text-stone-600 hover:text-stone-400 transition-colors text-center"
+                  >
+                    Dismiss
+                  </button>
+                </div>
               )}
 
               <button

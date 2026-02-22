@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, verifyServiceSecret } = require('./_auth');
+const { checkQuota } = require('./_usage');
 
 // HTML-escape user-supplied strings to prevent injection in emails
 const escapeHtml = (s) => String(s || '')
@@ -40,6 +41,12 @@ exports.handler = async (event) => {
     // Standard auth check for staff
     const auth = await authorize(event);
     if (!auth.ok) return auth.response;
+  }
+
+  // Rate limit to prevent Denial-of-Wallet via Twilio/Resend
+  const isUnderLimit = await checkQuota('sms_email');
+  if (!isUnderLimit) {
+    return json(429, { error: 'Notification rate limit exceeded. Please try again later.' });
   }
 
   try {

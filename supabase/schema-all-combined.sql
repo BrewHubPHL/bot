@@ -1018,6 +1018,28 @@ CREATE POLICY "Staff can read receipts" ON receipt_queue
     )
   );
 
+-- ═══════════════════════════════════════════════════════════════
+-- COMP AUDIT (schema-34)
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS comp_audit (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id    uuid        NOT NULL,
+  staff_id    uuid        NOT NULL,
+  staff_email text        NOT NULL,
+  staff_role  text        NOT NULL,
+  amount_cents int        NOT NULL CHECK (amount_cents >= 0),
+  reason      text        NOT NULL DEFAULT '',
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_comp_audit_created ON comp_audit (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_comp_audit_staff   ON comp_audit (staff_id, created_at DESC);
+
+ALTER TABLE comp_audit ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS comp_audit_deny_all ON comp_audit;
+CREATE POLICY comp_audit_deny_all ON comp_audit FOR ALL USING (false);
+
 
 -- #############################################################################
 -- ## schema-10-payment-hardening.sql — Stale Order Cleanup
@@ -2273,16 +2295,20 @@ RETURNS void AS $$
 $$ LANGUAGE sql SECURITY DEFINER;
 
 -- 3. Hardened refund restore: use recorded cups_decremented instead of re-counting
+-- Uses FOR UPDATE row lock to prevent double-restore on concurrent refund webhooks
 CREATE OR REPLACE FUNCTION restore_inventory_on_refund(p_order_id uuid)
 RETURNS jsonb AS $$
 DECLARE
   v_cups_dec  int;
   v_was_dec   boolean;
 BEGIN
+  -- Lock the order row to prevent concurrent double-restore
   SELECT COALESCE(inventory_decremented, false),
          COALESCE(cups_decremented, 0)
   INTO v_was_dec, v_cups_dec
-  FROM orders WHERE id = p_order_id;
+  FROM orders
+  WHERE id = p_order_id
+  FOR UPDATE;            -- row-level lock prevents TOCTOU race
 
   IF NOT v_was_dec THEN
     RETURN jsonb_build_object('restored', false, 'reason', 'inventory was never decremented');
@@ -2295,11 +2321,368 @@ BEGIN
     WHERE item_name = '12oz Cups';
   END IF;
 
+  -- Clear the flag atomically under the lock
   UPDATE orders
   SET inventory_decremented = false,
       cups_decremented = 0
-  WHERE id = p_order_id;
+  WHERE id = p_order_id
+    AND inventory_decremented = true;  -- belt-and-suspenders: only first caller matches
 
   RETURN jsonb_build_object('restored', true, 'cups_restored', v_cups_dec);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- #############################################################################
+-- ## schema-35-voucher-hardening.sql — Voucher Cryptographic Hardening
+-- #############################################################################
+
+-- Ensure pgcrypto is available (already created in schema-1, but be safe)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- 1. NEW COLUMN: code_hash (hex-encoded SHA-256 of upper(code))
+ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS code_hash text;
+
+CREATE INDEX IF NOT EXISTS idx_vouchers_code_hash
+  ON vouchers (code_hash)
+  WHERE code_hash IS NOT NULL;
+
+-- 2. BACKFILL hashes for every existing row that still has plaintext
+UPDATE vouchers
+   SET code_hash = encode(digest(upper(code), 'sha256'), 'hex')
+ WHERE code_hash IS NULL
+   AND code IS NOT NULL
+   AND code != '***REDEEMED***';
+
+-- 3. SCRUB plaintext from already-redeemed vouchers
+UPDATE vouchers
+   SET code = '***REDEEMED***'
+ WHERE is_redeemed = true
+   AND code IS NOT NULL
+   AND code != '***REDEEMED***';
+
+-- 4. CIRCUIT BREAKER TABLE: voucher_redemption_fails
+CREATE TABLE IF NOT EXISTS voucher_redemption_fails (
+  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  ip_address    text        NOT NULL,
+  attempted_at  timestamptz NOT NULL DEFAULT now(),
+  code_prefix   text
+);
+
+CREATE INDEX IF NOT EXISTS idx_voucher_fails_ip_time
+  ON voucher_redemption_fails (ip_address, attempted_at DESC);
+
+ALTER TABLE voucher_redemption_fails ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Deny public access to voucher_redemption_fails"
+  ON voucher_redemption_fails;
+CREATE POLICY "Deny public access to voucher_redemption_fails"
+  ON voucher_redemption_fails FOR ALL USING (false);
+
+-- 5. REPLACE atomic_redeem_voucher (hash-first, PII claim, post-burn scrub)
+DROP FUNCTION IF EXISTS atomic_redeem_voucher(text, uuid, uuid);
+DROP FUNCTION IF EXISTS atomic_redeem_voucher(text, uuid, uuid, boolean);
+
+CREATE OR REPLACE FUNCTION atomic_redeem_voucher(
+  p_voucher_code     text,
+  p_order_id         uuid,
+  p_user_id          uuid    DEFAULT NULL,
+  p_manager_override boolean DEFAULT false
+)
+RETURNS TABLE(
+  success        boolean,
+  voucher_id     uuid,
+  error_code     text,
+  error_message  text
+) AS $$
+DECLARE
+  v_voucher        RECORD;
+  v_order          RECORD;
+  v_lock_key       bigint;
+  v_code_hash      text;
+  v_daily_redeems  int;
+  v_effective_uid  uuid;
+BEGIN
+  IF p_voucher_code IS NULL OR length(p_voucher_code) < 4 THEN
+    RETURN QUERY SELECT false, NULL::uuid, 'INVALID_CODE'::text,
+      'Voucher code too short'::text;
+    RETURN;
+  END IF;
+
+  IF length(p_voucher_code) > 100 THEN
+    RETURN QUERY SELECT false, NULL::uuid, 'INVALID_CODE'::text,
+      'Voucher code too long'::text;
+    RETURN;
+  END IF;
+
+  v_code_hash := encode(digest(upper(p_voucher_code), 'sha256'), 'hex');
+
+  SELECT id, user_id, is_redeemed
+    INTO v_voucher
+    FROM vouchers
+   WHERE code_hash = v_code_hash
+     FOR UPDATE SKIP LOCKED;
+
+  IF v_voucher IS NULL THEN
+    SELECT id, user_id, is_redeemed
+      INTO v_voucher
+      FROM vouchers
+     WHERE upper(code) = upper(p_voucher_code)
+       AND code_hash IS NULL
+       FOR UPDATE SKIP LOCKED;
+
+    IF v_voucher IS NOT NULL THEN
+      UPDATE vouchers SET code_hash = v_code_hash WHERE id = v_voucher.id;
+    END IF;
+  END IF;
+
+  IF v_voucher IS NULL THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'VOUCHER_NOT_FOUND'::text,
+      'Voucher not found or already being processed'::text;
+    RETURN;
+  END IF;
+
+  IF v_voucher.is_redeemed THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'ALREADY_REDEEMED'::text,
+      'This voucher has already been used'::text;
+    RETURN;
+  END IF;
+
+  v_lock_key := hashtext(
+    'voucher_lock:' || COALESCE(v_voucher.user_id::text, 'guest')
+  );
+  PERFORM pg_advisory_xact_lock(v_lock_key);
+
+  IF EXISTS (
+    SELECT 1 FROM refund_locks
+     WHERE user_id = v_voucher.user_id
+       AND locked_at > now() - interval '5 minutes'
+  ) THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'REFUND_IN_PROGRESS'::text,
+      'Account locked due to pending refund. Please wait.'::text;
+    RETURN;
+  END IF;
+
+  IF p_order_id IS NOT NULL THEN
+    SELECT id, user_id, status
+      INTO v_order
+      FROM orders
+     WHERE id = p_order_id;
+
+    IF v_order IS NULL THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'ORDER_NOT_FOUND'::text, 'Order not found'::text;
+      RETURN;
+    END IF;
+
+    IF v_order.status IN ('paid', 'refunded') THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'ORDER_COMPLETE'::text,
+        'Cannot apply voucher to completed order'::text;
+      RETURN;
+    END IF;
+
+    IF v_voucher.user_id IS NOT NULL
+       AND v_voucher.user_id != v_order.user_id
+    THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'OWNERSHIP_MISMATCH'::text,
+        'This voucher belongs to a different customer'::text;
+      RETURN;
+    END IF;
+  END IF;
+
+  IF v_voucher.user_id IS NULL AND p_user_id IS NOT NULL THEN
+    UPDATE vouchers SET user_id = p_user_id WHERE id = v_voucher.id;
+  END IF;
+
+  -- Daily redemption cap: 3 per user per calendar day (manager override available)
+  v_effective_uid := COALESCE(v_voucher.user_id, p_user_id);
+
+  IF v_effective_uid IS NOT NULL AND NOT p_manager_override THEN
+    SELECT count(*) INTO v_daily_redeems
+      FROM vouchers
+     WHERE user_id = v_effective_uid
+       AND is_redeemed = true
+       AND redeemed_at::date = CURRENT_DATE;
+
+    IF v_daily_redeems >= 3 THEN
+      RETURN QUERY SELECT false, NULL::uuid,
+        'DAILY_LIMIT'::text,
+        'Maximum 3 free drinks per day. Come back tomorrow!'::text;
+      RETURN;
+    END IF;
+  END IF;
+
+  UPDATE vouchers
+     SET is_redeemed       = true,
+         redeemed_at       = now(),
+         applied_to_order_id = p_order_id,
+         status            = 'redeemed',
+         code              = '***REDEEMED***'
+   WHERE id = v_voucher.id
+     AND is_redeemed = false;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, NULL::uuid,
+      'RACE_CONDITION'::text,
+      'Voucher was redeemed by another request'::text;
+    RETURN;
+  END IF;
+
+  IF p_order_id IS NOT NULL THEN
+    PERFORM set_config('app.voucher_bypass', 'true', true);
+    UPDATE orders
+       SET total_amount_cents = 0,
+           status             = 'paid',
+           notes              = COALESCE(notes || ' | ', '')
+                                || 'Voucher redeemed (hash-verified)'
+                                || CASE WHEN p_manager_override
+                                        THEN ' [MANAGER OVERRIDE]'
+                                        ELSE '' END
+     WHERE id = p_order_id;
+  END IF;
+
+  RETURN QUERY SELECT true, v_voucher.id, NULL::text, NULL::text;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION atomic_redeem_voucher(text, uuid, uuid, boolean)
+  FROM anon, authenticated;
+GRANT  EXECUTE ON FUNCTION atomic_redeem_voucher(text, uuid, uuid, boolean)
+  TO service_role;
+
+-- 6. CIRCUIT BREAKER RPCs
+DROP FUNCTION IF EXISTS check_voucher_rate_limit(text);
+CREATE OR REPLACE FUNCTION check_voucher_rate_limit(p_ip text)
+RETURNS TABLE(
+  allowed                  boolean,
+  fail_count               int,
+  lockout_remaining_seconds int
+) AS $$
+DECLARE
+  v_count   int;
+  v_oldest  timestamptz;
+  v_lockout timestamptz;
+BEGIN
+  SELECT count(*), min(attempted_at)
+    INTO v_count, v_oldest
+    FROM voucher_redemption_fails
+   WHERE ip_address = p_ip
+     AND attempted_at > now() - interval '10 minutes';
+
+  IF v_count >= 5 THEN
+    v_lockout := v_oldest + interval '10 minutes';
+    RETURN QUERY SELECT false, v_count,
+      GREATEST(0, extract(epoch FROM v_lockout - now())::int);
+    RETURN;
+  END IF;
+
+  RETURN QUERY SELECT true, v_count, 0;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+DROP FUNCTION IF EXISTS log_voucher_fail(text, text);
+CREATE OR REPLACE FUNCTION log_voucher_fail(
+  p_ip          text,
+  p_code_prefix text DEFAULT NULL
+)
+RETURNS void AS $$
+BEGIN
+  INSERT INTO voucher_redemption_fails (ip_address, code_prefix)
+  VALUES (p_ip, left(p_code_prefix, 4));
+
+  DELETE FROM voucher_redemption_fails
+   WHERE attempted_at < now() - interval '1 hour';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION check_voucher_rate_limit(text)  FROM anon, authenticated;
+GRANT  EXECUTE ON FUNCTION check_voucher_rate_limit(text)  TO service_role;
+REVOKE EXECUTE ON FUNCTION log_voucher_fail(text, text)    FROM anon, authenticated;
+GRANT  EXECUTE ON FUNCTION log_voucher_fail(text, text)    TO service_role;
+
+
+-- #############################################################################
+-- ## schema-36-security-hardening.sql — Critical security remediations
+-- #############################################################################
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- FIX 1: Profiles UPDATE — restrict writable columns via BEFORE UPDATE trigger
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION guard_profile_protected_columns()
+RETURNS trigger AS $$
+BEGIN
+  -- Only restrict end-user roles (authenticated/anon via PostgREST).
+  -- Service_role, postgres, supabase_admin, and other backend roles are trusted.
+  IF current_setting('role', true) NOT IN ('authenticated', 'anon') THEN
+    RETURN NEW;
+  END IF;
+
+  -- For authenticated/anon users: reset protected columns to their previous values
+  NEW.loyalty_points := OLD.loyalty_points;
+  NEW.is_vip         := OLD.is_vip;
+  NEW.total_orders   := OLD.total_orders;
+  NEW.barcode_id     := OLD.barcode_id;
+  NEW.created_at     := OLD.created_at;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_guard_profile_protected ON profiles;
+CREATE TRIGGER trg_guard_profile_protected
+  BEFORE UPDATE ON profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION guard_profile_protected_columns();
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- FIX 2: staff_directory SELECT — restricted view for non-manager staff
+-- ─────────────────────────────────────────────────────────────────────────────
+
+DROP VIEW IF EXISTS staff_directory_safe;
+CREATE VIEW staff_directory_safe
+  WITH (security_invoker = false)
+AS
+SELECT
+  id,
+  name,
+  full_name,
+  email,
+  role,
+  is_working,
+  created_at,
+  token_version
+  -- pin and hourly_rate are intentionally excluded
+FROM staff_directory;
+
+GRANT SELECT ON staff_directory_safe TO authenticated;
+
+DROP POLICY IF EXISTS "Staff can read all staff" ON staff_directory;
+
+DROP POLICY IF EXISTS "Managers can read all staff" ON staff_directory;
+CREATE POLICY "Managers can read all staff" ON staff_directory
+  FOR SELECT
+  USING (is_brewhub_manager());
+
+DROP POLICY IF EXISTS "Staff can read own row" ON staff_directory;
+CREATE POLICY "Staff can read own row" ON staff_directory
+  FOR SELECT
+  USING (lower(email) = lower(auth.email()));
+
+COMMENT ON VIEW staff_directory_safe IS
+  'Restricted view of staff_directory excluding pin and hourly_rate. '
+  'Use this for KDS, POS, and non-manager UIs instead of querying the table directly.';
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- FIX 3: restore_inventory_on_refund — FOR UPDATE lock
+-- (Function body already updated in schema-30 section above)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+REVOKE EXECUTE ON FUNCTION restore_inventory_on_refund(uuid) FROM anon, authenticated;

@@ -38,7 +38,7 @@ exports.handler = async (event) => {
   if (!auth.ok) return auth.response;
 
   try {
-    const { orderId, status, paymentMethod } = JSON.parse(event.body);
+    const { orderId, status, paymentMethod, reason } = JSON.parse(event.body);
 
     if (!orderId) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Missing Order ID' }) };
@@ -48,6 +48,65 @@ exports.handler = async (event) => {
     const allowedStatuses = ['paid', 'preparing', 'ready', 'completed', 'cancelled'];
     if (!status || !allowedStatuses.includes(status)) {
       return { statusCode: 400, body: JSON.stringify({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }) };
+    }
+
+    // ── COMP ORDER GUARD ─────────────────────────────────────
+    // Comps require a reason and are dollar-capped for non-managers.
+    // Every comp is logged to comp_audit for manager review.
+    const COMP_CAP_CENTS = 1500; // $15 — baristas can comp up to this
+    const isComp = paymentMethod === 'comp';
+
+    if (isComp) {
+      // Require a reason for every comp
+      const compReason = (reason || '').trim();
+      if (!compReason || compReason.length < 2) {
+        return {
+          statusCode: 400,
+          headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+          body: JSON.stringify({ error: 'A reason is required when comping an order.' }),
+        };
+      }
+
+      // Fetch order total to enforce dollar cap
+      const { data: orderCheck, error: checkErr } = await supabase
+        .from('orders')
+        .select('total_amount_cents')
+        .eq('id', orderId)
+        .single();
+
+      if (checkErr || !orderCheck) {
+        return { statusCode: 404, body: JSON.stringify({ error: 'Order not found' }) };
+      }
+
+      const orderCents = orderCheck.total_amount_cents || 0;
+      const isManager = auth.role === 'manager' || auth.role === 'admin';
+
+      // Non-managers cannot comp orders above the cap
+      if (!isManager && orderCents > COMP_CAP_CENTS) {
+        console.warn(`[COMP BLOCKED] Staff ${auth.user?.email} tried to comp $${(orderCents/100).toFixed(2)} order ${orderId} (cap: $${(COMP_CAP_CENTS/100).toFixed(2)})`);
+        return {
+          statusCode: 403,
+          headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+          body: JSON.stringify({
+            error: `Comp limit is $${(COMP_CAP_CENTS/100).toFixed(2)} for non-manager staff. Ask a manager to approve.`,
+          }),
+        };
+      }
+
+      // Write audit row (non-fatal — don't block the comp if logging fails)
+      try {
+        await supabase.from('comp_audit').insert({
+          order_id:     orderId,
+          staff_id:     auth.user?.id || null,
+          staff_email:  auth.user?.email || 'unknown',
+          staff_role:   auth.role || 'unknown',
+          amount_cents: orderCents,
+          reason:       compReason.slice(0, 500), // cap length
+        });
+        console.log(`[COMP AUDIT] ${auth.user?.email} comped order ${orderId} ($${(orderCents/100).toFixed(2)}): ${compReason}`);
+      } catch (auditErr) {
+        console.error('[COMP AUDIT] Non-fatal audit insert error:', auditErr.message);
+      }
     }
 
     // Build update payload

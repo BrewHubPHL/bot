@@ -55,7 +55,7 @@ const BARCODE_FORMATS: Record<string, RegExp> = {
   EAN_13:   /^[0-9]{13}$/,
   EAN_8:    /^[0-9]{8}$/,
   CODE_128: /^[A-Z0-9]{6,20}$/,
-  INTERNAL: /^BRW-[A-Z0-9]{6}$/,
+  INTERNAL: /^BRW-[A-Z0-9]{4}(-[A-Z0-9]{4}){0,2}$/,
 };
 
 function validateBarcode(input: string): { valid: boolean; sanitized: string | null; error: string | null } {

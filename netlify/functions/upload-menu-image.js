@@ -5,6 +5,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, sanitizedError } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -23,6 +24,10 @@ const ALLOWED_TYPES = {
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return json(204, {});
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
+
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
 
   // Manager-only: only managers can upload menu images
   const auth = await authorize(event, { requireManager: true });

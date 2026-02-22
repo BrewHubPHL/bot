@@ -104,15 +104,15 @@ exports.handler = async (event) => {
       if (shiftHours > MAX_AUTO_HOURS) {
         console.warn(`[LOG-TIME] Shift for ${employee_email} is ${shiftHours.toFixed(1)}h — flagging for review.`);
 
-        // Insert the clock-out but flag for manager review
-        const { error: flagErr } = await supabase.from('time_logs').insert([{
-          employee_email: employee_email.toLowerCase(),
-          action_type: 'out',
-          clock_in: null,
-          clock_out: now.toISOString(),
-          status: 'Pending',
-          needs_manager_review: true
-        }]);
+        // Update the existing shift row — flag for manager review
+        const { error: flagErr } = await supabase.from('time_logs')
+          .update({
+            action_type: 'out',
+            clock_out: now.toISOString(),
+            status: 'Pending',
+            needs_manager_review: true
+          })
+          .eq('id', openShift.id);
         if (flagErr) throw flagErr;
 
         // Still update is_working
@@ -133,17 +133,31 @@ exports.handler = async (event) => {
     }
 
     // 6. LOG THE TIME
-    const payload = {
-      employee_email: employee_email.toLowerCase(),
-      action_type,
-      clock_in: action_type === 'in' ? now.toISOString() : null,
-      clock_out: action_type === 'out' ? now.toISOString() : null,
-      status: 'Pending'
-    };
+    if (action_type === 'out' && openShift) {
+      // Clock-out: UPDATE the existing open shift row (not INSERT)
+      const { error: updateErr } = await supabase.from('time_logs')
+        .update({
+          action_type: 'out',
+          clock_out: now.toISOString(),
+          status: 'Pending'
+        })
+        .eq('id', openShift.id);
 
-    const { error: insertError } = await supabase.from('time_logs').insert([payload]);
+      if (updateErr) throw updateErr;
+    } else {
+      // Clock-in: INSERT a new shift row
+      const payload = {
+        employee_email: employee_email.toLowerCase(),
+        action_type,
+        clock_in: now.toISOString(),
+        clock_out: null,
+        status: 'Pending'
+      };
 
-    if (insertError) throw insertError;
+      const { error: insertError } = await supabase.from('time_logs').insert([payload]);
+
+      if (insertError) throw insertError;
+    }
 
     // 7. UPDATE is_working STATUS
     const { error: updateError } = await supabase

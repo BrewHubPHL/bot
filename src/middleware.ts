@@ -103,8 +103,19 @@ export async function middleware(request: NextRequest) {
   const result = await verifySessionToken(sessionCookie, secret);
 
   if (result.expired) {
-    // Clear the stale cookie and redirect to force re-authentication
-    const response = NextResponse.next();
+    // Clear the stale cookie and deny access (force re-authentication)
+    const accept = request.headers.get("accept") || "";
+    if (accept.includes("text/html")) {
+      // HTML request — clear cookie and allow through so OpsGate shows PIN screen
+      const response = NextResponse.next();
+      response.cookies.delete("hub_staff_session");
+      return response;
+    }
+    // Non-HTML (fetch/API) — return 401
+    const response = new NextResponse(JSON.stringify({ error: "Session expired" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
     response.cookies.delete("hub_staff_session");
     return response;
   }
@@ -129,5 +140,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/kds/:path*", "/pos/:path*", "/scanner/:path*", "/manager/:path*", "/staff-hub/:path*"],
+  matcher: ["/kds/:path*", "/pos/:path*", "/scanner/:path*", "/manager/:path*", "/staff-hub/:path*", "/admin/:path*"],
 };

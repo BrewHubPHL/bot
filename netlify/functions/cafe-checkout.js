@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { checkQuota } = require('./_usage');
 
 // HTML-escape user-supplied strings to prevent injection in emails
 const escapeHtml = (s) => String(s || '')
@@ -11,6 +12,12 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+function getClientIP(event) {
+  return event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+}
 
 // UUID v4 format check
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,9 +50,27 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  // Staff auth required
-  const auth = await authorize(event, { requirePin: true });
-  if (!auth.ok) return auth.response;
+  // ── DUAL AUTH: Staff PIN *or* Supabase customer JWT ───────
+  // 1. Try staff PIN first (POS terminal flow)
+  // 2. Fall back to Supabase JWT (online customer flow)
+  // 3. If neither, allow guest checkout with rate limiting
+  let auth = await authorize(event, { requirePin: true });
+  let authMode = 'staff';
+
+  if (!auth.ok) {
+    // Not a PIN session — try Supabase JWT (customer logged in)
+    auth = await authorize(event);
+    authMode = auth.ok ? 'customer' : 'guest';
+  }
+
+  // Guest orders: rate-limit to prevent KDS spam
+  if (authMode === 'guest') {
+    const hasQuota = await checkQuota('cafe_guest_order');
+    if (!hasQuota) {
+      console.warn(`[CAFE] Guest rate limit hit from IP ${getClientIP(event)}`);
+      return json(429, { error: 'Too many orders. Please try again later or log in to skip the wait.' });
+    }
+  }
 
   try {
     const body = JSON.parse(event.body || '{}');
@@ -182,8 +207,12 @@ exports.handler = async (event) => {
       total_amount_cents: totalCents,
     };
     // Only attach user_id / customer fields if provided (prevents null FK issues)
-    if (user_id && typeof user_id === 'string' && user_id.length > 0) orderRow.user_id = user_id;
-    if (ce && typeof ce === 'string') orderRow.customer_email = ce;
+    // For logged-in customers, auto-attach their user_id for loyalty tracking
+    const effectiveUserId = user_id || (authMode === 'customer' && auth.user?.id) || null;
+    const effectiveEmail = ce || (authMode === 'customer' && auth.user?.email) || null;
+
+    if (effectiveUserId && typeof effectiveUserId === 'string' && effectiveUserId.length > 0) orderRow.user_id = effectiveUserId;
+    if (effectiveEmail && typeof effectiveEmail === 'string') orderRow.customer_email = effectiveEmail;
     if (cn && typeof cn === 'string') orderRow.customer_name = cn;
 
     const { data: order, error: orderErr } = await supabase

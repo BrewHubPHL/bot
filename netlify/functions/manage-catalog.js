@@ -4,6 +4,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, sanitizedError } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -31,6 +32,10 @@ exports.handler = async (event) => {
       if (error) throw error;
       return json(200, { products: data || [] });
     }
+
+    // CSRF protection for write operations
+    const csrfBlock = requireCsrfHeader(event);
+    if (csrfBlock) return csrfBlock;
 
     // Parse body for write operations
     let body;

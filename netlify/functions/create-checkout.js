@@ -2,6 +2,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { randomUUID } = require('crypto');
 const { checkQuota } = require('./_usage');
+const { requireCsrfHeader } = require('./_csrf');
 
 const square = new SquareClient({
   token: process.env.SQUARE_PRODUCTION_TOKEN,
@@ -14,20 +15,47 @@ const supabase = createClient(
 );
 
 exports.handler = async (event) => {
+  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  };
+
   // Wallet Protection: Rate limit public checkout creation
   const isUnderLimit = await checkQuota('square_checkout');
   if (!isUnderLimit) {
-    return { statusCode: 429, body: "Too many checkout requests. Please try again in a few minutes." };
+    return { statusCode: 429, headers: corsHeaders, body: "Too many checkout requests. Please try again in a few minutes." };
   }
 
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': process.env.SITE_URL || 'https://brewhubphl.com' }, body: '' };
+    return { statusCode: 200, headers: corsHeaders, body: '' };
   }
   
-  if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
+  if (event.httpMethod !== 'POST') return { statusCode: 405, headers: corsHeaders, body: 'Method Not Allowed' };
+
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
 
   try {
     const { cart, user_id, customer_details } = JSON.parse(event.body);
+
+    // Security: Validate user_id against auth token if provided
+    // Prevents loyalty-point farming by spoofing another user's ID
+    let verifiedUserId = null;
+    if (user_id) {
+      const authHeader = event.headers?.authorization || event.headers?.Authorization;
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      if (token) {
+        const { data: userData, error: authErr } = await supabase.auth.getUser(token);
+        if (!authErr && userData?.user?.id === user_id) {
+          verifiedUserId = user_id;
+        }
+      }
+      // If user_id was provided but unverifiable, silently drop it
+      // (guest checkout still works, just no loyalty association)
+    }
 
     if (!cart || cart.length === 0) return { statusCode: 400, body: "Cart empty" };
 
@@ -92,7 +120,7 @@ exports.handler = async (event) => {
       .from('orders')
       .insert([{
         id: orderId,
-        user_id: user_id || null,
+        user_id: verifiedUserId,
         customer_name: customer_details?.name,
         customer_email: customer_details?.email,
         total_amount_cents: totalCents,
@@ -106,7 +134,7 @@ exports.handler = async (event) => {
     // We assume your 'cart' items have { name, modifiers }
     const tickets = cart.map(item => ({
       order_id: orderId, // The Link
-      customer_id: user_id || null,
+      customer_id: verifiedUserId,
       drink_name: item.name,
       customizations: item.modifiers || {}, 
       status: 'pending',

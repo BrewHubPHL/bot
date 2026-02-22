@@ -13,15 +13,22 @@ const client = new SquareClient({
   environment: SquareEnvironment.Production,
 });
 
-// Helper: Generate unique voucher codes like BRW-K8L9P2
+// Helper: Generate high-entropy voucher codes like BRW-K8L9-P2XW-7NHT
+// 12 random bytes → 12 chars from a 32-char alphabet → 60 bits of entropy.
+// Old format (BRW-XXXXXX, 6 chars) had only ~30 bits — brute-forceable.
 const generateVoucherCode = () => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No 'I' or '1' to avoid confusion
-  const bytes = crypto.randomBytes(6);
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(bytes[i] % chars.length);
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars (no I/1/O/0)
+  const bytes = crypto.randomBytes(12);
+  let raw = '';
+  for (let i = 0; i < 12; i++) {
+    raw += chars.charAt(bytes[i] % chars.length);
   }
-  return `BRW-${code}`;
+  return `BRW-${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+};
+
+// Helper: SHA-256 hash of a voucher code (matches Postgres digest(upper(code),'sha256'))
+const hashVoucherCode = (code) => {
+  return crypto.createHash('sha256').update(code.toUpperCase()).digest('hex');
 };
 
 // Helper: Sanitize strings for logging/DB to prevent injection or massive logs
@@ -181,6 +188,8 @@ async function handleRefund(body, supabase) {
   const refund = body.data?.object?.refund;
   const paymentId = refund?.payment_id;
   const refundId = refund?.id;
+  // Extract the actual refund amount from Square's payload (in cents)
+  const refundAmountCents = Number(refund?.amount_money?.amount || 0);
 
   if (!paymentId) {
     return { statusCode: 200, body: "No payment ID in refund event" };
@@ -207,10 +216,10 @@ async function handleRefund(body, supabase) {
   }
 
   try {
-    // 1. Find the original order
+    // 1. Find the original order (include amounts for proportional loyalty revocation)
     const { data: order, error: findError } = await supabase
       .from('orders')
-      .select('id, user_id, status, inventory_decremented')
+      .select('id, user_id, status, inventory_decremented, paid_amount_cents, total_amount_cents')
       .eq('payment_id', paymentId)
       .single();
 
@@ -235,17 +244,26 @@ async function handleRefund(body, supabase) {
     
     console.log(`[REFUND] Order ${order.id} marked as refunded.`);
 
-    // 4. Revoke Loyalty Points via RPC
+    // 4. Revoke Loyalty Points via RPC — pass the ACTUAL refund amount
+    //    Priority: Square refund amount > order paid_amount > order total
+    //    This closes the buy/refund loyalty-farming loop where the old
+    //    default of 500 cents under-revoked points on large orders.
     if (order.user_id) {
-       // We use a dedicated RPC function to safely decrement without going below zero
-       const { error: rpcError } = await supabase.rpc('decrement_loyalty_on_refund', { 
-         target_user_id: order.user_id 
+       const revokeAmountCents = refundAmountCents
+         || order.paid_amount_cents
+         || order.total_amount_cents
+         || 0;
+
+       const { data: revokeResult, error: rpcError } = await supabase.rpc('decrement_loyalty_on_refund', { 
+         target_user_id: order.user_id,
+         amount_cents: revokeAmountCents
        });
        
        if (rpcError) {
          console.error('[REFUND] Failed to revoke points:', rpcError);
        } else {
-         console.log(`[REFUND] Points revoked for user ${order.user_id}`);
+         const deducted = revokeResult?.[0]?.points_deducted ?? revokeResult?.points_deducted ?? '?';
+         console.log(`[REFUND] Points revoked for user ${order.user_id}: ${deducted} pts (from ${revokeAmountCents}¢)`);
        }
 
        // 5. Delete the most recent unused voucher (The "Infinite Coffee" prevention)
@@ -465,6 +483,7 @@ async function handlePaymentUpdate(body, supabase) {
       
       try {
         const newVoucherCode = generateVoucherCode();
+        const codeHash = hashVoucherCode(newVoucherCode);
         
         // Generate QR Code
         const qrDataUrl = await QRCode.toDataURL(newVoucherCode, {
@@ -473,16 +492,19 @@ async function handlePaymentUpdate(body, supabase) {
           margin: 2
         });
         
-        // Save Voucher to DB
+        // Save Voucher to DB — store SHA-256 hash for verification.
+        // Plaintext code is kept temporarily so the customer's QR works;
+        // it is scrubbed to '***REDEEMED***' at burn time by the RPC.
         await supabase.from('vouchers').insert([{ 
           user_id: userId, 
           code: newVoucherCode,
+          code_hash: codeHash,
           qr_code_base64: qrDataUrl,
           status: 'active',
           created_at: new Date().toISOString()
         }]);
 
-        console.log(`[VOUCHER] Generated ${newVoucherCode} for user ${userId}`);
+        console.log(`[VOUCHER] Generated ${newVoucherCode.slice(0, 8)}*** for user ${userId}`);
       } catch (qrError) {
         console.error("[QR ERROR] Failed to generate voucher:", qrError);
       }

@@ -464,7 +464,7 @@ async function executeTool(toolName, toolInput, supabase) {
     }
 
     if (toolName === 'cancel_order') {
-        const { order_id, order_number } = toolInput;
+        const { order_id, order_number, _authed_user } = toolInput;
 
         if (!order_id && !order_number) {
             return { success: false, result: 'I need either the order ID or the 4-character order number to cancel.' };
@@ -475,7 +475,7 @@ async function executeTool(toolName, toolInput, supabase) {
         }
 
         try {
-            let query = supabase.from('orders').select('id, status, customer_name, total_amount_cents');
+            let query = supabase.from('orders').select('id, status, customer_name, customer_email, user_id, total_amount_cents');
 
             if (order_id) {
                 query = query.eq('id', order_id);
@@ -488,6 +488,20 @@ async function executeTool(toolName, toolInput, supabase) {
 
             if (findErr || !orders) {
                 return { success: false, result: `Could not find order ${order_number || order_id}. It may have already been removed.` };
+            }
+
+            // Security: verify the caller owns this order
+            // Authenticated users can only cancel their own orders
+            if (_authed_user) {
+                const ownsOrder = (orders.user_id && orders.user_id === _authed_user.id)
+                    || (orders.customer_email && _authed_user.email
+                        && orders.customer_email.toLowerCase() === _authed_user.email.toLowerCase());
+                if (!ownsOrder) {
+                    return { success: false, result: 'You can only cancel your own orders. If you need help, ask a barista!' };
+                }
+            } else {
+                // Anonymous users cannot cancel orders — require sign-in
+                return { success: false, result: 'You need to be signed in to cancel orders. Head to brewhubphl.com/portal to log in, or ask a barista for help!' };
             }
 
             if (orders.status === 'cancelled') {

@@ -35,7 +35,7 @@ interface MerchProduct {
   checkout_url: string | null;
   is_active: boolean;
   sort_order: number;
-  category: string | null;
+  category: "menu" | "merch" | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -110,7 +110,7 @@ function ProductCard({
         <div className="relative w-full aspect-square bg-[#222] flex items-center justify-center overflow-hidden">
           {product.image_url ? (
             <img
-              src={product.image_url}
+              src={safeImageUrl(product.image_url)}
               alt={product.name}
               className="w-full h-full object-cover"
               loading="lazy"
@@ -227,6 +227,7 @@ function ImageDropZone({
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
+            "X-BrewHub-Action": "true",
           },
           body: JSON.stringify({
             fileBase64: base64,
@@ -249,7 +250,7 @@ function ImageDropZone({
         setUploading(false);
       }
     },
-    [uploading, onUploaded, setUploading],
+    [uploading, onUploaded, setUploading, token],
   );
 
   const onDrop = useCallback(
@@ -366,6 +367,7 @@ export default function CatalogManager() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
         },
         body: JSON.stringify({ id: productId }),
       });
@@ -388,8 +390,9 @@ export default function CatalogManager() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
         },
-        body: JSON.stringify({ id: productId, updates: { archived_at: null, is_active: true } }),
+        body: JSON.stringify({ id: productId, archived_at: null, is_active: true }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -411,6 +414,7 @@ export default function CatalogManager() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
         },
         body: JSON.stringify({ id: productId, is_active: newStatus }),
       });
@@ -489,6 +493,7 @@ export default function CatalogManager() {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
+            "X-BrewHub-Action": "true",
           },
           body: JSON.stringify({ id: form.id, ...row }),
         });
@@ -499,6 +504,7 @@ export default function CatalogManager() {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
+            "X-BrewHub-Action": "true",
           },
           body: JSON.stringify(row),
         });
@@ -599,7 +605,7 @@ export default function CatalogManager() {
         return (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {filtered.map((p) => {
-              const pSafeImg = p.image_url;
+              const pSafeImg = safeImageUrl(p.image_url);
               return viewArchived ? (
                 <div
                   key={p.id}
@@ -607,7 +613,7 @@ export default function CatalogManager() {
                 >
                   <div className="relative w-full aspect-square bg-[#222] flex items-center justify-center overflow-hidden">
                     {pSafeImg ? (
-                      // snyk:ignore DOM-based Cross-site Scripting (XSS) — image_url is sanitised at ingestion via safeImageUrl(), only https:// URLs pass
+                      // deepcode ignore DOMXSS: image_url is sanitised at ingestion via safeImageUrl(), only https:// URLs pass
                       <img src={pSafeImg} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
                     ) : (
                       <span className="text-5xl select-none" aria-hidden>☕</span>

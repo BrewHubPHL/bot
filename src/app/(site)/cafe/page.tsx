@@ -1,7 +1,8 @@
 "use client";
-import Link from "next/link";;
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import type { User } from "@supabase/supabase-js";
 
 interface MenuItem {
   id: string;
@@ -21,6 +22,44 @@ export default function CafePage() {
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [orderStatus, setOrderStatus] = useState("");
+
+  // Auth state
+  const [user, setUser] = useState<User | null>(null);
+  const [loyaltyPoints, setLoyaltyPoints] = useState<number | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  /* ─── Auth bootstrap (mirrors portal pattern) ────────────── */
+  useEffect(() => {
+    const bootstrap = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        setUser(session.user);
+        loadLoyalty(session.user.id);
+      }
+      setAuthChecked(true);
+    };
+    bootstrap();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        setUser(session.user);
+        loadLoyalty(session.user.id);
+      } else {
+        setUser(null);
+        setLoyaltyPoints(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const loadLoyalty = useCallback(async (userId: string) => {
+    const { data } = await supabase
+      .from("profiles")
+      .select("loyalty_points")
+      .eq("id", userId)
+      .maybeSingle();
+    if (data) setLoyaltyPoints(data.loyalty_points ?? 0);
+  }, []);
 
   useEffect(() => {
     async function fetchMenu() {
@@ -57,12 +96,21 @@ export default function CafePage() {
       return;
     }
     try {
+      // Build headers — attach Supabase JWT when logged in for loyalty tracking
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-BrewHub-Action": "true",
+      };
+      if (user) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers["Authorization"] = `Bearer ${session.access_token}`;
+        }
+      }
+
       const resp = await fetch("/.netlify/functions/cafe-checkout", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-BrewHub-Action": "true",
-        },
+        headers,
         body: JSON.stringify({
           items: cart.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
         }),
@@ -70,7 +118,13 @@ export default function CafePage() {
       const result = await resp.json();
       if (!resp.ok) throw new Error(result.error || "Order failed");
       setCart([]);
-      setOrderStatus("Order placed! Thank you.");
+      setOrderStatus(
+        user
+          ? "Order placed! You earned loyalty points toward a free drink. ☕"
+          : "Order placed! Thank you."
+      );
+      // Refresh loyalty points after successful order
+      if (user) loadLoyalty(user.id);
     } catch (err: any) {
       setOrderStatus(err.message || "Order failed. Try again.");
     }
@@ -92,6 +146,43 @@ export default function CafePage() {
       </header>
       <h1 className="font-playfair text-2xl mb-4">Order Coffee &amp; Drinks</h1>
       <p className="mb-6 text-stone-600">Order coffee, espresso, and drinks at BrewHub Cafe in Point Breeze, Philadelphia. Fast pickup for locals in 19146.</p>
+
+      {/* ── Loyalty Banner ─────────────────────────────────── */}
+      {authChecked && !user && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+          <span className="text-2xl">☕</span>
+          <div>
+            <p className="font-semibold text-amber-900 text-sm">Earn free drinks with every order!</p>
+            <p className="text-xs text-amber-700 mt-1">
+              <Link href="/portal" className="underline font-bold hover:text-amber-900">Log in</Link> or{" "}
+              <Link href="/portal" className="underline font-bold hover:text-amber-900">create an account</Link> to
+              earn loyalty points. Every $1 = 1 point. Hit 500 points and your next drink is on us!
+            </p>
+          </div>
+        </div>
+      )}
+
+      {authChecked && user && (
+        <div className="mb-6 bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🎉</span>
+            <div>
+              <p className="font-semibold text-emerald-900 text-sm">Welcome back, {user.email?.split("@")[0]}!</p>
+              {loyaltyPoints !== null && (
+                <p className="text-xs text-emerald-700 mt-0.5">
+                  You have <strong>{loyaltyPoints} pts</strong> — {Math.max(0, 500 - (loyaltyPoints % 500))} more to your next free drink.
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            className="text-xs text-emerald-600 hover:text-red-500 underline ml-4"
+          >
+            Sign out
+          </button>
+        </div>
+      )}
       <div className="mb-8">
         <h2 className="font-bold mb-2">Menu</h2>
         {loading ? (

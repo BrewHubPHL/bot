@@ -11,34 +11,10 @@ exclude:
 # ignores vulnerabilities until expiry date; change duration by modifying expiry date
 ignore:
   javascript/HardcodedNonCryptoSecret:
-    - public/js/auth.js:
-        reason: Supabase Anon Key is public by design - security is via RLS
-        expires: 2027-02-10T00:00:00.000Z
-    - public/login.html:
-        reason: Supabase Anon Key is public by design - security is via RLS
-        expires: 2027-02-10T00:00:00.000Z
-    - public/portal.html:
-        reason: Supabase Anon Key is public by design - security is via RLS
-        expires: 2027-02-10T00:00:00.000Z
-    - public/resident.html:
-        reason: Supabase Anon Key is public by design - security is via RLS
-        expires: 2027-02-10T00:00:00.000Z
-    - rewards/index.html:
-        reason: Supabase Anon Key is public by design - security is via RLS
-        expires: 2027-02-10T00:00:00.000Z
-    - src/app/page.tsx:
-        reason: Supabase Anon Key is public by design - security is via RLS
-        expires: 2027-02-10T00:00:00.000Z
     - src/lib/supabase.ts:
         reason: Supabase Anon Key is public by design - security is via RLS
         expires: 2027-02-10T00:00:00.000Z
   javascript/DOMXSS:
-    - public/shop.html:
-        reason: All user input is sanitized via escapeHtml() before innerHTML
-        expires: 2027-02-10T00:00:00.000Z
-    - src/app/portal/page.tsx:
-        reason: Email is escaped before document.write() - sanitized
-        expires: 2027-02-10T00:00:00.000Z
     - src/app/(site)/components/manager/CatalogManager.tsx:
         reason: >-
           image_url is sanitised at ingestion via safeImageUrl() — only https://
@@ -47,8 +23,8 @@ ignore:
   d01f98de-a9fe-4483-8722-88ef56dc1298:
     - '*':
         reason: >-
-          False positive: image_url sanitised at ingestion via safeImageUrl(),
-          only https:// URLs pass
+          False positive: image_url is sanitised at ingestion and render via
+          safeImageUrl() which only permits https:// URLs
         expires: 2027-02-21T00:00:00.000Z
-        created: 2026-02-21T21:22:04.885Z
+        created: 2026-02-22T01:37:19.269Z
 patch: {}

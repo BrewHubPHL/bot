@@ -18,12 +18,22 @@ export default function ParcelsPage() {
       return;
     }
     setLoading(true);
-    // Search parcels by email or unit number
+
+    // Sanitize query: strip PostgREST filter operators to prevent injection
+    const sanitized = query.replace(/[.,()\\"]/g, "").trim();
+    if (sanitized.length < 3) {
+      setError("Please enter at least 3 characters.");
+      setLoading(false);
+      return;
+    }
+
+    // Search parcels by email or unit number (safe: operators stripped above)
     const { data, error: fetchError } = await supabase
       .from("parcels")
       .select("id, tracking_number, carrier, recipient_name, unit_number, status, received_at, picked_up_at")
-      .or(`recipient_phone.ilike.%${query}%,recipient_name.ilike.%${query}%,unit_number.ilike.%${query}%,recipient_email.ilike.%${query}%,tracking_number.ilike.%${query}%`)
-      .order("received_at", { ascending: false });
+      .or(`recipient_phone.ilike.%${sanitized}%,recipient_name.ilike.%${sanitized}%,unit_number.ilike.%${sanitized}%,recipient_email.ilike.%${sanitized}%,tracking_number.ilike.%${sanitized}%`)
+      .order("received_at", { ascending: false })
+      .limit(20);
     if (fetchError) {
       setError(fetchError.message);
     } else {
