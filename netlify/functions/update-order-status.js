@@ -196,6 +196,43 @@ exports.handler = async (event) => {
       };
     }
 
+    // ── ALREADY-PAST-PAID GUARD ──────────────────────────────
+    // If the POS sends 'paid' but the order already moved past paid
+    // (e.g. a race where the order was auto-advanced to 'preparing'),
+    // treat it as success and still queue a receipt if needed.
+    const PAST_PAID_STATUSES = ['preparing', 'ready', 'completed'];
+    if (status === 'paid' && PAST_PAID_STATUSES.includes(currentOrder.status)) {
+      // Generate receipt if cash/comp (may have been missed on the earlier transition)
+      if (paymentMethod && ['cash', 'comp'].includes(paymentMethod)) {
+        try {
+          const { data: existingReceipt } = await supabase
+            .from('receipt_queue').select('id').eq('order_id', orderId).limit(1).single();
+          if (!existingReceipt) {
+            const { data: fullOrder } = await supabase
+              .from('orders').select('*').eq('id', orderId).single();
+            const { data: lineItems } = await supabase
+              .from('coffee_orders').select('drink_name, price').eq('order_id', orderId);
+            if (fullOrder) {
+              const receiptText = generateReceiptString(fullOrder, lineItems || []);
+              await queueReceipt(supabase, orderId, receiptText);
+            }
+          }
+        } catch (receiptErr) {
+          console.error('[RECEIPT] Non-fatal receipt backfill error:', receiptErr.message);
+        }
+      }
+      return {
+        statusCode: 200,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          success: true,
+          idempotent: true,
+          alreadyPastPaid: true,
+          order: [currentOrder],
+        }),
+      };
+    }
+
     const allowed = VALID_TRANSITIONS[currentOrder.status] || [];
     if (!allowed.includes(status)) {
       return {

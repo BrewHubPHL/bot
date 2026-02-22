@@ -1,5 +1,5 @@
 "use client";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 
 const API_BASE =
@@ -382,6 +382,17 @@ export default function PayrollSection() {
     fetchPayroll();
     fetchSummary();
   }, [fetchPayroll, fetchSummary]);
+
+  // ---- Auto-refresh payroll every 30s ---------------------------
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (!token) return;
+    pollRef.current = setInterval(() => {
+      fetchPayroll();
+      fetchSummary();
+    }, 30_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [token, fetchPayroll, fetchSummary]);
 
   // ---- Summary totals -------------------------------------------
   const totalRegular = payroll.reduce((s, r) => s + r.regularHours, 0);

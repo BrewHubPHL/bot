@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Netlify does not support the Next.js Image Optimization API at the edge.
+  // Without this, <Image src="/logo.png"> triggers the built-in /_next/image
+  // handler which 500s on Netlify's serverless runtime every few seconds.
+  images: { unoptimized: true },
   // Map server-only env vars to NEXT_PUBLIC_ so they're available client-side.
   // Netlify sets SUPABASE_URL / SUPABASE_ANON_KEY; Next.js needs the NEXT_PUBLIC_ prefix.
   env: {
