@@ -9,6 +9,38 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ── Postgres SQLSTATE → human-readable map ─────────────────
+const PG_ERROR_MAP = {
+  '23505': { status: 409, label: 'UNIQUE_VIOLATION',    msg: 'Duplicate record conflict' },
+  '23503': { status: 409, label: 'FK_VIOLATION',        msg: 'Referenced record does not exist' },
+  '23514': { status: 422, label: 'CHECK_VIOLATION',     msg: 'Value violates a database constraint' },
+  '23502': { status: 422, label: 'NOT_NULL_VIOLATION',  msg: 'A required field is missing' },
+  '40001': { status: 503, label: 'SERIALIZATION_FAIL',  msg: 'Transaction conflict — please retry' },
+  '40P01': { status: 503, label: 'DEADLOCK',            msg: 'Database deadlock detected — please retry' },
+  '55P03': { status: 503, label: 'LOCK_TIMEOUT',        msg: 'Order is being processed by another request. Please retry.' },
+  '57014': { status: 503, label: 'STATEMENT_TIMEOUT',   msg: 'Database operation timed out — please retry' },
+  'P0001': { status: 422, label: 'RAISE_EXCEPTION',     msg: 'Business rule violation' },
+  'PGRST': { status: 500, label: 'POSTGREST_ERROR',     msg: 'Database gateway error' },
+};
+
+/**
+ * Extract the SQLSTATE from a Supabase/PostgREST error object.
+ * PostgREST puts it in `code`; sometimes it's buried in `message` or `details`.
+ */
+function extractSqlState(err) {
+  if (!err) return null;
+  // Direct code field (Supabase JS v2 surfaces this)
+  if (err.code && /^[A-Z0-9]{5}$/.test(err.code)) return err.code;
+  // PostgREST wraps PG errors in the message
+  const m = (err.message || '').match(/\b([A-Z0-9]{5})\b/);
+  if (m) return m[1];
+  // Hint or details
+  const d = (err.details || err.hint || '');
+  const m2 = d.match(/\b([A-Z0-9]{5})\b/);
+  if (m2) return m2[1];
+  return null;
+}
+
 /**
  * Generate a short, URL-safe error reference ID for log correlation.
  * Format: ERR-<timestamp_hex>-<random_hex>  (e.g. ERR-1a2b3c4d-f7e8)
@@ -38,6 +70,36 @@ async function logSyncError(source, detail, extra = {}) {
     console.error(`[LOG-SYNC] Failed to write sync log ${errorId}:`, logErr.message);
   }
   return errorId;
+}
+
+/**
+ * Build an error response from a Postgres/Supabase error, logging it
+ * to system_sync_logs and returning a mapped HTTP status + errorId.
+ */
+async function buildPgErrorResponse(err, orderId, authEmail, corsHeaders) {
+  const sqlState = extractSqlState(err) || 'UNKNOWN';
+  const mapped = PG_ERROR_MAP[sqlState] || PG_ERROR_MAP[sqlState.substring(0, 5)] || null;
+
+  const errorId = await logSyncError(
+    'update_order_status',
+    `Order ${orderId}: [${sqlState}] ${err.message || String(err)}`,
+    { sqlState, email: authEmail }
+  );
+
+  const httpStatus = mapped ? mapped.status : 500;
+  const userMsg = mapped ? mapped.msg : 'Internal server error';
+  const retryable = httpStatus === 503;
+
+  console.error(`[UPDATE-ORDER] ${errorId} [${sqlState}]:`, err.message || err);
+
+  const headers = { ...corsHeaders };
+  if (retryable) headers['Retry-After'] = '2';
+
+  return {
+    statusCode: httpStatus,
+    headers,
+    body: JSON.stringify({ error: userMsg, errorId, sqlState }),
+  };
 }
 
 exports.handler = async (event) => {
@@ -93,12 +155,13 @@ exports.handler = async (event) => {
     }
 
     // ── STATUS TRANSITION STATE MACHINE ──────────────────────
-    // Enforce valid transitions to prevent going backwards or from terminal states
+    // Enforce valid transitions to prevent going backwards or from terminal states.
+    // Self-transitions (e.g. ready→ready) are idempotent — handled below.
     const VALID_TRANSITIONS = {
       pending:   ['paid', 'preparing', 'cancelled'],
-      paid:      ['preparing', 'cancelled'],
-      preparing: ['preparing', 'ready', 'cancelled'],  // preparing→preparing: idempotent for cash after KDS tap
-      ready:     ['completed', 'cancelled'],
+      paid:      ['paid', 'preparing', 'cancelled'],
+      preparing: ['preparing', 'ready', 'cancelled'],
+      ready:     ['ready', 'completed', 'cancelled'],
       // Abandoned orders (15-min cron) can be revived by a cash/comp payment
       abandoned: ['preparing', 'cancelled'],
       // Terminal states — no transitions allowed:
@@ -118,6 +181,21 @@ exports.handler = async (event) => {
       return { statusCode: 404, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Order not found' }) };
     }
 
+    // ── GRACEFUL IDEMPOTENCY ─────────────────────────────────
+    // If the order is already in the requested state, return 200
+    // immediately — no DB write, no trigger chain, no lock risk.
+    if (currentOrder.status === status) {
+      return {
+        statusCode: 200,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          success: true,
+          idempotent: true,
+          order: [currentOrder],
+        }),
+      };
+    }
+
     const allowed = VALID_TRANSITIONS[currentOrder.status] || [];
     if (!allowed.includes(status)) {
       return {
@@ -130,12 +208,14 @@ exports.handler = async (event) => {
     }
 
     // ── COMP ORDER GUARD ─────────────────────────────────────
-    // Comps require a reason and are dollar-capped for non-managers.
-    // Every comp is logged to comp_audit for manager review.
+    // Comps require a reason, a manager/admin role check, and are
+    // dollar-capped for non-managers. Every comp is audit-logged.
     const COMP_CAP_CENTS = 1500; // $15 — baristas can comp up to this
     const isComp = paymentMethod === 'comp';
 
     if (isComp) {
+      const isManager = auth.role === 'manager' || auth.role === 'admin';
+
       // Require a reason for every comp
       const compReason = (reason || '').trim();
       if (!compReason || compReason.length < 2) {
@@ -147,7 +227,6 @@ exports.handler = async (event) => {
       }
 
       const orderCents = currentOrder.total_amount_cents || 0;
-      const isManager = auth.role === 'manager' || auth.role === 'admin';
 
       // Non-managers cannot comp orders above the cap
       if (!isManager && orderCents > COMP_CAP_CENTS) {
@@ -170,8 +249,9 @@ exports.handler = async (event) => {
           staff_role:   auth.role || 'unknown',
           amount_cents: orderCents,
           reason:       compReason.slice(0, 500), // cap length
+          is_manager:   isManager,
         });
-        console.log(`[COMP AUDIT] ${auth.user?.email} comped order ${orderId} ($${(orderCents/100).toFixed(2)}): ${compReason}`);
+        console.log(`[COMP AUDIT] ${auth.user?.email} (${auth.role}) comped order ${orderId} ($${(orderCents/100).toFixed(2)}): ${compReason}`);
       } catch (auditErr) {
         console.error('[COMP AUDIT] Non-fatal audit insert error:', auditErr.message);
       }
@@ -205,28 +285,7 @@ exports.handler = async (event) => {
     );
 
     if (rpcError) {
-      // Check if this is a lock timeout (SQLSTATE 55P03)
-      const isLockTimeout = rpcError.message && (
-        rpcError.message.includes('lock timeout') ||
-        rpcError.message.includes('55P03') ||
-        rpcError.message.includes('could not obtain lock')
-      );
-      if (isLockTimeout) {
-        const errorId = await logSyncError('update_order_status', `Lock timeout on order ${orderId}: ${rpcError.message}`, {
-          sqlState: '55P03',
-          email: auth.user?.email,
-        });
-        console.error(`[UPDATE-ORDER] Lock timeout ${errorId}:`, rpcError.message);
-        return {
-          statusCode: 503,
-          headers: { ...CORS_HEADERS, 'Retry-After': '2' },
-          body: JSON.stringify({
-            error: 'Order is being processed by another request. Please retry.',
-            errorId,
-          }),
-        };
-      }
-      throw rpcError;
+      return await buildPgErrorResponse(rpcError, orderId, auth.user?.email, CORS_HEADERS);
     }
 
     // RPC returns the updated order as a single JSON row
@@ -264,23 +323,25 @@ exports.handler = async (event) => {
     };
 
   } catch (err) {
-    // ── Log to system_sync_logs with correlation ID ────────────
+    // ── Structured error logging with SQLSTATE extraction ──────
+    const sqlState = extractSqlState(err) || err.code || null;
     const errorId = await logSyncError(
       'update_order_status',
-      err.message || String(err),
+      `[${sqlState || 'UNKNOWN'}] ${err.message || String(err)}`,
       {
-        sqlState: err.code || null,
+        sqlState,
         email: auth?.user?.email || null,
       }
     );
 
-    console.error(`[UPDATE-ORDER] ${errorId}:`, err);
+    console.error(`[UPDATE-ORDER] ${errorId} [${sqlState}]:`, err);
     return {
       statusCode: 500,
       headers: CORS_HEADERS,
       body: JSON.stringify({
         error: 'Internal server error',
         errorId,
+        sqlState,
       })
     };
   }
