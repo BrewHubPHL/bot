@@ -50,6 +50,47 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }) };
     }
 
+    // Validate UUID format
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(orderId)) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Invalid order ID format' }) };
+    }
+
+    // ── STATUS TRANSITION STATE MACHINE ──────────────────────
+    // Enforce valid transitions to prevent going backwards or from terminal states
+    const VALID_TRANSITIONS = {
+      pending:   ['paid', 'preparing', 'cancelled'],
+      paid:      ['preparing', 'cancelled'],
+      preparing: ['ready', 'cancelled'],
+      ready:     ['completed', 'cancelled'],
+      // Terminal states — no transitions allowed:
+      completed: [],
+      cancelled: [],
+      refunded:  [],
+      amount_mismatch: ['cancelled'],
+    };
+
+    const { data: currentOrder, error: lookupErr } = await supabase
+      .from('orders')
+      .select('status')
+      .eq('id', orderId)
+      .single();
+
+    if (lookupErr || !currentOrder) {
+      return { statusCode: 404, body: JSON.stringify({ error: 'Order not found' }) };
+    }
+
+    const allowed = VALID_TRANSITIONS[currentOrder.status] || [];
+    if (!allowed.includes(status)) {
+      return {
+        statusCode: 409,
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+        body: JSON.stringify({
+          error: `Cannot transition from '${currentOrder.status}' to '${status}'`,
+        }),
+      };
+    }
+
     // ── COMP ORDER GUARD ─────────────────────────────────────
     // Comps require a reason and are dollar-capped for non-managers.
     // Every comp is logged to comp_audit for manager review.
@@ -131,6 +172,15 @@ exports.handler = async (event) => {
       .select();
 
     if (error) throw error;
+
+    // Verify the update actually matched a row
+    if (!data || data.length === 0) {
+      return {
+        statusCode: 404,
+        headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
+        body: JSON.stringify({ error: 'Order not found or update had no effect' }),
+      };
+    }
 
     // Generate receipt for cash/comp payments (Square receipts handled by webhook)
     if (paymentMethod && ['cash', 'comp'].includes(paymentMethod) && data && data[0]) {

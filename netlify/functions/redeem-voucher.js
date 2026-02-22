@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, sanitizedError } = require('./_auth');
 const { checkVoucherRateLimit, logVoucherFail } = require('./_usage');
+const { redactIP } = require('./_ip-hash');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(
@@ -39,7 +40,7 @@ exports.handler = async (event) => {
   // ═══════════════════════════════════════════════════════════════════════════
   const rateResult = await checkVoucherRateLimit(clientIP);
   if (!rateResult.allowed) {
-    console.warn(`[REDEEM] IP ${clientIP} locked out (${rateResult.failCount} failures)`);
+    console.warn(`[REDEEM] IP ${redactIP(clientIP)} locked out (${rateResult.failCount} failures)`);
     return {
       statusCode: 429,
       body: JSON.stringify({

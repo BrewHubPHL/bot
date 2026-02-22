@@ -113,8 +113,3 @@ exports.handler = async (event) => {
 
   return json(200, { order: data, total_amount_cents: totalCents });
 };
-
-// ── HPP GUARD: Validate req.query.id against array type ─────────
-if (Array.isArray(event.queryStringParameters?.id)) {
-  return json(400, { error: 'Invalid parameter: id must be a single value, not an array' });
-}

@@ -53,9 +53,10 @@ exports.handler = async (event) => {
       return { statusCode: 404, body: JSON.stringify({ error: 'Order not found' }) };
     }
 
-    // 4. Prevent double-charging
-    if (order.status === 'paid') {
-      return { statusCode: 409, body: JSON.stringify({ error: 'Order already paid' }) };
+    // 4. Prevent double-charging — only pending orders can be sent to terminal
+    const POST_PAYMENT_STATUSES = ['paid', 'preparing', 'ready', 'completed', 'refunded', 'cancelled'];
+    if (POST_PAYMENT_STATUSES.includes(order.status)) {
+      return { statusCode: 409, body: JSON.stringify({ error: `Order already ${order.status} — cannot charge again` }) };
     }
 
     const amount = Number(order.total_amount_cents || 0);

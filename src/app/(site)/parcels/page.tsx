@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";;
+import Link from "next/link";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 
@@ -19,8 +19,8 @@ export default function ParcelsPage() {
     }
     setLoading(true);
 
-    // Sanitize query: strip PostgREST filter operators to prevent injection
-    const sanitized = query.replace(/[.,()\\"]/g, "").trim();
+    // Sanitize query: strip PostgREST filter operators and wildcards to prevent injection
+    const sanitized = query.replace(/[.,()\\"*%_]/g, "").trim();
     if (sanitized.length < 3) {
       setError("Please enter at least 3 characters.");
       setLoading(false);

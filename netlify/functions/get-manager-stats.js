@@ -14,7 +14,7 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return json(204, {});
   if (event.httpMethod !== 'GET') return json(405, { error: 'Method not allowed' });
 
-  const auth = await authorize(event);
+  const auth = await authorize(event, { requireManager: true });
   if (!auth.ok) return auth.response;
 
   try {

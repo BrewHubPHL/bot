@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
+const { redactIP } = require('./_ip-hash');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -82,7 +83,7 @@ exports.handler = async (event) => {
   const LOCAL_IPS = ['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1'];
   const isLocal = LOCAL_IPS.includes(ip);
   if (allowedIPs.length > 0 && !isLocal && !allowedIPs.includes(ip)) {
-    console.warn(`[PIN-LOGIN] Blocked IP: ${ip}`);
+    console.warn(`[PIN-LOGIN] Blocked IP: ${redactIP(ip)}`);
     return json(403, { error: 'PIN login is only available from the shop network' });
   }
 
@@ -144,13 +145,13 @@ exports.handler = async (event) => {
         });
         const failRow = failResult?.[0] || failResult;
         if (failRow?.locked) {
-          console.warn(`[PIN-LOGIN] IP ${ip} locked out for ${failRow.retry_after_seconds}s (DB)`);
+          console.warn(`[PIN-LOGIN] IP ${redactIP(ip)} locked out for ${failRow.retry_after_seconds}s (DB)`);
           return json(429, { error: 'Too many attempts. Try again shortly.', retryAfter: failRow.retry_after_seconds });
         }
       } catch (dbErr) {
         console.warn('[PIN-LOGIN] DB failure record failed:', dbErr.message);
       }
-      console.warn(`[PIN-LOGIN] Failed attempt from ${ip}`);
+      console.warn(`[PIN-LOGIN] Failed attempt from ${redactIP(ip)}`);
       return json(401, { error: 'Invalid PIN' });
     }
 

@@ -154,7 +154,7 @@ export default function ParcelMonitor() {
 
   /* ---- Render --------------------------------------------------- */
   return (
-    <div className="fixed inset-0 z-[9999] w-screen h-screen bg-black text-white overflow-hidden flex flex-col select-none cursor-default">
+    <div className="fixed inset-0 z-[9999] w-screen h-screen bg-black text-white overflow-hidden flex flex-col select-none cursor-default antiburn-shift monitor-4k-scale">
 
       {/* ═══════════ ERROR / STALE BANNER ═══════════ */}
       {fetchError && (
@@ -293,11 +293,31 @@ export default function ParcelMonitor() {
         <span className="font-medium text-gray-600">BrewHub PHL</span>
       </footer>
 
-      {/* Keyframe for the amber pulse on new arrivals */}
+      {/* Keyframe for the amber pulse on new arrivals + burn-in prevention */}
       <style>{`
         @keyframes rowPulse {
           0%, 100% { box-shadow: inset 0 0 0 0 rgba(245, 158, 11, 0); }
           50%      { box-shadow: inset 0 0 40px 0 rgba(245, 158, 11, 0.03); }
+        }
+        /* Burn-in prevention: subtle pixel-shift every 4 minutes.
+           Moves the entire layout 1-2px in a random-looking pattern
+           so no single pixel stays lit permanently on OLED/plasma TVs. */
+        @keyframes antiburn {
+          0%   { transform: translate(0, 0); }
+          25%  { transform: translate(1px, -1px); }
+          50%  { transform: translate(-1px, 1px); }
+          75%  { transform: translate(1px, 1px); }
+          100% { transform: translate(0, 0); }
+        }
+        .antiburn-shift {
+          animation: antiburn 240s linear infinite;
+        }
+        /* 4K scaling: when viewport width exceeds 2560px, scale up text */
+        @media (min-width: 2560px) {
+          .monitor-4k-scale { font-size: 125%; }
+        }
+        @media (min-width: 3840px) {
+          .monitor-4k-scale { font-size: 150%; }
         }
       `}</style>
     </div>

@@ -1,6 +1,14 @@
 const { checkQuota } = require('./_usage');
 const { requireCsrfHeader } = require('./_csrf');
 const { createClient } = require('@supabase/supabase-js');
+const { chatBucket } = require('./_token-bucket');
+
+/** Extract client IP for bucket keying */
+function getClientIP(event) {
+  return event.headers?.['x-nf-client-connection-ip']
+    || event.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+}
 
 // Lightweight JWT user extraction (token is validated by Supabase, not us)
 async function extractUser(event, supabase) {
@@ -161,8 +169,20 @@ const TOOLS = [
 // Execute tool calls
 async function executeTool(toolName, toolInput, supabase) {
     if (toolName === 'check_waitlist') {
-        const { email } = toolInput;
-        
+        const authedUser = toolInput._authed_user;
+
+        // IDENTITY-BOUND: Only authenticated users may check — and only their own email.
+        // Prevents unauthenticated email enumeration via prompt injection.
+        if (!authedUser) {
+            return {
+                requires_login: true,
+                result: 'You need to be logged in first to check the waitlist! Sign in at brewhubphl.com/portal'
+            };
+        }
+
+        // Force the lookup email to the JWT-verified identity — ignore AI-provided email
+        const email = authedUser.email;
+
         if (!email) {
             return { result: 'I need an email address to check the waitlist.' };
         }
@@ -300,6 +320,9 @@ async function executeTool(toolName, toolInput, supabase) {
 
             // Create order in database
             if (supabase) {
+                // IDENTITY-BOUND: Stamp the order with the authenticated user's ID
+                // so cancel_order ownership checks work and the order is linked to the account.
+                const authedUser = toolInput._authed_user;
                 const { data: order, error: orderErr } = await supabase
                     .from('orders')
                     .insert({
@@ -307,6 +330,8 @@ async function executeTool(toolName, toolInput, supabase) {
                         total_amount_cents: totalCents,
                         customer_name: customer_name || 'Voice Order',
                         notes: notes || null,
+                        ...(authedUser?.id ? { user_id: authedUser.id } : {}),
+                        ...(authedUser?.email ? { customer_email: authedUser.email } : {}),
                     })
                     .select()
                     .single();
@@ -350,18 +375,12 @@ async function executeTool(toolName, toolInput, supabase) {
     }
 
     if (toolName === 'get_loyalty_info') {
-        const { email, phone, send_sms } = toolInput;
+        const { phone, send_sms } = toolInput;
         const authedUser = toolInput._authed_user;
 
-        if (!email && !phone) {
-            if (!authedUser) {
-                return { result: 'I need you to log in first so I can look up your loyalty info! Sign in at brewhubphl.com/portal' };
-            }
-            return { result: 'I need your email or phone number to look up your loyalty info.' };
-        }
-
-        // Security: Only allow looking up your OWN info unless authenticated
-        // Anonymous users cannot enumerate other customers' PII
+        // IDENTITY-BOUND: Only authenticated users, looking up ONLY their own data.
+        // The email parameter from AI is IGNORED — we use the JWT-verified identity.
+        // This prevents cross-user loyalty enumeration via prompt injection.
         if (!authedUser) {
             return {
                 requires_login: true,
@@ -369,12 +388,19 @@ async function executeTool(toolName, toolInput, supabase) {
             };
         }
 
+        // Force lookup to the authenticated user's own email — non-overridable
+        const email = authedUser.email;
+
+        if (!email && !phone) {
+            return { result: 'I need your email or phone number to look up your loyalty info.' };
+        }
+
         try {
             let profile = null;
             let lookupEmail = email;
 
             if (supabase) {
-                // Look up by email first
+                // Look up by the authed user's verified email
                 if (email) {
                     const { data } = await supabase
                         .from('profiles')
@@ -385,7 +411,8 @@ async function executeTool(toolName, toolInput, supabase) {
                     lookupEmail = email;
                 }
 
-                // If not found and phone provided, try residents table
+                // If not found and phone provided, try residents table —
+                // but ONLY return results that match the authed user's email
                 if (!profile && phone) {
                     const cleanPhone = phone.replace(/\D/g, '').slice(-10);
                     const { data: resident } = await supabase
@@ -394,7 +421,8 @@ async function executeTool(toolName, toolInput, supabase) {
                         .or(`phone.ilike.%${cleanPhone}%,phone.ilike.%${cleanPhone.slice(-7)}%`)
                         .maybeSingle();
                     
-                    if (resident?.email) {
+                    // Cross-reference: only use phone lookup if the email matches the authed user
+                    if (resident?.email && resident.email.toLowerCase() === authedUser.email?.toLowerCase()) {
                         lookupEmail = resident.email;
                         const { data } = await supabase
                             .from('profiles')
@@ -671,6 +699,18 @@ exports.handler = async (event) => {
     // CSRF protection — prevents cross-origin abuse of chat/quota
     const csrfBlock = requireCsrfHeader(event);
     if (csrfBlock) return csrfBlock;
+
+    // Token bucket: per-IP burst protection (prevents bot spam / denial-of-wallet)
+    const ip = getClientIP(event);
+    const bucketResult = chatBucket.consume(ip);
+    if (!bucketResult.allowed) {
+        const retryAfter = Math.ceil(bucketResult.retryAfterMs / 1000);
+        return {
+            statusCode: 429,
+            headers: { ...headers, 'Retry-After': String(retryAfter) },
+            body: JSON.stringify({ reply: `Whoa, slow down! Give me ${retryAfter} seconds to catch my breath.` })
+        };
+    }
 
     // Rate limit to prevent Denial-of-Wallet attacks
     const hasQuota = await checkQuota('claude_chat');

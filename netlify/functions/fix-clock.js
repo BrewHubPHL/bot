@@ -2,7 +2,7 @@
 // Finds the open time_log for a given employee and closes it at a specified time.
 
 const { createClient } = require('@supabase/supabase-js');
-const { authorize, json, sanitizedError } = require('./_auth');
+const { authorize } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 
 const supabase = createClient(
@@ -10,13 +10,34 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+
+const cors = (code, data) => ({
+  statusCode: code,
+  headers: {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  },
+  body: JSON.stringify(data),
+});
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
-    return json(204, {});
+    return {
+      statusCode: 204,
+      headers: {
+        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      },
+      body: '',
+    };
   }
 
   if (event.httpMethod !== 'POST') {
-    return json(405, { error: 'Method not allowed' });
+    return cors(405, { error: 'Method not allowed' });
   }
 
   // CSRF protection
@@ -33,22 +54,22 @@ exports.handler = async (event) => {
 
     // ── Validate inputs ─────────────────────────────────────
     if (!employee_email || typeof employee_email !== 'string') {
-      return json(400, { error: 'employee_email is required' });
+      return cors(400, { error: 'employee_email is required' });
     }
 
     if (!clock_out_time || typeof clock_out_time !== 'string') {
-      return json(400, { error: 'clock_out_time is required (ISO 8601 datetime string)' });
+      return cors(400, { error: 'clock_out_time is required (ISO 8601 datetime string)' });
     }
 
     // Parse and validate the clock-out time
     const clockOutDate = new Date(clock_out_time);
     if (isNaN(clockOutDate.getTime())) {
-      return json(400, { error: 'clock_out_time must be a valid ISO 8601 date' });
+      return cors(400, { error: 'clock_out_time must be a valid ISO 8601 date' });
     }
 
     // Don't allow clock-out times in the future
     if (clockOutDate.getTime() > Date.now() + 60_000) {
-      return json(400, { error: 'clock_out_time cannot be in the future' });
+      return cors(400, { error: 'clock_out_time cannot be in the future' });
     }
 
     // ── Find the open (active) time_log for this employee ───
@@ -63,11 +84,11 @@ exports.handler = async (event) => {
 
     if (findErr) {
       console.error('[FIX-CLOCK] Find error:', findErr);
-      return json(500, { error: 'Failed to look up open shift' });
+      return cors(500, { error: 'Failed to look up open shift' });
     }
 
     if (!openLogs || openLogs.length === 0) {
-      return json(404, { error: 'No open clock-in found for this employee' });
+      return cors(404, { error: 'No open clock-in found for this employee' });
     }
 
     const openLog = openLogs[0];
@@ -75,13 +96,13 @@ exports.handler = async (event) => {
     // Clock-out must be after clock-in
     const clockInDate = new Date(openLog.clock_in);
     if (clockOutDate.getTime() <= clockInDate.getTime()) {
-      return json(400, { error: 'clock_out_time must be after the clock-in time' });
+      return cors(400, { error: 'clock_out_time must be after the clock-in time' });
     }
 
     // Sanity check: don't allow shifts longer than 24 hours
     const shiftMs = clockOutDate.getTime() - clockInDate.getTime();
     if (shiftMs > 24 * 60 * 60 * 1000) {
-      return json(400, { error: 'Corrected shift cannot exceed 24 hours. Adjust the clock-out time.' });
+      return cors(400, { error: 'Corrected shift cannot exceed 24 hours. Adjust the clock-out time.' });
     }
 
     // ── Apply the fix ───────────────────────────────────────
@@ -96,7 +117,7 @@ exports.handler = async (event) => {
 
     if (updateErr) {
       console.error('[FIX-CLOCK] Update error:', updateErr);
-      return json(500, { error: 'Failed to fix clock-out' });
+      return cors(500, { error: 'Failed to fix clock-out' });
     }
 
     // Update staff is_working flag
@@ -108,13 +129,14 @@ exports.handler = async (event) => {
     const managerEmail = auth.user?.email || 'unknown';
     console.log(`[FIX-CLOCK] Manager ${managerEmail} fixed clock-out for ${employee_email} → ${clockOutDate.toISOString()} (log ${openLog.id})`);
 
-    return json(200, {
+    return cors(200, {
       success: true,
       log_id: openLog.id,
       clock_in: openLog.clock_in,
       clock_out: clockOutDate.toISOString(),
     });
   } catch (err) {
-    return sanitizedError(err, 'fix-clock');
+    console.error('[FIX-CLOCK] Unhandled error:', err?.message || err);
+    return cors(500, { error: 'An error occurred. Please try again.' });
   }
 };

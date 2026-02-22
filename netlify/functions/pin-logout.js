@@ -4,6 +4,8 @@
  * Called by OpsGate on logout. Sets Max-Age=0 to delete the cookie
  * that pin-login.js creates.
  */
+const { requireCsrfHeader } = require('./_csrf');
+
 exports.handler = async (event) => {
   const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
 
@@ -12,13 +14,26 @@ exports.handler = async (event) => {
       statusCode: 200,
       headers: {
         'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Headers': 'Content-Type, X-BrewHub-Action',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Access-Control-Allow-Credentials': 'true',
       },
       body: '',
     };
   }
+
+  // Only accept POST
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Method not allowed' }),
+    };
+  }
+
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
 
   const isProduction = !['localhost', '127.0.0.1'].includes(
     (event.headers?.host || '').split(':')[0]

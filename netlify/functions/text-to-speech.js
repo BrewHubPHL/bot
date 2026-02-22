@@ -2,6 +2,14 @@
 const { authorize } = require('./_auth');
 const { checkQuota } = require('./_usage');
 const { requireCsrfHeader } = require('./_csrf');
+const { ttsBucket } = require('./_token-bucket');
+
+/** Extract client IP for bucket keying */
+function getClientIP(event) {
+  return event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+}
 
 exports.handler = async (event) => {
     const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
@@ -23,6 +31,18 @@ exports.handler = async (event) => {
     const csrfBlock = requireCsrfHeader(event);
     if (csrfBlock) return csrfBlock;
 
+    // Token bucket: per-IP burst protection (prevents rapid-fire cost amplification)
+    const ip = getClientIP(event);
+    const bucketResult = ttsBucket.consume(ip);
+    if (!bucketResult.allowed) {
+        const retryAfter = Math.ceil(bucketResult.retryAfterMs / 1000);
+        return {
+            statusCode: 429,
+            headers: { ...corsHeaders, 'Retry-After': String(retryAfter) },
+            body: JSON.stringify({ error: `Slow down! Try again in ${retryAfter}s.` })
+        };
+    }
+
     // 1. Check Auth (Staff get unlimited/VIP)
     const auth = await authorize(event);
     
@@ -33,6 +53,7 @@ exports.handler = async (event) => {
             console.error('[WALLET PROTECTION] ElevenLabs daily budget exceeded.');
             return { 
                 statusCode: 429, 
+                headers: corsHeaders,
                 body: JSON.stringify({ error: 'Daily voice quota reached. Come back tomorrow!' }) 
             };
         }

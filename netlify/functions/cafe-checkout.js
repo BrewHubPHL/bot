@@ -67,7 +67,7 @@ exports.handler = async (event) => {
   if (authMode === 'guest') {
     const hasQuota = await checkQuota('cafe_guest_order');
     if (!hasQuota) {
-      console.warn(`[CAFE] Guest rate limit hit from IP ${getClientIP(event)}`);
+      console.warn(`[CAFE] Guest rate limit hit from IP (redacted)`);
       return json(429, { error: 'Too many orders. Please try again later or log in to skip the wait.' });
     }
   }

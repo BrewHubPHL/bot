@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
+const { redactIP } = require('./_ip-hash');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -32,7 +33,7 @@ async function authorize(event, options = {}) {
 
   const clientIP = getClientIP(event);
   if (!isIPAllowed(clientIP)) {
-    console.error(`[IP BLOCKED] ${clientIP}`);
+    console.error(`[IP BLOCKED] ${redactIP(clientIP)}`);
     return { ok: false, response: json(403, { error: 'Access denied: Unauthorized IP' }) };
   }
 

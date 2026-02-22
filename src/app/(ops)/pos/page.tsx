@@ -9,6 +9,7 @@ import {
   AlertTriangle, RotateCcw, ScanLine, UserCheck, Ticket, Video, VideoOff,
   Gift, WifiOff, RefreshCw
 } from "lucide-react";
+import SwipeCartItem from "@/components/SwipeCartItem";
 
 /* ─── Types ────────────────────────────────────────────────────── */
 
@@ -417,10 +418,20 @@ export default function POSPage() {
   };
 
   /* ─── Step 2: Pay on Terminal (calls collect-payment) ────────── */
+  /* Recovery logic: If the network blips mid-request, the checkout may
+     have been created on Square's side. On retry, the server returns 409
+     "Order already paid/preparing" which we treat as success (idempotent).
+     We also add a 15-second timeout with AbortController to detect hangs. */
+  const paymentRetryRef = useRef(0);
+  const MAX_PAYMENT_RETRIES = 2;
+
   const handlePayOnTerminal = async () => {
     if (!createdOrderId) return;
     setTicketPhase("paying");
     setTerminalStatus("Sending to terminal…");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
     try {
       const token = getAccessToken();
@@ -433,7 +444,25 @@ export default function POSPage() {
           "X-BrewHub-Action": "true",
         },
         body: JSON.stringify({ orderId: createdOrderId }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeout);
+
+      if (resp.status === 409) {
+        // 409 = order already in a post-payment status. Treat as success.
+        setTicketPhase("paid");
+        setTerminalStatus("Payment already processed!");
+        haptic("success");
+        paymentRetryRef.current = 0;
+        setTimeout(() => {
+          setCart([]);
+          setTicketPhase("building");
+          setCreatedOrderId(null);
+          setTerminalStatus("");
+        }, 3000);
+        return;
+      }
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -447,6 +476,8 @@ export default function POSPage() {
       // The webhook will update the order status when payment completes
       setTicketPhase("paid");
       setTerminalStatus(`Checkout sent! ID: ${result.checkout?.id?.slice(0, 8) || "OK"}`);
+      haptic("success");
+      paymentRetryRef.current = 0;
 
       // Clear after delay
       setTimeout(() => {
@@ -457,9 +488,30 @@ export default function POSPage() {
       }, 5000);
 
     } catch (e: unknown) {
+      clearTimeout(timeout);
+
+      const isNetworkError =
+        (e instanceof DOMException && e.name === "AbortError") ||
+        (e instanceof TypeError);
+
+      // Automatic retry on network blip (up to MAX_PAYMENT_RETRIES)
+      if (isNetworkError && paymentRetryRef.current < MAX_PAYMENT_RETRIES) {
+        paymentRetryRef.current += 1;
+        setTerminalStatus(`Connection lost — retrying (${paymentRetryRef.current}/${MAX_PAYMENT_RETRIES})…`);
+        haptic("error");
+        // Exponential backoff: 2s, 4s
+        const delay = 2000 * paymentRetryRef.current;
+        setTimeout(() => handlePayOnTerminal(), delay);
+        return;
+      }
+
+      paymentRetryRef.current = 0;
       const msg = e instanceof Error ? e.message : "Terminal payment failed";
-      setErrorMsg(msg);
+      setErrorMsg(isNetworkError
+        ? "Connection lost. Tap retry — if the terminal is waiting, the customer can still tap."
+        : msg);
       setTicketPhase("error");
+      haptic("error");
     }
   };
 
@@ -868,50 +920,17 @@ export default function POSPage() {
               <p className="text-xs uppercase tracking-widest">No items yet</p>
             </div>
           ) : (
-            <div className="divide-y divide-stone-800/50">
-              {cart.map((ci) => {
-                const lineTotal = (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0)) * ci.quantity;
-                return (
-                  <div key={ci.id} className="px-5 py-3 group">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm text-stone-200">{ci.name}</p>
-                        {ci.modifiers.length > 0 && (
-                          <p className="text-xs text-amber-500/70 mt-0.5">
-                            {ci.modifiers.map((m) => m.name).join(", ")}
-                          </p>
-                        )}
-                      </div>
-                      <span className="text-sm font-bold text-stone-300 ml-2">{cents(lineTotal)}</span>
-                    </div>
-                    {ticketPhase === "building" && (
-                      <div className="flex items-center justify-between mt-2">
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => updateQty(ci.id, -1)}
-                            className="w-7 h-7 flex items-center justify-center rounded bg-stone-800 hover:bg-stone-700 transition-colors"
-                          >
-                            <Minus size={12} />
-                          </button>
-                          <span className="w-8 text-center text-sm font-mono font-bold">{ci.quantity}</span>
-                          <button
-                            onClick={() => updateQty(ci.id, 1)}
-                            className="w-7 h-7 flex items-center justify-center rounded bg-stone-800 hover:bg-stone-700 transition-colors"
-                          >
-                            <Plus size={12} />
-                          </button>
-                        </div>
-                        <button
-                          onClick={() => removeItem(ci.id)}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-stone-600 hover:text-red-400 transition-all"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="divide-y divide-stone-800/50" role="list">
+              {cart.map((ci) => (
+                <SwipeCartItem
+                  key={ci.id}
+                  item={ci}
+                  disabled={ticketPhase !== "building"}
+                  onUpdateQty={updateQty}
+                  onRemove={removeItem}
+                  formatCents={cents}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -936,7 +955,7 @@ export default function POSPage() {
             <button
               disabled={cart.length === 0 || isSubmitting}
               onClick={handleSendToKDS}
-              className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+              className="w-full min-h-[48px] py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
             >
               {isSubmitting ? (
                 <><Loader2 size={16} className="animate-spin" /> Processing…</>
@@ -957,7 +976,7 @@ export default function POSPage() {
 
               <button
                 onClick={handlePayOnTerminal}
-                className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                className="w-full min-h-[48px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
               >
                 <Monitor size={16} /> Pay on Terminal
               </button>
@@ -1019,22 +1038,15 @@ export default function POSPage() {
               )}
 
               <button
-                onClick={handlePayOnTerminal}
-                className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-              >
-                <Monitor size={16} /> Pay on Terminal
-              </button>
-
-              <button
                 onClick={handleMarkPaid}
-                className="w-full py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                className="w-full min-h-[48px] py-3 bg-stone-800 hover:bg-stone-700 active:bg-stone-600 text-stone-300 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
               >
                 <CreditCard size={14} /> Cash / Comp / Already Paid
               </button>
 
               <button
                 onClick={clearCart}
-                className="w-full py-2 text-xs text-stone-600 hover:text-red-400 transition-colors text-center"
+                className="w-full min-h-[48px] py-2 text-xs text-stone-600 hover:text-red-400 active:text-red-300 transition-colors text-center rounded-lg"
               >
                 Cancel Order
               </button>

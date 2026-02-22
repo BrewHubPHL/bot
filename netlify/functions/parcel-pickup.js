@@ -50,13 +50,15 @@ exports.handler = async (event) => {
       status: 'picked_up', 
       picked_up_at: new Date().toISOString() 
     })
-    .eq('tracking_number', tracking_number);
+    .eq('tracking_number', tracking_number)
+    .eq('status', 'arrived')  // Only mark arrived parcels as picked up
+    .select('id');             // Return matched rows to verify update
 
   if (!isStaff) {
     // Non-staff: enforce ownership — only allow pickup of parcels addressed to them
     const userEmail = (auth.user?.email || '').toLowerCase();
     if (!userEmail) {
-      return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden' }) };
+      return { statusCode: 403, headers: corsHeaders, body: JSON.stringify({ error: 'Forbidden' }) };
     }
     query = query.eq('recipient_email', userEmail);
   }
@@ -66,6 +68,15 @@ exports.handler = async (event) => {
   if (error) {
     console.error(error);
     return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: 'Pickup failed' }) };
+  }
+
+  // Verify that the update actually matched a row
+  if (!data || data.length === 0) {
+    return {
+      statusCode: 404,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: 'Parcel not found, already picked up, or not addressed to you' }),
+    };
   }
 
   // Bust Next.js cache so portal shows up-to-date parcel status

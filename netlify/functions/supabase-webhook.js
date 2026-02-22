@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('node:crypto');
 const { validateWebhookSource, getClientIP } = require('./_ip-guard');
+const { redactIP } = require('./_ip-hash');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -22,7 +23,7 @@ exports.handler = async (event) => {
   // 1. Security Layer 1: IP Allowlist (Defense in Depth)
   const ipCheck = validateWebhookSource(event, { allowSupabase: true, allowNetlify: true });
   if (!ipCheck.allowed) {
-    console.error(`[WEBHOOK BLOCKED] IP not in allowlist: ${ipCheck.ip}`);
+    console.error(`[WEBHOOK BLOCKED] IP not in allowlist: ${redactIP(ipCheck.ip)}`);
     // Don't reject yet - IP ranges may be incomplete. Log and continue to secret check.
   }
 
@@ -32,7 +33,7 @@ exports.handler = async (event) => {
   const localSecret = process.env.SUPABASE_WEBHOOK_SECRET || process.env.INTERNAL_SYNC_SECRET;
 
   if (!incomingSecret || !localSecret || !safeCompare(incomingSecret, localSecret)) {
-    console.error(`[WEBHOOK BLOCKED] Invalid secret from IP: ${getClientIP(event)}`);
+    console.error(`[WEBHOOK BLOCKED] Invalid secret from IP: ${redactIP(getClientIP(event))}`);
     return { 
       statusCode: 401, 
       body: JSON.stringify({ error: "Unauthorized" }) 
@@ -40,7 +41,7 @@ exports.handler = async (event) => {
   }
   
   // Log successful auth for audit trail
-  console.log(`[WEBHOOK] Authenticated from IP: ${ipCheck.ip}`);
+  console.log(`[WEBHOOK] Authenticated from IP: ${redactIP(ipCheck.ip)}`);
 
   // 2. Parse the payload from Supabase
   let payload;

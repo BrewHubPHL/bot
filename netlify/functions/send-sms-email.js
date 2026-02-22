@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, verifyServiceSecret } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 const { checkQuota } = require('./_usage');
 
 // HTML-escape user-supplied strings to prevent injection in emails
@@ -21,7 +22,7 @@ exports.handler = async (event) => {
       statusCode: 200,
       headers: {
         'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
       },
       body: ''
@@ -36,8 +37,12 @@ exports.handler = async (event) => {
   // Uses timing-safe comparison with null guard
   const serviceAuth = verifyServiceSecret(event);
   if (serviceAuth.valid) {
-    // Service-to-service call authenticated
+    // Service-to-service call authenticated — skip CSRF
   } else {
+    // CSRF protection for browser-initiated requests
+    const csrfBlock = requireCsrfHeader(event);
+    if (csrfBlock) return csrfBlock;
+
     // Standard auth check for staff
     const auth = await authorize(event);
     if (!auth.ok) return auth.response;

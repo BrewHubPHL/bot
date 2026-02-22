@@ -4,6 +4,23 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useOpsSession } from '@/components/OpsGate';
 
+/* ── Types ───────────────────────────────────────────────── */
+
+interface CoffeeOrderItem {
+  id: string;
+  drink_name: string;
+  customizations?: Record<string, string> | string | null;
+  price?: number | null;
+}
+
+interface KDSOrder {
+  id: string;
+  status: string;
+  customer_name: string | null;
+  created_at: string;
+  coffee_orders?: CoffeeOrderItem[];
+}
+
 /* ── API helpers ─────────────────────────────────────────── */
 const API_BASE =
   typeof window !== "undefined" && window.location.hostname === "localhost"
@@ -17,6 +34,15 @@ function getAccessToken(): string | null {
     const parsed = JSON.parse(raw);
     return parsed?.token ?? null;
   } catch { return null; }
+}
+
+/* ── Haptic helper ──────────────────────────────────────── */
+function haptic(pattern: "tap" | "success" | "error") {
+  if (typeof navigator === "undefined" || !navigator.vibrate) return;
+  const p: Record<string, number | number[]> = {
+    tap: 15, success: [15, 80, 15], error: [50, 30, 50, 30, 50],
+  };
+  try { navigator.vibrate(p[pattern]); } catch { /* silent */ }
 }
 
 /* ── Status workflow ─────────────────────────────────────────── */
@@ -39,6 +65,7 @@ const BORDER_COLOR: Record<string, string> = {
   paid:      'border-emerald-500',
   preparing: 'border-amber-400',
   ready:     'border-sky-400',
+  cancelled: 'border-stone-600',
 };
 
 const STATUS_BADGE: Record<string, string> = {
@@ -46,16 +73,27 @@ const STATUS_BADGE: Record<string, string> = {
   paid:      'bg-emerald-800 text-emerald-200',
   preparing: 'bg-amber-800 text-amber-200',
   ready:     'bg-sky-800 text-sky-200',
+  cancelled: 'bg-stone-700 text-stone-400',
 };
 
 export default function KDS() {
   const session = useOpsSession();
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<KDSOrder[]>([]);
   const [clock, setClock] = useState<string>("");
   const [updating, setUpdating] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const fetchingRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track cards that are animating out (for CSS exit transition)
+  const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
+
+  /* ── Toast helper ────────────────────────────────────────── */
+  const showToast = useCallback((msg: string, type: "success" | "error") => {
+    setToast({ msg, type });
+    const id = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(id);
+  }, []);
 
   /* ── Fetch orders via authenticated server function ──────── */
   const fetchOrders = useCallback(async () => {
@@ -69,7 +107,7 @@ export default function KDS() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { orders: data } = await res.json();
-      setOrders(data || []);
+      setOrders((data as KDSOrder[]) || []);
     } catch (err) {
       console.error("KDS: Fetch Error:", err);
     } finally {
@@ -98,10 +136,33 @@ export default function KDS() {
     };
   }, [fetchOrders, debouncedFetch]);
 
-  /* ── Status update via authenticated server function ───── */
+  /* ── Optimistic status update with rollback ───────────── */
   async function updateStatus(id: string, nextStatus: string) {
     setUpdating(id);
     setError(null);
+
+    // Snapshot current state for rollback
+    const snapshot = orders.map(o => ({ ...o }));
+    const orderName = orders.find(o => o.id === id)?.customer_name || "Order";
+
+    // Optimistic update: move card to new status or remove if terminal
+    const isTerminal = nextStatus === "completed" || nextStatus === "cancelled";
+    if (isTerminal) {
+      // Animate exit, then remove after transition
+      setExitingIds(prev => new Set(prev).add(id));
+      // After animation, remove from DOM
+      setTimeout(() => {
+        setOrders(prev => prev.filter(o => o.id !== id));
+        setExitingIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 350);
+    } else {
+      setOrders(prev => prev.map(o => o.id === id ? { ...o, status: nextStatus } : o));
+    }
+
     try {
       const token = getAccessToken();
       if (!token) throw new Error("No PIN session");
@@ -121,14 +182,24 @@ export default function KDS() {
         throw new Error(err.error || "Status update failed");
       }
 
-      // Optimistic: remove completed orders from local state immediately
-      if (nextStatus === 'completed') {
-        setOrders(prev => prev.filter(o => o.id !== id));
+      haptic("success");
+      if (nextStatus === "cancelled") {
+        showToast(`${orderName} cancelled`, "success");
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Status update failed';
-      console.error('KDS: Update Error:', msg);
+      // ── ROLLBACK: restore the snapshot ──
+      setOrders(snapshot);
+      setExitingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+
+      const msg = err instanceof Error ? err.message : "Status update failed";
+      console.error("KDS: Update Error:", msg);
       setError(`Update failed: ${msg}`);
+      showToast(`Failed: ${msg}`, "error");
+      haptic("error");
       setTimeout(() => setError(null), 5000);
     } finally {
       setUpdating(null);
@@ -142,12 +213,21 @@ export default function KDS() {
     return `${diff}m ago`;
   }
 
+  /* ── Urgency helper: orders waiting too long get highlighted ── */
+  function urgencyClass(createdAt: string, status: string): string {
+    if (status === "ready" || status === "completed" || status === "cancelled") return "";
+    const mins = Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000);
+    if (mins >= 10) return "ring-2 ring-red-500/60 animate-pulse";
+    if (mins >= 5) return "ring-2 ring-amber-500/40";
+    return "";
+  }
+
   return (
-    <div className="min-h-screen bg-stone-950 p-10 text-white">
-      <header className="flex justify-between items-end mb-12 border-b-2 border-stone-800 pb-8">
+    <div className="min-h-screen bg-stone-950 p-6 md:p-10 text-white">
+      <header className="flex flex-wrap justify-between items-end mb-8 md:mb-12 border-b-2 border-stone-800 pb-6 md:pb-8 gap-4">
         <div>
-          <h1 className="text-6xl font-black font-playfair tracking-tighter uppercase italic">BrewHub <span className="text-stone-500">KDS</span></h1>
-          <p className="text-sm font-mono text-stone-600 mt-2">SYSTEM ONLINE // {clock || "—"}</p>
+          <h1 className="text-4xl md:text-6xl font-black font-playfair tracking-tighter uppercase italic">BrewHub <span className="text-stone-500">KDS</span></h1>
+          <p className="text-sm font-mono text-stone-600 mt-2">SYSTEM ONLINE // {clock || "—"} // {orders.length} active</p>
         </div>
         {error && (
           <p className="text-red-400 font-mono text-sm bg-red-950 px-4 py-2 rounded">{error}</p>
@@ -155,35 +235,48 @@ export default function KDS() {
       </header>
 
       {orders.length === 0 && (
-        <p className="text-stone-600 text-center text-lg font-mono mt-20">No active orders</p>
+        <div className="flex flex-col items-center justify-center mt-20 gap-4">
+          <span className="text-6xl opacity-20">☕</span>
+          <p className="text-stone-600 text-center text-lg font-mono">No active orders</p>
+          <p className="text-stone-700 text-center text-xs font-mono">New orders will appear automatically</p>
+        </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 md:gap-8">
         {orders.map(order => {
           const nextStatus = STATUS_FLOW[order.status];
           const items = order.coffee_orders || [];
+          const isExiting = exitingIds.has(order.id);
 
           return (
-            <div key={order.id} className={`bg-stone-900 border-t-8 rounded-sm flex flex-col h-full shadow-2xl ${BORDER_COLOR[order.status] || 'border-stone-600'}`}>
+            <div
+              key={order.id}
+              className={[
+                "bg-stone-900 border-t-8 rounded-sm flex flex-col h-full shadow-2xl transition-all duration-300",
+                BORDER_COLOR[order.status] || "border-stone-600",
+                urgencyClass(order.created_at, order.status),
+                isExiting ? "opacity-0 scale-95 translate-y-4" : "opacity-100 scale-100 translate-y-0",
+              ].join(" ")}
+            >
               {/* Header */}
-              <div className="p-6 border-b border-stone-800 flex justify-between items-start">
+              <div className="p-4 md:p-6 border-b border-stone-800 flex justify-between items-start">
                 <div>
-                  <h3 className="text-3xl font-playfair">{order.customer_name || 'Guest'}</h3>
+                  <h3 className="text-2xl md:text-3xl font-playfair">{order.customer_name || 'Guest'}</h3>
                   <p className="text-stone-500 font-mono text-xs mt-1">{elapsed(order.created_at)}</p>
                 </div>
-                <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest ${STATUS_BADGE[order.status] || 'bg-stone-700 text-stone-300'}`}>
+                <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${STATUS_BADGE[order.status] || 'bg-stone-700 text-stone-300'}`}>
                   {order.status}
                 </span>
               </div>
 
               {/* Order items */}
-              <div className="p-6 flex-grow space-y-4">
+              <div className="p-4 md:p-6 flex-grow space-y-3 md:space-y-4">
                 {items.length === 0 && (
                   <p className="text-stone-600 italic text-sm">No items found</p>
                 )}
-                {items.map((item: any) => (
+                {items.map((item: CoffeeOrderItem) => (
                   <div key={item.id} className="border-l-2 border-stone-700 pl-4">
-                    <p className="text-xl font-bold">{item.drink_name}</p>
+                    <p className="text-lg md:text-xl font-bold">{item.drink_name}</p>
                     {item.customizations && (
                       <p className="text-stone-400 text-sm italic">
                         {typeof item.customizations === 'object'
@@ -198,22 +291,22 @@ export default function KDS() {
                 ))}
               </div>
 
-              {/* Action buttons */}
+              {/* Action buttons — 48px min touch targets for iPad */}
               <div className="p-4 bg-black/20 space-y-2">
                 {nextStatus && (
                   <button
-                    disabled={updating === order.id}
+                    disabled={updating === order.id || isExiting}
                     onClick={() => updateStatus(order.id, nextStatus)}
-                    className="w-full py-4 text-xs font-bold tracking-[0.3em] uppercase bg-stone-100 text-stone-900 hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    className="w-full min-h-[48px] py-4 text-xs font-bold tracking-[0.3em] uppercase bg-stone-100 text-stone-900 hover:bg-white active:bg-stone-200 transition-colors disabled:opacity-50 disabled:cursor-wait rounded-sm"
                   >
                     {updating === order.id ? 'Updating…' : BUTTON_LABEL[order.status] || 'Next'}
                   </button>
                 )}
                 {order.status !== 'cancelled' && (
                   <button
-                    disabled={updating === order.id}
+                    disabled={updating === order.id || isExiting}
                     onClick={() => updateStatus(order.id, 'cancelled')}
-                    className="w-full py-2 text-xs font-bold tracking-[0.2em] uppercase text-red-400 hover:text-red-300 hover:bg-red-950/50 transition-colors rounded disabled:opacity-50"
+                    className="w-full min-h-[48px] py-3 text-xs font-bold tracking-[0.2em] uppercase text-red-400 hover:text-red-300 hover:bg-red-950/50 active:bg-red-950/70 transition-colors rounded disabled:opacity-50"
                   >
                     Cancel Order
                   </button>
@@ -223,6 +316,16 @@ export default function KDS() {
           );
         })}
       </div>
+
+      {/* ═══════ Toast notification ═══════ */}
+      {toast && (
+        <div className={[
+          "fixed bottom-8 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 text-sm font-semibold transition-all animate-in slide-in-from-bottom duration-300",
+          toast.type === "success" ? "bg-emerald-600 text-white" : "bg-red-600 text-white",
+        ].join(" ")}>
+          {toast.type === "success" ? "✓" : "✗"} {toast.msg}
+        </div>
+      )}
     </div>
   );
 }
