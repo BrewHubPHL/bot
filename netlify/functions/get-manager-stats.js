@@ -67,9 +67,9 @@ exports.handler = async (event) => {
         .select('email, full_name, hourly_rate, role'),
       supabase
         .from('time_logs')
-        .select('employee_email, action_type, clock_in, clock_out, created_at')
-        .gte('created_at', start)
-        .lt('created_at', end),
+        .select('employee_email, clock_in, clock_out')
+        // active shifts (any start date) OR shifts that started today
+        .or(`clock_out.is.null,clock_in.gte.${start}`),
     ]);
 
     const orderData = ordersRes.data || [];
@@ -79,31 +79,64 @@ exports.handler = async (event) => {
     const orderCount = orderData.length;
     const totalRevenue = orderData.reduce((sum, o) => sum + (o.total_amount_cents || 0), 0) / 100;
 
-    // Staff currently clocked in: last log today is 'in' with no clock_out
-    let activeStaff = 0;
+    // Build rate + name lookups
+    const rateMap = {};
+    const nameMap = {};
+    for (const s of staffData) {
+      const email = String(s.email || '').toLowerCase();
+      let rate = Number(s.hourly_rate);
+      if (!Number.isFinite(rate) || rate < 0) rate = 0;
+      if (rate > 200) rate = 200;
+      rateMap[email] = rate;
+      nameMap[email] = sanitizeInput(s.full_name || '').slice(0, 60);
+    }
+
+    // Compute actual labor cost: hours_worked × hourly_rate for each shift
+    // (only the today-portion counts, so cross-midnight shifts are handled)
+    const nowMs = now.getTime();
+    const startMs = new Date(start).getTime();
+    const activeEmails = new Set();
+    const activeShiftsMap = new Map(); // email → clock_in ISO (most recent open shift)
     let totalLabor = 0;
-    for (const staff of staffData) {
-      const staffEmail = String(staff.email || '').toLowerCase();
-      const logs = logsData.filter(l => String(l.employee_email || '').toLowerCase() === staffEmail);
-      const lastLog = logs[logs.length - 1];
-      if (lastLog && (lastLog.action_type || '').toLowerCase() === 'in' && !lastLog.clock_out) {
-        activeStaff++;
-        // Validate hourly_rate: coerce, bound and ignore absurd values
-        let rate = Number(staff.hourly_rate);
-        if (!Number.isFinite(rate) || rate < 0) rate = 0;
-        if (rate > 200) rate = 200; // cap unrealistic values
-        totalLabor += rate;
+
+    for (const log of logsData) {
+      const email = String(log.employee_email || '').toLowerCase();
+      const rate = rateMap[email] || 0;
+      const clockInMs = log.clock_in ? new Date(log.clock_in).getTime() : startMs;
+      const clockOutMs = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
+      // Only count the portion that falls within today
+      const shiftStart = Math.max(clockInMs, startMs);
+      const shiftEnd = Math.min(clockOutMs, nowMs);
+      if (shiftEnd > shiftStart) {
+        totalLabor += ((shiftEnd - shiftStart) / 3_600_000) * rate;
+      }
+      if (!log.clock_out) {
+        activeEmails.add(email);
+        // Keep most recent open clock_in per person
+        const prev = activeShiftsMap.get(email);
+        if (!prev || clockInMs > new Date(prev).getTime()) {
+          activeShiftsMap.set(email, log.clock_in || now.toISOString());
+        }
       }
     }
+
+    const activeStaff = activeEmails.size;
+
+    // Active shifts list — used by the "On the Clock" card on the manager dashboard
+    const activeShifts = Array.from(activeShiftsMap.entries()).map(([email, clock_in]) => ({
+      name: nameMap[email] || email,
+      email,
+      clock_in,
+    }));
 
     // Sanitise staff names for any downstream display (shorten to 60 chars)
     const sanitizedStaff = staffData.map(s => ({
       email: String(s.email || '').toLowerCase(),
-      name: sanitizeInput(s.full_name || '').slice(0, 60),
+      name: nameMap[String(s.email || '').toLowerCase()] || '',
       role: String(s.role || '').slice(0, 30),
     }));
 
-    return { statusCode: 200, headers, body: JSON.stringify({ revenue: totalRevenue, orders: orderCount, staffCount: activeStaff, labor: totalLabor, staff: sanitizedStaff }) };
+    return { statusCode: 200, headers, body: JSON.stringify({ revenue: totalRevenue, orders: orderCount, staffCount: activeStaff, labor: totalLabor, staff: sanitizedStaff, activeShifts }) };
   } catch (err) {
     const res = sanitizedError(err, 'get-manager-stats');
     res.headers = Object.assign({}, res.headers || {}, headers);

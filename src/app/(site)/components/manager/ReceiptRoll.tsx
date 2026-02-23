@@ -9,7 +9,7 @@ const API_BASE =
     : "/.netlify/functions";
 
 const MAX_RECEIPTS = 10;
-const POLL_INTERVAL_MS = 8_000; // poll every 8 s
+const POLL_INTERVAL_MS = 30_000; // poll every 30 s
 
 /* ─── Types ─── */
 interface Receipt {

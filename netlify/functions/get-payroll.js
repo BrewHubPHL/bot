@@ -99,7 +99,7 @@ exports.handler = async (event) => {
 
       if (openErr) throw openErr;
 
-      const maskedShifts = (openShifts || []).map(s => ({ id: s.id, employee_email_masked: maskEmail(s.employee_email), clock_in: s.clock_in, created_at: s.created_at }));
+      const maskedShifts = (openShifts || []).map(s => ({ id: s.id, employee_email: s.employee_email, clock_in: s.clock_in, created_at: s.created_at }));
 
       return { statusCode: 200, headers, body: JSON.stringify({ summary: data || [], openShifts: maskedShifts }) };
     }
@@ -154,14 +154,14 @@ exports.handler = async (event) => {
       return {
         id: s.id,
         full_name: sanitizeInput(String(s.full_name || '')).slice(0, 200),
-        email_masked: maskEmail(s.email),
+        email: String(s.email || '').toLowerCase(),
         hourly_rate: Number.isFinite(hourly) ? hourly : null,
       };
     });
 
     const logs = (logsRes.data || []).map(l => ({
       id: l.id,
-      employee_email_masked: maskEmail(l.employee_email),
+      employee_email: String(l.employee_email || '').toLowerCase(),
       action_type: sanitizeInput(String(l.action_type || '')).slice(0, 50),
       clock_in: l.clock_in,
       clock_out: l.clock_out,

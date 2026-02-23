@@ -114,7 +114,7 @@ export default function ParcelMonitor() {
     let pollId: ReturnType<typeof setTimeout>;
     const schedulePoll = () => {
       pollId = setTimeout(() => {
-        fetchParcels().then(schedulePoll);
+        void fetchParcels().then(schedulePoll);
       }, backoffRef.current);
     };
     schedulePoll();
@@ -125,7 +125,7 @@ export default function ParcelMonitor() {
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
         // Immediately fetch when returning to view, then resume schedule
-        fetchParcels().then(() => {
+        void fetchParcels().then(() => {
           clearTimeout(pollId);
           schedulePoll();
         });
@@ -216,7 +216,7 @@ export default function ParcelMonitor() {
       )}
 
       {/* ═══════════ PARCEL LIST ═══════════ */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto" aria-live="polite" aria-label="Parcels awaiting pickup">
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <div className="flex flex-col items-center gap-4 text-gray-600">
