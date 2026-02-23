@@ -212,8 +212,19 @@ export default function ResidentPortal() {
         authAttemptsRef.current = 0; // reset on success
       }
     } catch (err: unknown) {
-      const msg = (err as Error)?.message || "Authentication failed";
-      setAuthError(msg);
+      const raw = (err as Error)?.message || "";
+      // Map common Supabase auth errors to friendly messages
+      let friendly = "Authentication failed. Please try again.";
+      if (raw.toLowerCase().includes("already registered") || raw.toLowerCase().includes("user already exists")) {
+        friendly = "An account with this email already exists. Please sign in instead.";
+      } else if (raw.toLowerCase().includes("invalid login") || raw.toLowerCase().includes("invalid credentials")) {
+        friendly = "Incorrect email or password.";
+      } else if (raw.toLowerCase().includes("email not confirmed")) {
+        friendly = "Please confirm your email before signing in.";
+      } else if (raw.toLowerCase().includes("too many requests") || raw.toLowerCase().includes("rate limit")) {
+        friendly = "Too many attempts. Please wait a moment and try again.";
+      }
+      setAuthError(friendly);
       // Increment attempts + enforce cooldown
       authAttemptsRef.current += 1;
       if (authAttemptsRef.current >= MAX_AUTH_ATTEMPTS) {
@@ -280,7 +291,12 @@ export default function ResidentPortal() {
       <div className="min-h-screen bg-stone-950 flex items-center justify-center pt-24 px-4">
         <div className="w-full max-w-md bg-stone-900 rounded-xl shadow-2xl p-8 border border-stone-800">
           <div className="text-center mb-8">
-            <img src="/logo.png" alt="BrewHub" className="w-20 h-20 mx-auto rounded-full border-2 border-stone-700 mb-4" />
+            <img
+            src="/logo.png"
+            alt="BrewHub"
+            className="w-20 h-20 mx-auto rounded-full border-2 border-stone-700 mb-4"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+          />
             <h1 className="font-playfair text-3xl text-white">Resident Portal</h1>
             <p className="text-stone-500 text-sm mt-2">Track packages, earn rewards, and more</p>
           </div>
@@ -414,7 +430,7 @@ export default function ResidentPortal() {
           </div>
           <button
             onClick={() => supabase.auth.signOut().then(() => window.location.reload())}
-            className="text-stone-600 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-stone-900"
+            className="min-h-[44px] min-w-[44px] text-stone-600 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-stone-900 flex items-center justify-center"
             aria-label="Sign out"
           >
             <LogOut size={20} />
@@ -427,13 +443,27 @@ export default function ResidentPortal() {
             <QrCode size={16} />
             <span className="uppercase tracking-[0.2em] text-[10px] font-bold">Loyalty QR</span>
           </div>
-          <img
-            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(user?.id || "")}&bgcolor=0C0A09&color=FFFFFF`}
-            alt="Loyalty QR Code"
-            className="mx-auto rounded-lg border border-stone-700"
-            width={160}
-            height={160}
-          />
+          {dataLoading ? (
+            <Skeleton className="mx-auto h-[160px] w-[160px] rounded-lg" />
+          ) : (
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(user?.id || "")}&bgcolor=0C0A09&color=FFFFFF`}
+              alt="Loyalty QR Code — show this at the cafe to earn rewards"
+              className="mx-auto rounded-lg border border-stone-700"
+              width={160}
+              height={160}
+              onError={(e) => {
+                const img = e.currentTarget as HTMLImageElement;
+                img.style.display = "none";
+                const fallback = img.nextElementSibling as HTMLElement | null;
+                if (fallback) fallback.style.display = "flex";
+              }}
+            />
+          )}
+          <div className="hidden mx-auto w-[160px] h-[160px] rounded-lg border border-stone-700 items-center justify-center text-stone-600 text-xs text-center p-2">
+            QR unavailable — show this ID at the counter<br />
+            <span className="font-mono text-[9px] break-all mt-1 text-stone-500">{user?.id?.slice(0, 12)}…</span>
+          </div>
           <p className="text-stone-600 text-xs mt-3">Show this at the cafe to earn rewards</p>
         </div>
 
@@ -445,7 +475,9 @@ export default function ResidentPortal() {
               <span className="uppercase tracking-[0.2em] text-[10px] font-bold">Coffee Rewards</span>
             </div>
             <div className="flex items-baseline gap-3">
-              <span className="text-4xl font-playfair text-white">{Math.floor((loyalty.points % 500) / 50)}</span>
+              <span className="text-4xl font-playfair text-white">
+                {dataLoading ? <Skeleton className="inline-block h-10 w-8" /> : Math.floor((loyalty.points % 500) / 50)}
+              </span>
               <span className="text-stone-600 text-sm">/10 cups until your next free drink</span>
             </div>
             <div className="mt-4 flex gap-1">
@@ -458,7 +490,7 @@ export default function ResidentPortal() {
                 />
               ))}
             </div>
-            <button onClick={printKeychain} className="mt-4 text-[10px] uppercase tracking-widest text-stone-500 hover:text-stone-300 border border-stone-700 px-4 py-2 rounded-lg hover:bg-stone-800 transition-colors">
+            <button onClick={printKeychain} className="mt-4 min-h-[44px] text-[10px] uppercase tracking-widest text-stone-500 hover:text-stone-300 border border-stone-700 px-4 py-2 rounded-lg hover:bg-stone-800 transition-colors">
               Print Keychain Card
             </button>
           </div>

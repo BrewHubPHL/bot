@@ -165,7 +165,7 @@ export default function ScannerPage() {
   const startBarcodeDetection = useCallback(() => {
     // Use native BarcodeDetector if available (Safari, Chrome)
     if ("BarcodeDetector" in window) {
-      const detector = new (window as any).BarcodeDetector({
+      const detector = new BarcodeDetector({
         formats: ["qr_code", "ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39"],
       });
 
@@ -388,11 +388,11 @@ export default function ScannerPage() {
 
   /* ─── Render ─────────────────────────────────────────────────── */
   return (
-    <div className="h-screen w-screen flex flex-col bg-stone-950 text-white select-none overflow-hidden">
+    <main className="h-screen w-screen flex flex-col bg-stone-950 text-white select-none overflow-hidden" aria-label="Package Scanner">
       {/* ═══════ Top Bar ═══════ */}
       <header className="h-14 bg-stone-900 border-b border-stone-800 flex items-center justify-between px-5 shrink-0 safe-area-top">
         <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="BrewHub" className="w-8 h-8 rounded-full" />
+          <img src="/logo.png" alt="BrewHub" className="w-8 h-8 rounded-full" onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
           <span className="font-bold text-sm tracking-tight">Scanner</span>
         </div>
 
@@ -669,6 +669,6 @@ export default function ScannerPage() {
         .safe-area-top { padding-top: env(safe-area-inset-top, 0); }
         .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom, 0); }
       `}</style>
-    </div>
+    </main>
   );
 }

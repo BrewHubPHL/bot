@@ -388,8 +388,8 @@ export default function CatalogManager() {
       if (!res.ok) throw new Error("Catalog fetch failed");
       const data = await res.json();
       setProducts(sanitizeProducts(data.products ?? []));
-    } catch (err) {
-      console.error("Catalog fetch failed:", err);
+    } catch (err: unknown) {
+      console.error("Catalog fetch failed:", err instanceof Error ? err.message : err);
     }
     setLoading(false);
   }, [token]);

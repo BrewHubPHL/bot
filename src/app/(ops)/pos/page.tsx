@@ -588,7 +588,7 @@ export default function POSPage() {
       setLoyaltyCamError("BarcodeDetector not available — use Safari on iOS 16.4+");
       return;
     }
-    const detector = new (window as any).BarcodeDetector({ formats: ["qr_code"] });
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
     const detect = async () => {
       if (!loyaltyVideoRef.current || !loyaltyStreamRef.current) return;
       try {
@@ -1169,6 +1169,13 @@ export default function POSPage() {
   /* ─── Render ─────────────────────────────────────────────────── */
   return (
     <div className="h-screen w-screen flex flex-col md:flex-row bg-stone-950 text-white select-none overflow-hidden">
+      {/* Skip link for keyboard navigation */}
+      <a
+        href="#product-grid"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:bg-amber-500 focus:text-stone-900 focus:px-4 focus:py-2 focus:rounded font-bold"
+      >
+        Skip to menu
+      </a>
       {/* ═══════ Offline Banner ═══════ */}
       <OfflineBanner
         isOnline={isOnline}
@@ -1184,7 +1191,7 @@ export default function POSPage() {
       />
 
       {/* ═══════ COL 1 — Categories (iPad sidebar / hidden on mobile) ═══════ */}
-      <aside className="hidden md:flex w-[140px] bg-stone-900 flex-col border-r border-stone-800 shrink-0">
+      <aside aria-label="Menu categories" className="hidden md:flex w-[140px] bg-stone-900 flex-col border-r border-stone-800 shrink-0">
         {/* Logo */}
         <div className="px-4 py-5 border-b border-stone-800 flex items-center gap-2">
           <img src="/logo.png" alt="BrewHub" className="w-8 h-8 rounded-full" />
@@ -1192,11 +1199,13 @@ export default function POSPage() {
         </div>
 
         {/* Category Buttons */}
-        <nav className="flex-1 py-4 space-y-1 px-2">
+        <nav aria-label="Product categories" className="flex-1 py-4 space-y-1 px-2">
           {CATEGORIES.map((cat) => (
             <button
               key={cat.key}
               onClick={() => { setActiveCategory(cat.key); setSelectedItem(null); }}
+              aria-pressed={activeCategory === cat.key}
+              aria-current={activeCategory === cat.key ? "true" : undefined}
               className={`w-full flex items-center gap-2 px-3 py-3 min-h-[48px] rounded-lg text-xs font-semibold uppercase tracking-wider transition-all
                 ${activeCategory === cat.key
                   ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
@@ -1226,6 +1235,7 @@ export default function POSPage() {
           <button
             key={cat.key}
             onClick={() => { setActiveCategory(cat.key); setSelectedItem(null); }}
+            aria-pressed={activeCategory === cat.key}
             className={`flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap shrink-0 transition-all
               ${activeCategory === cat.key
                 ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
@@ -1239,7 +1249,7 @@ export default function POSPage() {
       </div>
 
       {/* ═══════ COL 2 — Product Builder (Item Grid + Modifier Panel) ═══════ */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
+      <main id="product-grid" aria-label="Product selection" className="flex-1 flex flex-col min-w-0 relative">
         {/* Top Bar */}
         <header className="h-14 bg-stone-900/60 backdrop-blur border-b border-stone-800 flex items-center justify-between px-6 shrink-0">
           <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-stone-400">
@@ -1376,10 +1386,10 @@ export default function POSPage() {
             </div>
           </>
         )}
-      </div>
+      </main>
 
       {/* ═══════ COL 3 — Live Ticket (desktop sidebar / mobile bottom sheet) ═══════ */}
-      <aside className={`
+      <aside aria-label="Order cart" className={`
         fixed inset-x-0 bottom-0 z-40 h-[85vh] rounded-t-2xl shadow-2xl
         transition-transform duration-300 ease-out
         ${cartDrawerOpen ? "translate-y-0" : "translate-y-full"}

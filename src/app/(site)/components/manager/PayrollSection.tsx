@@ -1,6 +1,7 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
+import ManagerChallengeModal from "@/components/ManagerChallengeModal";
 
 const API_BASE =
   typeof window !== "undefined" && window.location.hostname === "localhost"
@@ -125,6 +126,12 @@ interface OpenShiftRow {
   employee_email: string;
   clock_in: string;
   created_at: string;
+}
+
+interface PendingFixAction {
+  email: string;
+  clockOutTimeISO: string;
+  reason: string;
 }
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -302,6 +309,11 @@ export default function PayrollSection() {
   const [fixBusy, setFixBusy] = useState(false);
   const [fixError, setFixError] = useState("");
   const [fixSuccess, setFixSuccess] = useState("");
+  const [fixReason, setFixReason] = useState("");
+
+  // ---- Challenge modal state ------------------------------------
+  const [pendingAction, setPendingAction] = useState<PendingFixAction | null>(null);
+  const [showChallengeModal, setShowChallengeModal] = useState(false);
 
   // ---- Fetch + compute ------------------------------------------
   const fetchPayroll = useCallback(async () => {
@@ -402,11 +414,14 @@ export default function PayrollSection() {
   const hasMissed = payroll.some((r) => r.missedPunch);
 
   // ---- Fix clock-out handler ------------------------------------
-  const handleFixClockOut = async (email: string) => {
+  const handleFixClockOut = async (email: string, challengeNonce?: string) => {
     if (!token || !fixTime) return;
     setFixBusy(true);
     setFixError("");
     setFixSuccess("");
+
+    const clockOutTimeISO = datetimeLocalToEasternISO(fixTime);
+    const reason = fixReason.trim();
 
     try {
       const res = await fetch(`${API_BASE}/fix-clock`, {
@@ -415,19 +430,33 @@ export default function PayrollSection() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
           "X-BrewHub-Action": "true",
+          ...(challengeNonce ? { "x-brewhub-challenge": challengeNonce } : {}),
         },
         body: JSON.stringify({
           employee_email: email,
-          clock_out_time: datetimeLocalToEasternISO(fixTime),
+          clock_out_time: clockOutTimeISO,
+          reason,
+          ...(challengeNonce ? { _challenge_nonce: challengeNonce } : {}),
         }),
       });
 
       const data = await res.json();
+
+      // ---- Step-up: backend requires manager challenge ----------
+      if (res.status === 403 && (data.error ?? "").toLowerCase().includes("challenge")) {
+        setPendingAction({ email, clockOutTimeISO, reason });
+        setShowChallengeModal(true);
+        setFixBusy(false);
+        return;
+      }
+
       if (!res.ok) throw new Error(data.error || "Fix failed");
 
       setFixSuccess(`Clock-out fixed for ${email}`);
       setFixingEmail(null);
       setFixTime("");
+      setFixReason("");
+      setPendingAction(null);
       setTimeout(() => setFixSuccess(""), 4000);
 
       // Refresh both payroll data and summary
@@ -439,6 +468,49 @@ export default function PayrollSection() {
       setFixBusy(false);
     }
   };
+
+  // ---- Replay fix-clock after successful manager challenge ------
+  const handleChallengeSuccess = useCallback(async (nonce: string) => {
+    setShowChallengeModal(false);
+    if (!pendingAction || !token) return;
+
+    setFixBusy(true);
+    setFixError("");
+    try {
+      const res = await fetch(`${API_BASE}/fix-clock`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+          "x-brewhub-challenge": nonce,
+        },
+        body: JSON.stringify({
+          employee_email: pendingAction.email,
+          clock_out_time: pendingAction.clockOutTimeISO,
+          reason: pendingAction.reason,
+          _challenge_nonce: nonce,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fix failed after challenge");
+
+      setFixSuccess(`Clock-out fixed for ${pendingAction.email}`);
+      setFixingEmail(null);
+      setFixTime("");
+      setFixReason("");
+      setPendingAction(null);
+      setTimeout(() => setFixSuccess(""), 4000);
+
+      fetchPayroll();
+      fetchSummary();
+    } catch (err: unknown) {
+      setFixError(err instanceof Error ? err.message : "Failed to fix clock-out");
+    } finally {
+      setFixBusy(false);
+    }
+  }, [pendingAction, token, fetchPayroll, fetchSummary]);
 
   // ---- Render ---------------------------------------------------
   return (
@@ -573,32 +645,43 @@ export default function PayrollSection() {
                     )}
                   </div>
                   {fixingEmail === os.employee_email ? (
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex flex-col gap-1.5 flex-shrink-0 min-w-[220px]">
                       <input
                         type="datetime-local"
                         value={fixTime}
                         onChange={(e) => setFixTime(e.target.value)}
                         min={utcToEasternDatetimeLocal(os.clock_in)}
                         className="bg-[#111] border border-[#444] rounded px-2 py-1 text-xs text-white
-                                   focus:outline-none focus:ring-1 focus:ring-amber-500 w-[200px]"
+                                   focus:outline-none focus:ring-1 focus:ring-amber-500 w-full"
                       />
-                      <button
-                        type="button"
-                        disabled={!fixTime || fixBusy}
-                        onClick={() => handleFixClockOut(os.employee_email)}
-                        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40
-                                   text-white text-[10px] font-bold px-3 py-1.5 rounded transition-colors"
-                      >
-                        {fixBusy ? "Saving…" : "Save"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setFixingEmail(null); setFixTime(""); setFixError(""); }}
-                        className="text-gray-500 hover:text-white text-[10px] px-2 py-1 rounded
-                                   border border-[#333] transition-colors"
-                      >
-                        ✕
-                      </button>
+                      <input
+                        type="text"
+                        value={fixReason}
+                        onChange={(e) => setFixReason(e.target.value)}
+                        placeholder="Reason (required)"
+                        maxLength={200}
+                        className="bg-[#111] border border-[#444] rounded px-2 py-1 text-xs text-white
+                                   focus:outline-none focus:ring-1 focus:ring-amber-500 w-full"
+                      />
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          disabled={!fixTime || !fixReason.trim() || fixBusy}
+                          onClick={() => handleFixClockOut(os.employee_email)}
+                          className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40
+                                     text-white text-[10px] font-bold px-3 py-1.5 rounded transition-colors"
+                        >
+                          {fixBusy ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setFixingEmail(null); setFixTime(""); setFixReason(""); setFixError(""); }}
+                          className="text-gray-500 hover:text-white text-[10px] px-2 py-1 rounded
+                                     border border-[#333] transition-colors"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <button
@@ -724,11 +807,20 @@ export default function PayrollSection() {
                           className="bg-[#111] border border-[#444] rounded px-2 py-1 text-xs text-white
                                      focus:outline-none focus:ring-1 focus:ring-amber-500 w-full max-w-[220px]"
                         />
+                        <input
+                          type="text"
+                          value={fixReason}
+                          onChange={(e) => setFixReason(e.target.value)}
+                          placeholder="Reason for correction (required)"
+                          maxLength={200}
+                          className="bg-[#111] border border-[#444] rounded px-2 py-1 text-xs text-white
+                                     focus:outline-none focus:ring-1 focus:ring-amber-500 w-full max-w-[220px]"
+                        />
                         <span className="text-[9px] text-gray-500">Times are in Eastern (ET)</span>
                         <div className="flex gap-1.5">
                           <button
                             type="button"
-                            disabled={!fixTime || fixBusy}
+                            disabled={!fixTime || !fixReason.trim() || fixBusy}
                             onClick={() => handleFixClockOut(row.email)}
                             className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40
                                        text-white text-[10px] font-bold px-3 py-1 rounded transition-colors"
@@ -737,7 +829,7 @@ export default function PayrollSection() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => { setFixingEmail(null); setFixTime(""); setFixError(""); }}
+                            onClick={() => { setFixingEmail(null); setFixTime(""); setFixReason(""); setFixError(""); }}
                             className="text-gray-500 hover:text-white text-[10px] px-2 py-1 rounded
                                        border border-[#333] transition-colors"
                           >
@@ -795,6 +887,21 @@ export default function PayrollSection() {
           ))
         )}
       </div>
+
+      {/* ── Manager Challenge Modal ── */}
+      {showChallengeModal && token && (
+        <ManagerChallengeModal
+          actionType="fix_clock"
+          actionDescription={`Fix clock-out for ${pendingAction?.email ?? ""}`}
+          token={token}
+          onSuccess={handleChallengeSuccess}
+          onCancel={() => {
+            setShowChallengeModal(false);
+            setPendingAction(null);
+            setFixBusy(false);
+          }}
+        />
+      )}
     </section>
   );
 }

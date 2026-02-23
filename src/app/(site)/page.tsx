@@ -72,13 +72,17 @@ function linkify(text: string): React.ReactNode[] {
 
 // 1. ENGINE CONFIGURATION — client imported from @/lib/supabase
 
+type ChatMessage = { role: 'user' | 'assistant'; content: string };
+
 export default function BrewHubLanding() {
   // State Management
   const [isLoading, setIsLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [isJoined, setIsJoined] = useState(false);
+  const [waitlistError, setWaitlistError] = useState("");
   const [chatInput, setChatInput] = useState("");
-  const [messages, setMessages] = useState([{ role: 'assistant', content: "Hey! I'm Elise, your BrewHub helper. Ask me about our opening, your waitlist spot, or the menu!" }]);
+  const [chatTyping, setChatTyping] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: "Hey! I'm Elise, your BrewHub helper. Ask me about our opening, your waitlist spot, or the menu!" }]);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState("");
   const [initialRender, setInitialRender] = useState(true);
@@ -88,9 +92,9 @@ export default function BrewHubLanding() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatBoxRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<BrewSpeechRecognition | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | AudioBufferSourceNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const messagesRef = useRef(messages);
+  const messagesRef = useRef<ChatMessage[]>(messages);
 
   // Keep mutable refs so speech callbacks always see latest state (avoids stale closures)
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -112,7 +116,7 @@ export default function BrewHubLanding() {
     if (chatBoxRef.current) {
       chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, chatTyping]);
 
   // Cleanup voice on unmount
   useEffect(() => {
@@ -196,7 +200,7 @@ export default function BrewHubLanding() {
             }
           };
 
-          audioRef.current = source as unknown as HTMLAudioElement;
+      audioRef.current = source as unknown as HTMLAudioElement;
           setVoiceStatus("Elise is speaking...");
           source.start(0);
           return; // success via Web Audio
@@ -337,8 +341,12 @@ export default function BrewHubLanding() {
     }
     if (audioRef.current) {
       // Handle both HTMLAudioElement (.pause) and AudioBufferSourceNode (.stop)
-      try { (audioRef.current as any).stop?.(); } catch { /* ok */ }
-      try { (audioRef.current as any).pause?.(); } catch { /* ok */ }
+      const src = audioRef.current;
+      if (src instanceof AudioBufferSourceNode) {
+        try { src.stop(); } catch { /* already stopped */ }
+      } else if (src instanceof HTMLAudioElement) {
+        try { src.pause(); } catch { /* ok */ }
+      }
       audioRef.current = null;
     }
     if (audioContextRef.current) {
@@ -362,28 +370,38 @@ export default function BrewHubLanding() {
   // 2. WAITLIST LOGIC
   const handleWaitlist = async (e: React.FormEvent) => {
     e.preventDefault();
+    setWaitlistError("");
     const { error } = await supabase.from('waitlist').insert([{ email }]);
     if (!error) {
       setIsJoined(true);
       confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
       localStorage.setItem('brewhub_email', email);
+    } else {
+      setWaitlistError(
+        error.code === '23505'
+          ? "You're already on the list! We'll see you soon."
+          : "Something went wrong. Please try again."
+      );
     }
   };
 
   // 3. TEXT CHAT LOGIC (Claude-powered — same backend as voice)
   const handleTextChat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() || chatTyping) return;
 
     const userText = chatInput;
     setMessages(prev => [...prev, { role: 'user', content: userText }]);
     setChatInput("");
+    setChatTyping(true);
 
     try {
       const reply = await sendToClaude(userText);
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
-    } catch (err) {
+    } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: "I'm having trouble connecting to my coffee sensors. Try again in a second!" }]);
+    } finally {
+      setChatTyping(false);
     }
   };
 
@@ -426,6 +444,9 @@ export default function BrewHubLanding() {
           ) : (
             <div className="hero-success">You're on the list. We'll see you soon at the Hub. ☕</div>
           )}
+          {waitlistError && (
+            <p className="hero-success" style={{ color: 'var(--hub-brown)', fontSize: '0.9rem', marginTop: '0.5rem' }}>{waitlistError}</p>
+          )}
         </div>
       </section>
 
@@ -440,8 +461,12 @@ export default function BrewHubLanding() {
                 <span className="chat-bubble-label">{m.role === 'user' ? 'Guest' : 'Elise'}</span>
                 {linkify(m.content)}
               </div>
-            ))}
-            <div ref={chatEndRef} />
+            ))}            {chatTyping && (
+              <div className="chat-bubble chat-bubble-bot" aria-live="polite" aria-label="Elise is typing">
+                <span className="chat-bubble-label">Elise</span>
+                <span style={{ letterSpacing: '0.15em', fontSize: '1.3rem', lineHeight: 1 }}>···</span>
+              </div>
+            )}            <div ref={chatEndRef} />
           </div>
           <form onSubmit={handleTextChat} className="concierge-form">
             <input 

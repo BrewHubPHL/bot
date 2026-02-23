@@ -7,9 +7,18 @@ const API_BASE =
     ? "http://localhost:8888/.netlify/functions"
     : "/.netlify/functions";
 
+interface InventoryItem {
+  id: string;
+  item_name: string;
+  category: string | null;
+  current_stock: number;
+  min_threshold: number;
+  unit: string | null;
+}
+
 export default function InventoryTable() {
   const token = useOpsSessionOptional()?.token;
-  const [inventory, setInventory] = useState<any[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchInventory = useCallback(async () => {
@@ -21,7 +30,7 @@ export default function InventoryTable() {
       });
       if (!res.ok) throw new Error("Inventory fetch failed");
       const data = await res.json();
-      setInventory(data.inventory ?? []);
+      setInventory(data.inventory as InventoryItem[] ?? []);
     } catch (err) {
       console.error("Inventory fetch failed:", err);
     }
@@ -36,7 +45,7 @@ export default function InventoryTable() {
     <section className="mb-8">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-lg font-semibold">📦 Inventory Status</h2>
-        <button className="text-gray-400 border border-[#333] px-3 py-1 rounded hover:bg-[#222]" onClick={fetchInventory}>↻ Refresh</button>
+        <button className="text-gray-400 border border-[#333] px-3 py-1 min-h-[44px] rounded hover:bg-[#222]" onClick={fetchInventory}>↻ Refresh</button>
       </div>
       <div className="bg-[#1a1a1a] rounded-lg overflow-hidden border border-[#333]">
         <div className="grid grid-cols-4 gap-2 px-6 py-3 text-xs text-gray-400 bg-[#222]">

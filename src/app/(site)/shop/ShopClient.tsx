@@ -40,6 +40,7 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
   const [cartOpen, setCartOpen] = useState(false);
   const [addedProduct, setAddedProduct] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ShopTab>('menu');
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
 
   // Load cart from localStorage
   useEffect(() => {
@@ -225,14 +226,15 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
             >
               {/* Product Image */}
               <div className="h-48 bg-gradient-to-br from-[var(--hub-cream)] to-stone-100 flex items-center justify-center">
-                {product.image_url && /^https?:\/\//.test(product.image_url) ? (
+                {product.image_url && /^https?:\/\//.test(product.image_url) && !failedImages.has(product.name) ? (
                   <img
                     src={product.image_url}
                     alt={product.name}
                     className="w-full h-full object-cover"
+                    onError={() => setFailedImages(prev => new Set(prev).add(product.name))}
                   />
                 ) : (
-                  <span className="text-6xl">{getEmoji(product.name)}</span>
+                  <span className="text-6xl" aria-hidden="true">{getEmoji(product.name)}</span>
                 )}
               </div>
 

@@ -61,7 +61,12 @@ export default function ResidentRegisterPage() {
     });
     if (signUpError) {
       console.error("Resident signup error:", signUpError.message);
-      setError("Registration failed. Please try again.");
+      const raw = signUpError.message.toLowerCase();
+      if (raw.includes("already registered") || raw.includes("user already exists")) {
+        setError("An account with this email already exists. Please sign in from the portal.");
+      } else {
+        setError("Registration failed. Please try again.");
+      }
       setLoading(false);
       return;
     }
@@ -74,7 +79,11 @@ export default function ResidentRegisterPage() {
     });
     if (residentError) {
       console.error("Resident insert error:", residentError.message);
-      setError("Registration failed. Please try again.");
+      if (residentError.code === "23505") {
+        setError("This email or unit is already registered. Please sign in from the portal.");
+      } else {
+        setError("Registration failed. Please try again.");
+      }
       setLoading(false);
       return;
     }
@@ -89,32 +98,35 @@ export default function ResidentRegisterPage() {
         <h1 className="font-playfair text-2xl mb-4">Register for package tracking & coffee rewards.</h1>
         {success ? (
           <div className="bg-green-100 text-green-800 p-4 rounded mb-4">Registration successful! Please check your email to verify your account.</div>
-        ) : null}
-        {error ? (
-          <div className="bg-red-100 text-red-800 p-4 rounded mb-4">{error}</div>
-        ) : null}
-        <form onSubmit={handleRegister}>
-          <input type="text" placeholder="Full Name *" required maxLength={MAX_NAME} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value.slice(0, MAX_NAME) }))} />
-          <input type="text" placeholder="Unit # or Address *" required maxLength={MAX_UNIT} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value.slice(0, MAX_UNIT) }))} />
-          <input type="email" placeholder="Email *" required maxLength={MAX_EMAIL} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value.slice(0, MAX_EMAIL) }))} />
-          <input type="password" placeholder="Password (min 6 characters) *" required maxLength={MAX_PASSWORD} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value.slice(0, MAX_PASSWORD) }))} />
-          <input type="password" placeholder="Confirm Password *" required maxLength={MAX_PASSWORD} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.confirm} onChange={e => setForm(f => ({ ...f, confirm: e.target.value.slice(0, MAX_PASSWORD) }))} />
-          <input type="tel" placeholder="Phone (optional - for text alerts)" maxLength={MAX_PHONE} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value.slice(0, MAX_PHONE) }))} />
-          <div className="flex items-start gap-2 mb-2">
+        ) : (
+          <>
+            {error ? (
+              <div role="alert" className="bg-red-100 text-red-800 p-4 rounded mb-4">{error}</div>
+            ) : null}
+            <form onSubmit={handleRegister}>
+              <input type="text" placeholder="Full Name *" required maxLength={MAX_NAME} className="w-full p-3 mb-2 min-h-[44px] border border-stone-200 rounded" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value.slice(0, MAX_NAME) }))} />
+              <input type="text" placeholder="Unit # or Address *" required maxLength={MAX_UNIT} className="w-full p-3 mb-2 min-h-[44px] border border-stone-200 rounded" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value.slice(0, MAX_UNIT) }))} />
+              <input type="email" placeholder="Email *" required maxLength={MAX_EMAIL} className="w-full p-3 mb-2 min-h-[44px] border border-stone-200 rounded" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value.slice(0, MAX_EMAIL) }))} />
+              <input type="password" placeholder="Password (min 6 characters) *" required maxLength={MAX_PASSWORD} className="w-full p-3 mb-2 min-h-[44px] border border-stone-200 rounded" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value.slice(0, MAX_PASSWORD) }))} />
+              <input type="password" placeholder="Confirm Password *" required maxLength={MAX_PASSWORD} className="w-full p-3 mb-2 min-h-[44px] border border-stone-200 rounded" value={form.confirm} onChange={e => setForm(f => ({ ...f, confirm: e.target.value.slice(0, MAX_PASSWORD) }))} />
+              <input type="tel" placeholder="Phone (optional - for text alerts)" maxLength={MAX_PHONE} className="w-full p-3 mb-2 min-h-[44px] border border-stone-200 rounded" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value.slice(0, MAX_PHONE) }))} />
+              <div className="flex items-start gap-2 mb-2">
             <input type="checkbox" id="sms-consent" required className="mt-1" checked={form.sms} onChange={e => setForm(f => ({ ...f, sms: e.target.checked }))} />
             <label htmlFor="sms-consent" className="text-xs text-stone-700">
               I agree to receive SMS notifications about my packages from BrewHub PHL. Message frequency varies. Msg & data rates may apply. Reply STOP to unsubscribe.
             </label>
           </div>
-          <p className="text-xs text-stone-400 mb-4">
+              <p className="text-xs text-stone-400 mb-4">
             By registering, you agree to our
             <Link href="/terms" target="_blank" className="underline ml-1">Terms & Conditions</Link>
             and
             <Link href="/privacy" target="_blank" className="underline ml-1">Privacy Policy</Link>.
           </p>
-          <button type="submit" className="w-full bg-stone-900 text-white py-3 rounded font-bold mb-2" disabled={loading}>{loading ? "Registering..." : "Register"}</button>
-        </form>
-        <div className="text-xs text-stone-500 mt-2">Already have an account? <Link href="/portal" className="underline">Log in</Link></div>
+              <button type="submit" className="w-full bg-stone-900 text-white py-3 min-h-[44px] rounded font-bold mb-2" disabled={loading}>{loading ? "Registering..." : "Register"}</button>
+            </form>
+            <div className="text-xs text-stone-500 mt-2">Already have an account? <Link href="/portal" className="underline">Log in</Link></div>
+          </>
+        )}
       </div>
     </main>
   );

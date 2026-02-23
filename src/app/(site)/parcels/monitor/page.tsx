@@ -158,12 +158,12 @@ export default function ParcelMonitor() {
 
       {/* ═══════════ ERROR / STALE BANNER ═══════════ */}
       {fetchError && (
-        <div className="shrink-0 bg-red-900/80 text-red-200 text-center py-2 text-sm font-semibold tracking-wide">
+        <div role="alert" className="shrink-0 bg-red-900/80 text-red-200 text-center py-2 text-sm font-semibold tracking-wide">
           ⚠ Connection issue — retrying&hellip; ({fetchError})
         </div>
       )}
       {!fetchError && isStale && (
-        <div className="shrink-0 bg-amber-900/60 text-amber-200 text-center py-2 text-sm font-semibold tracking-wide">
+        <div role="status" className="shrink-0 bg-amber-900/60 text-amber-200 text-center py-2 text-sm font-semibold tracking-wide">
           ⏳ Data may be stale — last updated {Math.round((tick - lastSuccess) / 1000)}s ago
         </div>
       )}
@@ -267,7 +267,7 @@ export default function ParcelMonitor() {
 
                   {/* ── Carrier + Tracking ── */}
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className={`shrink-0 h-3 w-3 rounded-full ${carrierColor(p.carrier)}`} />
+                    <span aria-label={p.carrier ?? "Unknown carrier"} className={`shrink-0 h-3 w-3 rounded-full ${carrierColor(p.carrier)}`} />
                     <span className="text-lg md:text-xl text-gray-300 truncate">
                       {p.carrier || "Other"}
                     </span>

@@ -25,13 +25,25 @@ export default function CafePage() {
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [menuError, setMenuError] = useState(false);
-  const [orderStatus, setOrderStatus] = useState("");
+  const [orderSuccess, setOrderSuccess] = useState("");
+  const [orderError, setOrderError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // Auth state
   const [user, setUser] = useState<User | null>(null);
   const [loyaltyPoints, setLoyaltyPoints] = useState<number | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+
+  /* ─── Cart persistence ──────────────────────────────────── */
+  useEffect(() => {
+    const saved = localStorage.getItem("brewhub_cafe_cart");
+    if (saved) {
+      try { setCart(JSON.parse(saved)); } catch { /* ignore corrupt data */ }
+    }
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("brewhub_cafe_cart", JSON.stringify(cart));
+  }, [cart]);
 
   /* ─── Auth bootstrap (mirrors portal pattern) ────────────── */
   useEffect(() => {
@@ -110,9 +122,10 @@ export default function CafePage() {
   async function handleOrder(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return; // guard against double-submit
-    setOrderStatus("");
+    setOrderSuccess("");
+    setOrderError("");
     if (cart.length === 0) {
-      setOrderStatus("Please add at least one item.");
+      setOrderError("Please add at least one item.");
       return;
     }
     setSubmitting(true);
@@ -139,16 +152,20 @@ export default function CafePage() {
       const result = await resp.json();
       if (!resp.ok) throw new Error(result.error || "Order failed");
       setCart([]);
-      setOrderStatus(
+      setCart([]);
+      localStorage.removeItem("brewhub_cafe_cart");
+      setOrderSuccess(
         user
           ? "Order placed! You earned loyalty points toward a free drink. ☕"
           : "Order placed! Thank you."
       );
+      setOrderError("");
       // Refresh loyalty points after successful order
       if (user) loadLoyalty(user.id);
     } catch (err: unknown) {
       const msg = (err as Error)?.message;
-      setOrderStatus(msg && !msg.includes("supabase") ? msg : "Order failed. Please try again.");
+      setOrderError(msg && !msg.includes("supabase") ? msg : "Order failed. Please try again.");
+      setOrderSuccess("");
     } finally {
       setSubmitting(false);
     }
@@ -158,14 +175,17 @@ export default function CafePage() {
     <main className="max-w-2xl mx-auto px-4 py-10 text-stone-900 bg-white rounded-md shadow-md">
       <header className="flex items-center justify-between mb-8 border-b pb-4">
         <div className="flex items-center gap-3 font-bold text-lg">
-          <img src="/logo.png" alt="BrewHub PHL logo" className="h-9 w-9 rounded-full" />
+          <img
+            src="/logo.png"
+            alt="BrewHub PHL logo"
+            className="h-9 w-9 rounded-full"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+          />
           BrewHub Cafe
         </div>
         <nav className="flex gap-4 text-xs">
-          <Link href="/cafe" className="text-stone-900 font-bold underline">Cafe POS</Link>
-          <Link href="/parcels" className="text-stone-500 hover:text-stone-900">Parcel Hub</Link>
-          <Link href="/scanner" className="text-stone-500 hover:text-stone-900">Inventory</Link>
-          <Link href="/manager" className="text-stone-500 hover:text-stone-900">Dashboard</Link>
+          <Link href="/" className="text-stone-500 hover:text-stone-900">Home</Link>
+          <Link href="/portal" className="text-stone-500 hover:text-stone-900">My Account</Link>
         </nav>
       </header>
       <h1 className="font-playfair text-2xl mb-4">Order Coffee &amp; Drinks</h1>
@@ -223,7 +243,10 @@ export default function CafePage() {
                   <div className="font-semibold">{item.name}</div>
                   <div className="text-xs text-stone-500">${(item.price_cents / 100).toFixed(2)}</div>
                 </div>
-                <button className="bg-stone-900 text-white px-3 py-1 rounded text-xs font-bold" onClick={() => addToCart(item)}>
+                <button
+                  className="bg-stone-900 text-white px-4 rounded text-sm font-bold min-h-[44px] min-w-[44px] hover:bg-stone-700 transition-colors"
+                  onClick={() => addToCart(item)}
+                >
                   Add
                 </button>
               </div>
@@ -240,7 +263,10 @@ export default function CafePage() {
             {cart.map((item, idx) => (
               <li key={idx} className="flex items-center justify-between border-b border-stone-100 py-1">
                 <span>{item.name} x{item.quantity} — ${((item.price_cents * item.quantity) / 100).toFixed(2)}</span>
-                <button className="text-red-500 text-xs ml-2" onClick={() => removeFromCart(idx)}>
+                <button
+                  className="text-red-500 text-xs ml-2 min-h-[44px] px-3 hover:text-red-700 transition-colors"
+                  onClick={() => removeFromCart(idx)}
+                >
                   Remove
                 </button>
               </li>
@@ -252,7 +278,12 @@ export default function CafePage() {
             {submitting ? "Placing Order…" : "Place Order"}
           </button>
         </form>
-        {orderStatus && <div className="mt-2 text-xs text-center text-stone-600">{orderStatus}</div>}
+        {orderSuccess && (
+          <div className="mt-2 text-xs text-center text-green-700 font-semibold">{orderSuccess}</div>
+        )}
+        {orderError && (
+          <div className="mt-2 text-xs text-center text-red-600">{orderError}</div>
+        )}
       </div>
       <footer className="mt-10 text-xs text-stone-400 uppercase">BrewHub PHL &bull; Point Breeze, Philadelphia</footer>
     </main>

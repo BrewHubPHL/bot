@@ -14,11 +14,13 @@ export default function StatsGrid() {
   const [staffCount, setStaffCount] = useState<number>(0);
   const [labor, setLabor] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
     async function fetchStats() {
       setLoading(true);
+      setFetchError(null);
       try {
         const res = await fetch(`${API_BASE}/get-manager-stats`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -30,7 +32,9 @@ export default function StatsGrid() {
         setStaffCount(data.staffCount ?? 0);
         setLabor(data.labor ?? 0);
       } catch (err) {
-        console.error("Stats fetch failed:", (err as Error)?.message);
+        const msg = err instanceof Error ? err.message : "Failed to load stats";
+        console.error("Stats fetch failed:", msg);
+        setFetchError(msg);
       }
       setLoading(false);
     }
@@ -38,7 +42,11 @@ export default function StatsGrid() {
   }, [token]);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+    <>
+      {fetchError && (
+        <p role="alert" className="col-span-4 text-red-400 text-sm bg-red-950/40 rounded px-4 py-2 mb-2">{fetchError}</p>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
       <div className="bg-[#1a1a1a] rounded-xl p-6 border border-[#333]">
         <div className="text-xs text-gray-400 mb-1 flex items-center justify-between">
           Today's Revenue <span className="ml-2 text-xs">🔄</span>
@@ -62,5 +70,6 @@ export default function StatsGrid() {
         <div className="text-xs text-gray-500">Total Shift Cost</div>
       </div>
     </div>
+    </>
   );
 }

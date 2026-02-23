@@ -10,19 +10,20 @@
  * - Scanner page (shows offline notice)
  */
 
-const CACHE_NAME = 'brewhub-v1';
-const API_CACHE = 'brewhub-api-v1';
+const CACHE_NAME = 'brewhub-v2';
+const API_CACHE = 'brewhub-api-v2';
 
-// App shell: critical paths + assets that must work offline
+// App shell: public routes safe to pre-cache (no auth required)
 const APP_SHELL = [
   '/',
-  '/pos',
-  '/kds',
-  '/scanner',
-  '/staff-hub',
+  '/cafe',
   '/login',
   '/site.webmanifest',
 ];
+
+// Protected ops routes — behind OpsGate, never pre-cached by SW.
+// The app's middleware handles auth; the SW must not intercept these.
+const PROTECTED_ROUTES = ['/pos', '/kds', '/scanner', '/staff-hub'];
 
 // ── Install: Pre-cache app shell ────────────────────────────────
 self.addEventListener('install', (event) => {
@@ -70,6 +71,11 @@ self.addEventListener('fetch', (event) => {
 
   // Skip chrome-extension, etc.
   if (!url.protocol.startsWith('http')) return;
+
+  // Never intercept protected ops routes — OpsGate middleware owns auth.
+  // Caching a 302 redirect here would poison the cache with login pages.
+  const isProtected = PROTECTED_ROUTES.some(p => url.pathname.startsWith(p));
+  if (isProtected) return;
 
   // ── API calls: Network-first with cache fallback ──────────
   if (url.pathname.startsWith('/.netlify/functions/') || url.pathname.startsWith('/api/')) {
@@ -154,7 +160,7 @@ async function staleWhileRevalidate(request) {
 
   // Offline fallback page for navigation requests
   if (request.mode === 'navigate') {
-    const shellFallback = await cache.match('/pos');
+    const shellFallback = await cache.match('/cafe') || await cache.match('/login');
     if (shellFallback) return shellFallback;
   }
 

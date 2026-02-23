@@ -12,9 +12,40 @@ interface CartItem {
   quantity: number;
 }
 
+/* ── Square Web SDK — minimal ambient types ──────────────────────── */
+interface SquareTokenizeResult {
+  status: string;
+  token: string;
+  errors?: { message: string }[];
+}
+interface SquareCard {
+  attach(selector: string): Promise<void>;
+  tokenize(): Promise<SquareTokenizeResult>;
+  destroy(): void;
+}
+interface SquarePaymentMethod {
+  tokenize(): Promise<SquareTokenizeResult>;
+  attach(selector: string): Promise<void>;
+  destroy?(): void;
+}
+interface SquarePaymentRequest {
+  update(options: { total: { amount: string; label: string } }): void;
+}
+interface SquarePayments {
+  card(): Promise<SquareCard>;
+  applePay(request: SquarePaymentRequest): Promise<SquarePaymentMethod>;
+  googlePay(request: SquarePaymentRequest): Promise<SquarePaymentMethod>;
+  paymentRequest(options: {
+    countryCode: string;
+    currencyCode: string;
+    total: { amount: string; label: string };
+  }): SquarePaymentRequest;
+}
 declare global {
   interface Window {
-    Square?: any;
+    Square?: {
+      payments(appId: string, locationId: string): SquarePayments;
+    };
   }
 }
 
@@ -32,12 +63,14 @@ export default function CheckoutPage() {
   const [googlePayReady, setGooglePayReady] = useState(false);
   const [walletProcessing, setWalletProcessing] = useState(false);
 
-  const cardRef = useRef<any>(null);
-  const paymentsRef = useRef<any>(null);
-  const applePayRef = useRef<any>(null);
-  const googlePayRef = useRef<any>(null);
+  const cardRef = useRef<SquareCard | null>(null);
+  const paymentsRef = useRef<SquarePayments | null>(null);
+  const applePayRef = useRef<SquarePaymentMethod | null>(null);
+  const googlePayRef = useRef<SquarePaymentMethod | null>(null);
   const squareConfigRef = useRef<{ appId: string; locationId: string } | null>(null);
-  const walletPaymentRequestRef = useRef<any>(null);
+  const walletPaymentRequestRef = useRef<SquarePaymentRequest | null>(null);
+
+  const [squareLoadError, setSquareLoadError] = useState(false);
 
   const totalCents = cart.reduce((sum, item) => sum + (item.price_cents * item.quantity), 0);
 
@@ -52,6 +85,13 @@ export default function CheckoutPage() {
       }
     }
   }, []);
+
+  // SDK load timeout — if square.js never fires onLoad, warn the user after 10s
+  useEffect(() => {
+    if (squareReady) return;
+    const id = setTimeout(() => setSquareLoadError(true), 10_000);
+    return () => clearTimeout(id);
+  }, [squareReady]);
 
   // Initialize Square when SDK loads
   useEffect(() => {
@@ -74,6 +114,7 @@ export default function CheckoutPage() {
         };
 
         // Initialize Square Payments
+        if (!window.Square) throw new Error('Square SDK not loaded');
         paymentsRef.current = window.Square.payments(config.squareAppId, config.squareLocationId);
 
         // Create card input
@@ -165,8 +206,8 @@ export default function CheckoutPage() {
       } else {
         throw new Error(data.error || 'Payment failed');
       }
-    } catch (err: any) {
-      setError(err.message || 'Payment failed. Please try again.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Payment failed. Please try again.');
     }
 
     setLoading(false);
@@ -192,14 +233,14 @@ export default function CheckoutPage() {
       }
 
       await submitPayment(result.token);
-    } catch (err: any) {
-      setError(err.message || 'Payment failed. Please try again.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Payment failed. Please try again.');
       setLoading(false);
     }
   }
 
   // ── Wallet payment (Apple Pay / Google Pay) ──
-  async function handleWalletPayment(walletMethod: any, walletName: string) {
+  async function handleWalletPayment(walletMethod: SquarePaymentMethod, walletName: string) {
     if (!email.trim()) {
       setError('Please enter your email before paying');
       return;
@@ -216,8 +257,8 @@ export default function CheckoutPage() {
       } else {
         throw new Error(result.errors?.[0]?.message || `${walletName} payment failed`);
       }
-    } catch (err: any) {
-      setError(err.message || `${walletName} payment failed. Please try card payment.`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : `${walletName} payment failed. Please try card payment.`);
       setWalletProcessing(false);
     }
   }
@@ -343,7 +384,7 @@ export default function CheckoutPage() {
                     {applePayReady && (
                       <button
                         type="button"
-                        onClick={() => handleWalletPayment(applePayRef.current, 'Apple Pay')}
+                        onClick={() => handleWalletPayment(applePayRef.current!, 'Apple Pay')}
                         disabled={loading || walletProcessing}
                         className="w-full h-12 bg-black text-white rounded-lg font-medium text-base disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-900 transition-colors"
                         style={{ WebkitAppearance: '-apple-pay-button' } as React.CSSProperties}
@@ -355,7 +396,7 @@ export default function CheckoutPage() {
                     {googlePayReady && (
                       <div
                         id="google-pay-button"
-                        onClick={() => handleWalletPayment(googlePayRef.current, 'Google Pay')}
+                        onClick={() => handleWalletPayment(googlePayRef.current!, 'Google Pay')}
                         className="min-h-[48px] rounded-lg overflow-hidden cursor-pointer"
                       />
                     )}
@@ -380,6 +421,11 @@ export default function CheckoutPage() {
                     <p className="text-sm text-stone-400 mt-2 flex items-center gap-2">
                       <Loader2 size={14} className="animate-spin" />
                       Loading payment form...
+                    </p>
+                  )}
+                  {squareLoadError && !squareReady && (
+                    <p className="text-sm text-red-600 mt-2">
+                      Payment system failed to load. Please refresh the page or try a different browser.
                     </p>
                   )}
                 </div>

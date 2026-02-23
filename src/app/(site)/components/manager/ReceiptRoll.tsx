@@ -50,7 +50,10 @@ export default function ReceiptRoll() {
   const token = useOpsSessionOptional()?.token;
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
+  const [rateLimited, setRateLimited] = useState(false);
   const initialLoadDone = useRef(false);
+  const backoffRef = useRef<number>(POLL_INTERVAL_MS);
+  const backoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch receipts via server-side Netlify function (bypasses RLS)
   const loadReceipts = useCallback(async () => {
@@ -59,7 +62,14 @@ export default function ReceiptRoll() {
       const res = await fetch(`${API_BASE}/get-receipts?limit=10`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 429) {
+        backoffRef.current = Math.min(backoffRef.current * 2, 120_000);
+        setRateLimited(true);
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setRateLimited(false);
+      backoffRef.current = POLL_INTERVAL_MS;
       const json = await res.json();
       const incoming = (json.receipts ?? []) as Receipt[];
 
@@ -84,24 +94,19 @@ export default function ReceiptRoll() {
     }
   }, [token]);
 
+  // Poll for new receipts with exponential backoff on 429
   useEffect(() => {
     if (!token) return;
-    loadReceipts();
-  }, [token, loadReceipts]);
-
-  // Poll for new receipts (Realtime requires publication + RLS config;
-  // server-side polling is more reliable for the manager dashboard)
-  useEffect(() => {
-    if (!token) return;
-
-    const poll = setInterval(() => {
-      loadReceipts();
-    }, POLL_INTERVAL_MS);
-
-    console.log("[ReceiptRoll] Polling active");
-
+    let cancelled = false;
+    const schedule = async () => {
+      if (cancelled) return;
+      await loadReceipts();
+      if (!cancelled) backoffTimerRef.current = setTimeout(schedule, backoffRef.current);
+    };
+    schedule();
     return () => {
-      clearInterval(poll);
+      cancelled = true;
+      if (backoffTimerRef.current) clearTimeout(backoffTimerRef.current);
     };
   }, [token, loadReceipts]);
 
@@ -178,6 +183,12 @@ export default function ReceiptRoll() {
           100% { box-shadow: 2px 4px 12px rgba(0,0,0,0.45); }
         }
       `}</style>
+
+      {rateLimited && (
+        <div role="status" aria-live="polite" className="text-xs text-amber-400 font-mono px-3 py-1.5 bg-amber-950/40 rounded mb-2">
+          ⏳ Rate limited — backing off, will retry automatically
+        </div>
+      )}
 
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-lg font-semibold">🖨️ Live Receipt Roll</h2>

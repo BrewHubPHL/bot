@@ -7,9 +7,30 @@ const API_BASE =
     ? "http://localhost:8888/.netlify/functions"
     : "/.netlify/functions";
 
+interface ActivityEvent {
+  type: "order" | "inventory";
+  id: string;
+  label: string;
+  time: string;
+}
+
+interface OrderRecord {
+  id: string;
+  customer_name: string | null;
+  status: string;
+  created_at: string;
+}
+
+interface InventoryRecord {
+  id: string;
+  item_name: string;
+  current_stock: number;
+  updated_at: string;
+}
+
 export default function RecentActivity() {
   const token = useOpsSessionOptional()?.token;
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -23,14 +44,14 @@ export default function RecentActivity() {
         if (!res.ok) throw new Error("Activity fetch failed");
         const data = await res.json();
 
-        const orderEvents = (data.orders || []).map((o: any) => ({
-          type: "order",
+        const orderEvents = (data.orders as OrderRecord[] || []).map((o) => ({
+          type: "order" as const,
           id: o.id,
           label: `Order: ${o.customer_name || 'Guest'} (${o.status})`,
           time: o.created_at,
         }));
-        const inventoryEvents = (data.inventory || []).map((i: any) => ({
-          type: "inventory",
+        const inventoryEvents = (data.inventory as InventoryRecord[] || []).map((i) => ({
+          type: "inventory" as const,
           id: i.id,
           label: `Inventory: ${i.item_name} (${i.current_stock})`,
           time: i.updated_at,
