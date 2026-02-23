@@ -101,6 +101,10 @@ exports.handler = async (event) => {
       const idStr = String(order.id || '----');
       const minutesAgo = order.created_at ? Math.round((Date.now() - new Date(order.created_at).getTime()) / 60000) : null;
 
+      // An order is paid once it reaches 'paid', 'preparing', 'ready', or 'completed'.
+      // 'pending' and 'unpaid' are the only pre-payment states.
+      const isPaid = ['paid', 'preparing', 'ready', 'completed'].includes(order.status);
+
       return {
         position: index + 1,
         name: firstName,
@@ -108,6 +112,7 @@ exports.handler = async (event) => {
         items,
         status: order.status,
         minutesAgo,
+        isPaid,
       };
     });
 
