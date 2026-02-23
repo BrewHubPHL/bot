@@ -2,8 +2,10 @@
 
 import { useState, useCallback, useEffect, createContext, useContext, type ReactNode } from "react";
 import {
-  Lock, LogIn, LogOut, Loader2, Clock, AlertCircle, User, CheckCircle2, Delete
+  Lock, LogIn, LogOut, Loader2, Clock, AlertCircle, User, CheckCircle2, Delete, Shield
 } from "lucide-react";
+import PinRotationModal from "./PinRotationModal";
+import ManagerChallengeModal from "./ManagerChallengeModal";
 
 /* ─── Types ────────────────────────────────────────────── */
 interface StaffInfo {
@@ -17,9 +19,20 @@ interface StaffInfo {
 interface OpsSession {
   staff: StaffInfo;
   token: string;
+  needsPinRotation?: boolean;
+}
+
+/**
+ * Manager challenge hook result.
+ * Components use this to gate sensitive actions behind TOTP verification.
+ */
+export interface ManagerChallenge {
+  /** Call to start a manager challenge flow. Returns the nonce on success, null on cancel. */
+  requestChallenge: (actionType: string, description: string) => Promise<string | null>;
 }
 
 const OpsSessionContext = createContext<OpsSession | null>(null);
+const ManagerChallengeContext = createContext<ManagerChallenge | null>(null);
 
 /** Hook for child pages to access the authenticated staff member & token */
 export function useOpsSession(): OpsSession {
@@ -31,6 +44,20 @@ export function useOpsSession(): OpsSession {
 /** Safe variant – returns null when rendered outside <OpsGate> (e.g. (site) route) */
 export function useOpsSessionOptional(): OpsSession | null {
   return useContext(OpsSessionContext);
+}
+
+/**
+ * Hook for child pages to gate manager actions behind a TOTP challenge.
+ * Usage:
+ *   const { requestChallenge } = useManagerChallenge();
+ *   const nonce = await requestChallenge('fix_clock', 'Fix missing clock-out');
+ *   if (!nonce) return; // user cancelled
+ *   // include nonce in the API call body as _challenge_nonce
+ */
+export function useManagerChallenge(): ManagerChallenge {
+  const ctx = useContext(ManagerChallengeContext);
+  if (!ctx) throw new Error("useManagerChallenge must be used within <OpsGate>");
+  return ctx;
 }
 
 /* ─── Helpers ──────────────────────────────────────────── */
@@ -51,6 +78,15 @@ export default function OpsGate({ children, requireManager = false }: { children
   const [verifying, setVerifying] = useState(false);
   const [clockLoading, setClockLoading] = useState(false);
   const [clockMsg, setClockMsg] = useState("");
+
+  // Schema 47: PIN rotation + manager challenge state
+  const [showPinRotation, setShowPinRotation] = useState(false);
+  const [pinRotationDeferred, setPinRotationDeferred] = useState(false);
+  const [challengeState, setChallengeState] = useState<{
+    actionType: string;
+    description: string;
+    resolve: (nonce: string | null) => void;
+  } | null>(null);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -101,7 +137,7 @@ export default function OpsGate({ children, requireManager = false }: { children
       setSession(syncedSession);
       sessionStorage.setItem("ops_session", JSON.stringify(syncedSession));
     } catch (err) {
-      console.error("[OpsGate] Session verification failed:", err);
+      console.error("[OpsGate] Session verification failed:", (err as Error)?.message);
       sessionStorage.removeItem("ops_session");
       setSession(null);
     } finally {
@@ -193,10 +229,19 @@ export default function OpsGate({ children, requireManager = false }: { children
         return;
       }
 
-      const newSession: OpsSession = { staff: data.staff, token: data.token };
+      const newSession: OpsSession = {
+        staff: data.staff,
+        token: data.token,
+        needsPinRotation: data.needsPinRotation || false,
+      };
       setSession(newSession);
       sessionStorage.setItem("ops_session", JSON.stringify(newSession));
       setPin("");
+
+      // Schema 47: Prompt PIN rotation if needed
+      if (data.needsPinRotation) {
+        setShowPinRotation(true);
+      }
     } catch {
       setError("Connection error — try again");
       setPin("");
@@ -266,6 +311,22 @@ export default function OpsGate({ children, requireManager = false }: { children
     fetch(`${API_BASE}/pin-logout`, { method: "POST", headers: { "X-BrewHub-Action": "true" }, credentials: "include" }).catch(() => {});
   }, []);
 
+  // ═══════════════════════════════════════════════════════════════
+  // Schema 47: Manager Challenge — prompts TOTP verification
+  // for sensitive actions. Returns a Promise that resolves with
+  // the nonce (or null if cancelled).
+  // ═══════════════════════════════════════════════════════════════
+  const requestChallenge = useCallback(
+    (actionType: string, description: string): Promise<string | null> => {
+      return new Promise((resolve) => {
+        setChallengeState({ actionType, description, resolve });
+      });
+    },
+    []
+  );
+
+  const managerChallengeValue: ManagerChallenge = { requestChallenge };
+
   /* ─── SSR / pre-mount: show blank black screen to avoid hydration mismatch ─── */
   if (!mounted) {
     return (
@@ -307,62 +368,109 @@ export default function OpsGate({ children, requireManager = false }: { children
 
     return (
       <OpsSessionContext.Provider value={session}>
-        {/* Persistent header bar */}
-        <div className="fixed top-0 left-0 right-0 z-40 bg-zinc-900 border-b border-zinc-700 px-4 py-2 flex items-center justify-between text-sm">
-          <div className="flex items-center gap-3">
-            <User className="w-4 h-4 text-amber-400" />
-            <span className="font-medium text-white">{session.staff.name}</span>
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-              session.staff.is_working
-                ? "bg-green-900/50 text-green-400"
-                : "bg-zinc-700 text-zinc-400"
-            }`}>
-              {session.staff.is_working ? "On Shift" : "Off Shift"}
-            </span>
+        <ManagerChallengeContext.Provider value={managerChallengeValue}>
+          {/* Schema 47: PIN Rotation Modal */}
+          {showPinRotation && !pinRotationDeferred && (
+            <PinRotationModal
+              email={session.staff.email}
+              token={session.token}
+              onSuccess={() => {
+                setShowPinRotation(false);
+                // PIN changed → session invalidated → force re-login
+                handleLogout();
+              }}
+              onDefer={() => {
+                setShowPinRotation(false);
+                setPinRotationDeferred(true);
+              }}
+              canDefer
+            />
+          )}
+
+          {/* Schema 47: Manager Challenge Modal */}
+          {challengeState && (
+            <ManagerChallengeModal
+              actionType={challengeState.actionType}
+              actionDescription={challengeState.description}
+              token={session.token}
+              onSuccess={(nonce) => {
+                challengeState.resolve(nonce);
+                setChallengeState(null);
+              }}
+              onCancel={() => {
+                challengeState.resolve(null);
+                setChallengeState(null);
+              }}
+            />
+          )}
+
+          {/* Persistent header bar */}
+          <div className="fixed top-0 left-0 right-0 z-40 bg-zinc-900 border-b border-zinc-700 px-4 py-2 flex items-center justify-between text-sm">
+            <div className="flex items-center gap-3">
+              <User className="w-4 h-4 text-amber-400" />
+              <span className="font-medium text-white">{session.staff.name}</span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                session.staff.is_working
+                  ? "bg-green-900/50 text-green-400"
+                  : "bg-zinc-700 text-zinc-400"
+              }`}>
+                {session.staff.is_working ? "On Shift" : "Off Shift"}
+              </span>
+              {/* Schema 47: PIN rotation reminder badge */}
+              {session.needsPinRotation && pinRotationDeferred && (
+                <button
+                  onClick={() => setShowPinRotation(true)}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-900/50 text-amber-400 hover:bg-amber-800/50 transition-colors"
+                  title="Your PIN needs to be rotated"
+                >
+                  <Shield className="w-3 h-3" /> Change PIN
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Clock In/Out buttons */}
+              {clockLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+              ) : (
+                <>
+                  {!session.staff.is_working ? (
+                    <button
+                      onClick={() => handleClock("in")}
+                      className="flex items-center gap-1.5 px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <LogIn className="w-3.5 h-3.5" /> Clock In
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleClock("out")}
+                      className="flex items-center gap-1.5 px-3 py-1 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <LogOut className="w-3.5 h-3.5" /> Clock Out
+                    </button>
+                  )}
+                </>
+              )}
+
+              {clockMsg && (
+                <span className="text-xs text-amber-300 max-w-48 truncate">{clockMsg}</span>
+              )}
+
+              <div className="w-px h-5 bg-zinc-700 mx-1" />
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-white text-xs transition-colors"
+                title="Lock screen"
+              >
+                <Lock className="w-3.5 h-3.5" /> Lock
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Clock In/Out buttons */}
-            {clockLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
-            ) : (
-              <>
-                {!session.staff.is_working ? (
-                  <button
-                    onClick={() => handleClock("in")}
-                    className="flex items-center gap-1.5 px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-xs font-medium rounded-lg transition-colors"
-                  >
-                    <LogIn className="w-3.5 h-3.5" /> Clock In
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleClock("out")}
-                    className="flex items-center gap-1.5 px-3 py-1 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg transition-colors"
-                  >
-                    <LogOut className="w-3.5 h-3.5" /> Clock Out
-                  </button>
-                )}
-              </>
-            )}
-
-            {clockMsg && (
-              <span className="text-xs text-amber-300 max-w-48 truncate">{clockMsg}</span>
-            )}
-
-            <div className="w-px h-5 bg-zinc-700 mx-1" />
-
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-white text-xs transition-colors"
-              title="Lock screen"
-            >
-              <Lock className="w-3.5 h-3.5" /> Lock
-            </button>
-          </div>
-        </div>
-
-        {/* Main content offset below header */}
-        <div className="pt-10">{children}</div>
+          {/* Main content offset below header */}
+          <div className="pt-10">{children}</div>
+        </ManagerChallengeContext.Provider>
       </OpsSessionContext.Provider>
     );
   }

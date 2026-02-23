@@ -1,7 +1,14 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+
+const MAX_NAME = 100;
+const MAX_UNIT = 20;
+const MAX_EMAIL = 254;
+const MAX_PHONE = 20;
+const MAX_PASSWORD = 128;
+const MIN_FORM_TIME_MS = 2000; // bot timing guard
 
 export default function ResidentRegisterPage() {
   const [form, setForm] = useState({
@@ -16,6 +23,7 @@ export default function ResidentRegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const formLoadedAt = useRef(Date.now());
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
@@ -29,29 +37,44 @@ export default function ResidentRegisterPage() {
       setError("Passwords do not match.");
       return;
     }
+    // Bot timing guard
+    if (Date.now() - formLoadedAt.current < MIN_FORM_TIME_MS) {
+      setError("Please slow down and try again.");
+      return;
+    }
     setLoading(true);
+
+    // Cap inputs
+    const safeName = form.name.slice(0, MAX_NAME);
+    const safeUnit = form.unit.slice(0, MAX_UNIT);
+    const safeEmail = form.email.slice(0, MAX_EMAIL);
+    const safePhone = form.phone.slice(0, MAX_PHONE);
+    const safePassword = form.password.slice(0, MAX_PASSWORD);
+
     // 1. Register user with Supabase Auth
     const { data, error: signUpError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
+      email: safeEmail,
+      password: safePassword,
       options: {
-        data: { full_name: form.name, unit_number: form.unit, phone: form.phone }
+        data: { full_name: safeName, unit_number: safeUnit, phone: safePhone }
       }
     });
     if (signUpError) {
-      setError(signUpError.message);
+      console.error("Resident signup error:", signUpError.message);
+      setError("Registration failed. Please try again.");
       setLoading(false);
       return;
     }
     // 2. Add to residents table
     const { error: residentError } = await supabase.from("residents").insert({
-      name: form.name,
-      unit_number: form.unit,
-      email: form.email,
-      phone: form.phone
+      name: safeName,
+      unit_number: safeUnit,
+      email: safeEmail,
+      phone: safePhone
     });
     if (residentError) {
-      setError(residentError.message);
+      console.error("Resident insert error:", residentError.message);
+      setError("Registration failed. Please try again.");
       setLoading(false);
       return;
     }
@@ -71,12 +94,12 @@ export default function ResidentRegisterPage() {
           <div className="bg-red-100 text-red-800 p-4 rounded mb-4">{error}</div>
         ) : null}
         <form onSubmit={handleRegister}>
-          <input type="text" placeholder="Full Name *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-          <input type="text" placeholder="Unit # or Address *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} />
-          <input type="email" placeholder="Email *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-          <input type="password" placeholder="Password (min 6 characters) *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
-          <input type="password" placeholder="Confirm Password *" required className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.confirm} onChange={e => setForm(f => ({ ...f, confirm: e.target.value }))} />
-          <input type="tel" placeholder="Phone (optional - for text alerts)" className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+          <input type="text" placeholder="Full Name *" required maxLength={MAX_NAME} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value.slice(0, MAX_NAME) }))} />
+          <input type="text" placeholder="Unit # or Address *" required maxLength={MAX_UNIT} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value.slice(0, MAX_UNIT) }))} />
+          <input type="email" placeholder="Email *" required maxLength={MAX_EMAIL} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value.slice(0, MAX_EMAIL) }))} />
+          <input type="password" placeholder="Password (min 6 characters) *" required maxLength={MAX_PASSWORD} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value.slice(0, MAX_PASSWORD) }))} />
+          <input type="password" placeholder="Confirm Password *" required maxLength={MAX_PASSWORD} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.confirm} onChange={e => setForm(f => ({ ...f, confirm: e.target.value.slice(0, MAX_PASSWORD) }))} />
+          <input type="tel" placeholder="Phone (optional - for text alerts)" maxLength={MAX_PHONE} className="w-full p-3 mb-2 border border-stone-200 rounded" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value.slice(0, MAX_PHONE) }))} />
           <div className="flex items-start gap-2 mb-2">
             <input type="checkbox" id="sms-consent" required className="mt-1" checked={form.sms} onChange={e => setForm(f => ({ ...f, sms: e.target.checked }))} />
             <label htmlFor="sms-consent" className="text-xs text-stone-700">

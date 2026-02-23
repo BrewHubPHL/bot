@@ -71,8 +71,8 @@ async function getMenuPrices() {
     .is('archived_at', null);
   
   if (error || !data || data.length === 0) {
-    console.warn('[AI-ORDER] Using fallback prices');
-    return FALLBACK_PRICES;
+    console.warn('[AI-ORDER] DB menu lookup failed — rejecting order (fail-closed)');
+    return null; // Audit #24: fail-closed — do not use stale fallback prices for real charges
   }
   
   const prices = {};
@@ -185,8 +185,14 @@ exports.handler = async (event) => {
       });
     }
 
-    // Load menu prices
+    // Load menu prices — fail-closed: reject order if DB is unreachable
     const menuPrices = await getMenuPrices();
+    if (!menuPrices) {
+      return json(503, {
+        success: false,
+        error: 'Menu system temporarily unavailable. Please try again in a moment or order at the counter.'
+      });
+    }
     const menuItemNames = Object.keys(menuPrices);
 
     // Validate and calculate order

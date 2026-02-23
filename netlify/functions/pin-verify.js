@@ -59,7 +59,7 @@ exports.handler = async (event) => {
       })
     };
   } catch (err) {
-    console.error('[PIN-VERIFY] Error:', err);
+    console.error('[PIN-VERIFY] Error:', err?.message);
     return {
       statusCode: 500,
       headers: corsHeaders,

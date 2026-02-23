@@ -37,6 +37,7 @@ export default function CheckoutPage() {
   const applePayRef = useRef<any>(null);
   const googlePayRef = useRef<any>(null);
   const squareConfigRef = useRef<{ appId: string; locationId: string } | null>(null);
+  const walletPaymentRequestRef = useRef<any>(null);
 
   const totalCents = cart.reduce((sum, item) => sum + (item.price_cents * item.quantity), 0);
 
@@ -47,7 +48,7 @@ export default function CheckoutPage() {
       try {
         setCart(JSON.parse(saved));
       } catch (e) {
-        console.error('Failed to load cart:', e);
+        console.error('Failed to load cart:', (e as Error)?.message);
       }
     }
   }, []);
@@ -89,6 +90,7 @@ export default function CheckoutPage() {
             label: 'BrewHub PHL',
           },
         });
+        walletPaymentRequestRef.current = walletPaymentRequest;
 
         // Try Apple Pay (only available on Safari / iOS with configured wallet)
         try {
@@ -118,7 +120,24 @@ export default function CheckoutPage() {
       if (cardRef.current) cardRef.current.destroy();
       if (googlePayRef.current) googlePayRef.current.destroy?.();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [squareReady, cart.length]);
+
+  // Keep wallet payment request amount in sync when total changes (FE-H3 fix)
+  useEffect(() => {
+    if (walletPaymentRequestRef.current && totalCents > 0) {
+      try {
+        walletPaymentRequestRef.current.update({
+          total: {
+            amount: (totalCents / 100).toFixed(2),
+            label: 'BrewHub PHL',
+          },
+        });
+      } catch {
+        // Square SDK may not support update on all payment request types
+      }
+    }
+  }, [totalCents]);
 
   // ── Shared: submit payment with a tokenized nonce ──
   const submitPayment = useCallback(async (sourceId: string) => {
@@ -132,8 +151,8 @@ export default function CheckoutPage() {
         body: JSON.stringify({
           cart,
           sourceId,
-          customerEmail: email.trim(),
-          customerName: name.trim(),
+          customerEmail: email.trim().slice(0, 254),
+          customerName: name.trim().slice(0, 100),
         }),
       });
 

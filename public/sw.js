@@ -163,6 +163,15 @@ async function staleWhileRevalidate(request) {
 
 // ── Message handler: Manual cache updates from app ──────────────
 self.addEventListener('message', (event) => {
+  // Validate sender origin: only accept messages from same-origin clients
+  try {
+    const sourceUrl = event.source && event.source.url;
+    const origin = sourceUrl ? new URL(sourceUrl).origin : null;
+    const allowedOrigins = [self.location.origin, 'https://brewhubphl.com', 'https://www.brewhubphl.com'];
+    if (!origin || !allowedOrigins.includes(origin)) return;
+  } catch (e) {
+    return;
+  }
   if (event.data?.type === 'CACHE_MENU') {
     // App sends fresh menu data to cache
     const menuResponse = new Response(JSON.stringify(event.data.payload), {

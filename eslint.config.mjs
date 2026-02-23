@@ -1,11 +1,10 @@
 import { defineConfig, globalIgnores } from "eslint/config";
-import nextPlugin from "eslint-config-next";
 
-const eslintConfig = defineConfig([
-  ...Array.isArray(nextPlugin) ? nextPlugin : [nextPlugin],
-  // Override default ignores of eslint-config-next.
+// Minimal flat config: keep default ignores. Avoid importing external configs
+// here to prevent runtime import errors in the ESLint CLI environment.
+export default defineConfig([
+  // global ignores (override defaults)
   globalIgnores([
-    // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
     "build/**",
@@ -13,5 +12,3 @@ const eslintConfig = defineConfig([
     // netlify/** no longer ignored — serverless functions are now linted
   ]),
 ]);
-
-export default eslintConfig;

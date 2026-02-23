@@ -34,7 +34,7 @@ exports.handler = async (event) => {
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
     console.error("Missing SUPABASE_URL or SUPABASE_ANON_KEY");
     return { 
-      statusCode: 200, 
+      statusCode: 500, 
       body: JSON.stringify({ result: "I'm having trouble accessing the list right now. Please try again later." }) 
     };
   }
@@ -56,11 +56,14 @@ exports.handler = async (event) => {
       };
     }
 
+    // Audit #24: cap email input to 254 chars (RFC 5321 max)
+    const safeEmail = String(email).toLowerCase().trim().slice(0, 254);
+
     // 3. Query Supabase
     const { data, error } = await supabase
       .from('waitlist')
       .select('email, created_at')
-      .eq('email', email.toLowerCase().trim())
+      .eq('email', safeEmail)
       .maybeSingle(); // Returns null if not found, instead of throwing an error
 
     if (error) throw error;
@@ -85,9 +88,9 @@ exports.handler = async (event) => {
     }
 
   } catch (err) {
-    console.error("Check Waitlist Error:", err.message, err.code, err.details);
+    console.error('[tool-check-waitlist] error:', err?.message);
     return { 
-      statusCode: 200, 
+      statusCode: 502, 
       body: JSON.stringify({ result: "I'm having trouble accessing the list right now. Please try again later." }) 
     };
   }

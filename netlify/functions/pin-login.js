@@ -46,6 +46,8 @@ function recordAttempt(ip, success) {
 
 /**
  * Constant-time PIN comparison to prevent timing attacks
+ * LEGACY: Kept as fallback during bcrypt migration. Once all PINs are hashed,
+ * this function is only used if verify_staff_pin RPC is unavailable.
  */
 function safeCompare(a, b) {
   if (!a || !b) return false;
@@ -53,6 +55,18 @@ function safeCompare(a, b) {
   const bufB = Buffer.from(String(b));
   if (bufA.length !== bufB.length) return false;
   return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Derive a device fingerprint from request headers.
+ * This binds the session to the originating device, making stolen tokens
+ * harder to reuse from a different machine.
+ */
+function deriveDeviceFingerprint(event) {
+  const ua = event.headers['user-agent'] || '';
+  const accept = event.headers['accept-language'] || '';
+  const raw = `${ua}|${accept}`;
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
 }
 
 const json = (statusCode, data) => ({
@@ -114,23 +128,55 @@ exports.handler = async (event) => {
       return json(400, { error: 'PIN must be exactly 6 digits' });
     }
 
-    // Fetch all staff PINs (small table — typically < 20 rows)
-    const { data: staff, error } = await supabase
-      .from('staff_directory')
-      .select('id, name, full_name, email, role, pin, is_working')
-      .not('pin', 'is', null);
+    // ═══════════════════════════════════════════════════════════
+    // BCRYPT PIN VERIFICATION (Schema 47)
+    // Uses the verify_staff_pin RPC which does bcrypt comparison
+    // server-side in PostgreSQL via pgcrypto. Falls back to legacy
+    // plaintext comparison only during migration period.
+    // ═══════════════════════════════════════════════════════════
+    let matchedStaff = null;
+    let needsPinRotation = false;
 
-    if (error) {
-      console.error('[PIN-LOGIN] DB error:', error);
-      return json(500, { error: 'Login failed' });
+    // Try bcrypt-based verification first (post-migration)
+    try {
+      const { data: bcryptResult, error: bcryptErr } = await supabase.rpc('verify_staff_pin', { p_pin: pin });
+      if (!bcryptErr && bcryptResult && bcryptResult.length > 0) {
+        const row = bcryptResult[0];
+        matchedStaff = {
+          id: row.staff_id,
+          name: row.staff_name,
+          full_name: row.full_name,
+          email: row.staff_email,
+          role: row.staff_role,
+          is_working: row.is_working,
+        };
+        needsPinRotation = row.needs_pin_rotation;
+      } else if (bcryptErr) {
+        // RPC doesn't exist yet (pre-migration) — fall back to legacy
+        console.warn('[PIN-LOGIN] verify_staff_pin RPC unavailable, falling back to legacy:', bcryptErr.message);
+      }
+    } catch (rpcErr) {
+      console.warn('[PIN-LOGIN] bcrypt RPC failed, falling back to legacy:', rpcErr.message);
     }
 
-    // Find matching staff member using constant-time comparison
-    // We check ALL records to prevent timing-based enumeration
-    let matchedStaff = null;
-    for (const s of (staff || [])) {
-      if (safeCompare(pin, s.pin)) {
-        matchedStaff = s;
+    // Legacy fallback: plaintext comparison (remove after full migration)
+    if (!matchedStaff) {
+      const { data: staff, error } = await supabase
+        .from('staff_directory')
+        .select('id, name, full_name, email, role, pin, is_working')
+        .not('pin', 'is', null);
+
+      if (error) {
+        console.error('[PIN-LOGIN] DB error:', error);
+        return json(500, { error: 'Login failed' });
+      }
+
+      // Find matching staff member using constant-time comparison
+      // We check ALL records to prevent timing-based enumeration
+      for (const s of (staff || [])) {
+        if (safeCompare(pin, s.pin)) {
+          matchedStaff = s;
+        }
       }
     }
 
@@ -163,15 +209,22 @@ exports.handler = async (event) => {
     // Generate a session token (signed, short-lived)
     // This is NOT a Supabase JWT — it's a simple HMAC token for ops pages
     const sessionId = crypto.randomBytes(24).toString('hex');
+    const deviceFp = deriveDeviceFingerprint(event);
     const expiresAt = Date.now() + (8 * 60 * 60 * 1000); // 8-hour shift
     const payload = JSON.stringify({
       sid: sessionId,
       staffId: matchedStaff.id,
       email: matchedStaff.email,
+      dfp: deviceFp,                  // device fingerprint binding
       iat: Date.now(),
       exp: expiresAt,
+      needsPinRotation,               // client shows rotation prompt
     });
-    const secret = process.env.INTERNAL_SYNC_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const secret = process.env.INTERNAL_SYNC_SECRET;
+    if (!secret) {
+      console.error('[PIN-LOGIN] INTERNAL_SYNC_SECRET not configured — cannot sign PIN tokens');
+      return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: 'Server misconfiguration' }) };
+    }
     const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
     const token = Buffer.from(payload).toString('base64') + '.' + signature;
 
@@ -207,6 +260,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         success: true,
         token,
+        needsPinRotation,  // Schema 47: client shows rotation prompt
         staff: {
           id: matchedStaff.id,
           name: matchedStaff.full_name || matchedStaff.name,

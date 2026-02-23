@@ -80,7 +80,7 @@ export default function ReceiptRoll() {
         return incoming;
       });
     } catch (err) {
-      console.error("Receipt fetch failed:", err);
+      console.error("Receipt fetch failed:", (err as Error)?.message);
     }
   }, [token]);
 

@@ -29,7 +29,7 @@ export default async function ShopPage() {
     if (settingsErr) throw settingsErr;
     shopEnabled = settingsData?.value !== false;
   } catch (err) {
-    console.error('[Shop] Settings fetch failed:', err);
+    console.error('[Shop] Settings fetch failed:', (err as Error)?.message);
     isMaintenanceMode = true;
   }
 
@@ -57,7 +57,7 @@ export default async function ShopPage() {
       if (error) throw error;
       if (data) products = data;
     } catch (err) {
-      console.error('[Shop] Products fetch failed:', err);
+      console.error('[Shop] Products fetch failed:', (err as Error)?.message);
       isMaintenanceMode = true;
     }
   }

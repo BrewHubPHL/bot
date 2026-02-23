@@ -91,9 +91,9 @@ export async function middleware(request: NextRequest) {
   }
 
   // Verify the HMAC session token from the cookie
-  const secret = process.env.INTERNAL_SYNC_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const secret = process.env.INTERNAL_SYNC_SECRET || "";
   if (!secret) {
-    console.error("[MIDDLEWARE] No signing secret configured");
+    console.error("[MIDDLEWARE] INTERNAL_SYNC_SECRET not configured — cannot verify session tokens");
     return new NextResponse(JSON.stringify({ error: "Server misconfiguration" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

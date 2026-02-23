@@ -8,19 +8,24 @@ const supabase = createClient(
 );
 
 exports.handler = async (event) => {
-  // Auth check
-  const auth = await authorize(event);
-  if (!auth.ok) return auth.response;
-
   if (event.httpMethod !== 'POST') {
     return json(405, { error: 'Method not allowed' });
   }
+
+  // Auth check
+  const auth = await authorize(event);
+  if (!auth.ok) return auth.response;
 
   // ── CSRF protection ───────────────────────────────────────
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  const parsed = JSON.parse(event.body || '{}');
+  let parsed;
+  try {
+    parsed = JSON.parse(event.body || '{}');
+  } catch {
+    return json(400, { error: 'Invalid JSON body' });
+  }
 
   // ── HPP GUARD: Detect duplicate keys in JSON body ───────────────
   const duplicateKeys = Object.keys(parsed).filter((key, index, arr) => arr.indexOf(key) !== index);
@@ -67,7 +72,7 @@ exports.handler = async (event) => {
     .is('archived_at', null);
 
   if (dbErr) {
-    console.error('Create order price lookup error:', dbErr);
+    console.error('Create order price lookup error:', dbErr?.message);
     return json(500, { error: 'Failed to load product prices' });
   }
 
@@ -107,7 +112,7 @@ exports.handler = async (event) => {
     .single();
 
   if (error) {
-    console.error('Create order error:', error);
+    console.error('Create order error:', error?.message);
     return json(500, { error: 'Order failed' });
   }
 

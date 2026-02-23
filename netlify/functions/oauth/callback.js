@@ -3,17 +3,6 @@ const { createClient } = require('@supabase/supabase-js');
 const { SquareClient, SquareEnvironment } = require('square');
 const { oauthBucket } = require('../_token-bucket');
 
-// Initialize Supabase using your production environment variables
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-// Initialize Square Client for Production
-const client = new SquareClient({
-  environment: SquareEnvironment.Production,
-});
-
 /**
  * Constant-time comparison to prevent timing attacks on state tokens.
  */
@@ -26,10 +15,10 @@ function safeCompare(a, b) {
 }
 
 exports.handler = async (event) => {
-  // Per-IP rate limit on OAuth callback
-  const clientIp = event.headers['x-nf-client-connection-ip']
-    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
-    || 'unknown';
+  // Normalize headers (case-insensitive) and apply per-IP rate limit
+  const headers = {};
+  for (const k of Object.keys(event.headers || {})) headers[k.toLowerCase()] = event.headers[k];
+  const clientIp = headers['x-nf-client-connection-ip'] || headers['x-forwarded-for']?.split(',')[0]?.trim() || headers['x-real-ip'] || 'unknown';
   const ipLimit = oauthBucket.consume('oauth-cb:' + clientIp);
   if (!ipLimit.allowed) {
     return { statusCode: 429, body: JSON.stringify({ error: 'Too many requests.' }) };
@@ -53,6 +42,18 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: "Missing state parameter. Please restart the authorization flow." })
     };
   }
+
+  // Fail-closed env checks and per-request clients
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const SQUARE_APP_ID = process.env.SQUARE_APP_ID || process.env.SQUARE_PRODUCTION_APPLICATION_ID;
+  const SQUARE_CLIENT_SECRET = process.env.SQUARE_PRODUCTION_ID_SECRET || process.env.SQUARE_PRODUCTION_TOKEN;
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SQUARE_APP_ID || !SQUARE_CLIENT_SECRET) {
+    console.error('Missing required environment variables for OAuth callback');
+    return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured' }) };
+  }
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   // Retrieve the stored state from shop_settings
   const { data: stored, error: fetchErr } = await supabase
@@ -106,15 +107,33 @@ exports.handler = async (event) => {
   await supabase.from('shop_settings').delete().eq('id', 'oauth_state');
 
   try {
-    // Exchange the Auth Code for Production Tokens
-    const response = await client.oAuth.obtainToken({
-      clientId: process.env.SQUARE_APP_ID,
-      clientSecret: process.env.SQUARE_PRODUCTION_ID_SECRET,
+    // Initialize Square client for production (per-request)
+    const client = new SquareClient({ environment: SquareEnvironment.Production });
+
+    // Exchange the Auth Code for Production Tokens (wrap with timeout)
+    const withTimeout = (p, ms) => new Promise((resolve, reject) => {
+      let done = false;
+      const t = setTimeout(() => { if (!done) { done = true; reject(new Error('timeout')); } }, ms);
+      p.then(r => { if (!done) { done = true; clearTimeout(t); resolve(r); } }).catch(e => { if (!done) { done = true; clearTimeout(t); reject(e); } });
+    });
+
+    const tokenPromise = client.oAuth.obtainToken({
+      clientId: SQUARE_APP_ID,
+      clientSecret: SQUARE_CLIENT_SECRET,
       code: code,
       grantType: 'authorization_code',
     });
 
-    const { accessToken, refreshToken, merchantId } = response.result;
+    const response = await withTimeout(tokenPromise, 15_000);
+    const result = response?.result || {};
+    const accessToken = result.accessToken || result.access_token;
+    const refreshToken = result.refreshToken || result.refresh_token;
+    const merchantId = result.merchantId || result.merchant_id;
+
+    if (!accessToken || !refreshToken) {
+      console.error('Square OAuth did not return tokens');
+      return { statusCode: 502, body: JSON.stringify({ error: 'Token exchange failed' }) };
+    }
 
     // "Upsert" into shop_settings ensures we update the live token instead of creating duplicates
     const { error } = await supabase
@@ -129,27 +148,26 @@ exports.handler = async (event) => {
 
     if (error) throw error;
 
-    // Escape merchantId for safe HTML rendering
-    const safeMerchantId = String(merchantId || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-    // Return a friendly success message for your browser
+    // Return a minimal success page; mask merchant id to last 4 characters when present
+    const displayMerchant = merchantId ? `••••${String(merchantId).slice(-4)}` : 'your merchant';
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'text/html' },
       body: `
         <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
           <h1>☕ BrewHub Square Sync Success</h1>
-          <p>Production tokens for Merchant <b>${safeMerchantId}</b> have been secured in Supabase.</p>
+          <p>Production tokens for Merchant <b>${displayMerchant}</b> have been secured in Supabase.</p>
           <p>You can now test production payments from your living room.</p>
         </div>
       `
     };
 
   } catch (error) {
-    console.error("Square OAuth Error:", error.message);
-    return { 
-      statusCode: 500, 
-      body: JSON.stringify({ error: "Token exchange failed" }) 
+    // Do not log tokens or stack traces. Log minimal error and return generic message.
+    console.error('Square OAuth Error:', (error && error.message) || error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'Token exchange failed' })
     };
   }
 };

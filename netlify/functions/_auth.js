@@ -28,8 +28,26 @@ function getJwtIat(token) {
   } catch { return null; }
 }
 
+/**
+ * Derive device fingerprint from request headers (must match pin-login.js logic)
+ */
+function deriveDeviceFingerprint(event) {
+  const ua = event.headers?.['user-agent'] || '';
+  const accept = event.headers?.['accept-language'] || '';
+  const raw = `${ua}|${accept}`;
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+}
+
 async function authorize(event, options = {}) {
-  const { requireManager = false, allowServiceSecret = false, maxTokenAgeMinutes = null, requirePin = false, allowManagerIPBypass = false } = options;
+  const {
+    requireManager = false,
+    allowServiceSecret = false,
+    maxTokenAgeMinutes = null,
+    requirePin = false,
+    allowManagerIPBypass = false,
+    requireManagerChallenge = false,  // Schema 47: require TOTP challenge nonce
+    challengeActionType = null,       // e.g. 'adjust_hours', 'fix_clock', 'comp_order'
+  } = options;
 
   const clientIP = getClientIP(event);
   const ipAllowed = isIPAllowed(clientIP);
@@ -47,9 +65,10 @@ async function authorize(event, options = {}) {
     const secret = event.headers?.['x-brewhub-secret'];
     const envSecret = process.env.INTERNAL_SYNC_SECRET;
     if (secret && envSecret) {
-      const bufA = Buffer.from(secret);
-      const bufB = Buffer.from(envSecret);
-      if (bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB)) {
+      // Hash both to fixed-length digests to eliminate length side-channel
+      const hashA = crypto.createHash('sha256').update(secret).digest();
+      const hashB = crypto.createHash('sha256').update(envSecret).digest();
+      if (crypto.timingSafeEqual(hashA, hashB)) {
         if (requireManager) return { ok: false, response: json(403, { error: 'Service tokens cannot perform manager actions' }) };
         return { ok: true, via: 'secret', role: 'service' };
       }
@@ -76,7 +95,11 @@ async function authorize(event, options = {}) {
     try {
       const [payloadB64, signature] = parts;
       const payloadStr = Buffer.from(payloadB64, 'base64').toString('utf8');
-      const secret = process.env.INTERNAL_SYNC_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const secret = process.env.INTERNAL_SYNC_SECRET;
+      if (!secret) {
+        console.error('[AUTH] INTERNAL_SYNC_SECRET not configured — cannot verify PIN tokens');
+        return { ok: false, response: json(500, { error: 'Server misconfiguration' }) };
+      }
       const expected = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
       
       const sigBuf = Buffer.from(signature, 'hex');
@@ -112,7 +135,54 @@ async function authorize(event, options = {}) {
 
       if (requireManager && !isManager) return { ok: false, response: json(403, { error: 'Manager access required' }) };
 
-      return { ok: true, via: 'pin', user: { email, id: payload.staffId }, role: staff.role };
+      // ═══════════════════════════════════════════════════════════
+      // Schema 47: Device fingerprint binding
+      // If the token contains a device fingerprint (dfp), verify it
+      // matches the current request. Prevents token theft/reuse.
+      // ═══════════════════════════════════════════════════════════
+      if (payload.dfp) {
+        const currentFp = deriveDeviceFingerprint(event);
+        if (payload.dfp !== currentFp) {
+          console.warn(`[AUTH BLOCKED] Device fingerprint mismatch for ${email}: token=${payload.dfp} current=${currentFp}`);
+          return { ok: false, response: json(401, { error: 'Session bound to a different device. Please log in again.', code: 'DEVICE_MISMATCH' }) };
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // Schema 47: Manager challenge nonce verification
+      // For sensitive operations, require a one-time TOTP challenge
+      // nonce in addition to the session token.
+      // ═══════════════════════════════════════════════════════════
+      if (requireManagerChallenge && isManager) {
+        let body;
+        try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
+        const challengeNonce = body._challenge_nonce || event.headers?.['x-brewhub-challenge'];
+        if (!challengeNonce) {
+          return { ok: false, response: json(403, { error: 'Manager challenge required', code: 'CHALLENGE_REQUIRED' }) };
+        }
+        // Verify + consume the nonce atomically
+        try {
+          const { data: nonceResult } = await supabase.rpc('consume_challenge_nonce', {
+            p_nonce: challengeNonce,
+            p_staff_email: email,
+          });
+          const row = nonceResult?.[0] || nonceResult;
+          if (!row?.valid) {
+            console.warn(`[AUTH BLOCKED] Invalid/expired challenge nonce for ${email}`);
+            return { ok: false, response: json(403, { error: 'Invalid or expired challenge code', code: 'CHALLENGE_INVALID' }) };
+          }
+          // Optionally verify the nonce was issued for the right action type
+          if (challengeActionType && row.action_type !== challengeActionType) {
+            console.warn(`[AUTH BLOCKED] Challenge action mismatch: expected=${challengeActionType} got=${row.action_type}`);
+            return { ok: false, response: json(403, { error: 'Challenge code was issued for a different action', code: 'CHALLENGE_ACTION_MISMATCH' }) };
+          }
+        } catch (nonceErr) {
+          console.error('[AUTH] Challenge nonce verification failed:', nonceErr.message);
+          return { ok: false, response: json(500, { error: 'Challenge verification failed' }) };
+        }
+      }
+
+      return { ok: true, via: 'pin', user: { email, id: payload.staffId }, role: staff.role, deviceFingerprint: payload.dfp };
     } catch (err) {
       console.error('[AUTH] PIN verification failed:', err);
       return { ok: false, response: json(401, { error: 'Invalid PIN session' }) };
@@ -195,9 +265,10 @@ function verifyServiceSecret(event) {
   const secret = event.headers?.['x-brewhub-secret'];
   const envSecret = process.env.INTERNAL_SYNC_SECRET;
   if (!secret || !envSecret) return { valid: false, response: json(401, { error: 'Unauthorized' }) };
-  const bufA = Buffer.from(secret);
-  const bufB = Buffer.from(envSecret);
-  if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+  // Hash both to fixed-length digests to eliminate length side-channel
+  const hashA = crypto.createHash('sha256').update(secret).digest();
+  const hashB = crypto.createHash('sha256').update(envSecret).digest();
+  if (!crypto.timingSafeEqual(hashA, hashB)) {
     return { valid: false, response: json(401, { error: 'Unauthorized' }) };
   }
   return { valid: true };

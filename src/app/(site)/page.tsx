@@ -201,7 +201,7 @@ export default function BrewHubLanding() {
           source.start(0);
           return; // success via Web Audio
         } catch (decodeErr) {
-          console.warn('Web Audio decode failed, falling back to Audio element:', decodeErr);
+          console.warn('Web Audio decode failed, falling back to Audio element:', (decodeErr as Error)?.message);
         }
       }
 
@@ -224,7 +224,7 @@ export default function BrewHubLanding() {
       await audio.play();
     } catch (err) {
       isSpeakingRef.current = false;
-      console.error('TTS playback error:', err);
+      console.error('TTS playback error:', (err as Error)?.message);
       // Resume listening so the user isn't stuck
       if (recognitionRef.current && isVoiceActiveRef.current) {
         setVoiceStatus("Listening...");
@@ -246,7 +246,7 @@ export default function BrewHubLanding() {
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       await speakReply(reply);
     } catch (err) {
-      console.error('Voice turn error:', err);
+      console.error('Voice turn error:', (err as Error)?.message);
       setMessages(prev => [...prev, { role: 'assistant', content: "I'm having trouble connecting to my coffee sensors. Try again in a second!" }]);
       // Resume listening even on error
       if (recognitionRef.current) {
@@ -322,7 +322,7 @@ export default function BrewHubLanding() {
       setVoiceStatus("Listening... speak now!");
 
     } catch (err) {
-      console.error('Voice error:', err);
+      console.error('Voice error:', (err as Error)?.message);
       setVoiceStatus("Failed to start — check mic permissions");
       setIsVoiceActive(false);
       setTimeout(() => setVoiceStatus(""), 3000);

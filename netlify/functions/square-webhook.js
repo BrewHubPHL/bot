@@ -153,7 +153,7 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: 'Duplicate event ignored' };
     }
     // Transient DB error — tell Square to retry later
-    console.error('[IDEMPOTENCY] Gate insert failed:', idempotencyGateError);
+    console.error('[IDEMPOTENCY] Gate insert failed:', idempotencyGateError?.message);
     return { statusCode: 500, body: 'Idempotency check failed' };
   }
 
@@ -173,6 +173,18 @@ exports.handler = async (event) => {
   // ROUTE B: PAYMENTS (The "Happy Path")
   if (body.type === 'payment.updated') {
     return handlePaymentUpdate(body, supabase);
+  }
+
+  // ROUTE C: TERMINAL OFFLINE DECLINE (The "Ghost Revenue" Detection)
+  // Square fires payment.created / payment.updated with status FAILED when
+  // an offline-mode card batch is processed and a card declines.
+  if (body.type === 'payment.created') {
+    const payment = body.data?.object?.payment;
+    if (payment && (payment.status === 'FAILED' || payment.status === 'CANCELED')) {
+      return handleOfflineDecline(body, supabase);
+    }
+    // Non-failed payment.created events → ignore (we handle payment.updated)
+    return { statusCode: 200, body: JSON.stringify({ message: 'Event noted' }) };
   }
 
   // Ignore other events
@@ -211,7 +223,7 @@ async function handleRefund(body, supabase) {
       console.warn(`[IDEMPOTENCY] Refund ${refundId || paymentId} already processed. Skipping.`);
       return { statusCode: 200, body: "Duplicate refund webhook ignored" };
     }
-    console.error('[IDEMPOTENCY] Database error:', idempotencyError);
+    console.error('[IDEMPOTENCY] Database error:', idempotencyError?.message);
     return { statusCode: 500, body: 'Idempotency check failed' };
   }
 
@@ -260,7 +272,7 @@ async function handleRefund(body, supabase) {
        });
        
        if (rpcError) {
-         console.error('[REFUND] Failed to revoke points:', rpcError);
+         console.error('[REFUND] Failed to revoke points:', rpcError?.message);
        } else {
          const deducted = revokeResult?.[0]?.points_deducted ?? revokeResult?.points_deducted ?? '?';
          console.log(`[REFUND] Points revoked for user ${order.user_id}: ${deducted} pts (from ${revokeAmountCents}¢)`);
@@ -290,7 +302,7 @@ async function handleRefund(body, supabase) {
         { p_order_id: order.id }
       );
       if (restoreErr) {
-        console.error('[REFUND] Inventory restore RPC failed:', restoreErr);
+        console.error('[REFUND] Inventory restore RPC failed:', restoreErr?.message);
       } else {
         console.log('[REFUND] Inventory restored:', JSON.stringify(restoreResult));
       }
@@ -302,7 +314,7 @@ async function handleRefund(body, supabase) {
     return { statusCode: 200, body: "Refund processed: Points revoked, inventory restored." };
 
   } catch (err) {
-    console.error('[REFUND ERROR]', err);
+    console.error('[REFUND ERROR]', err?.message);
     return { statusCode: 500, body: "Refund processing failed" };
   }
 }
@@ -310,9 +322,21 @@ async function handleRefund(body, supabase) {
 // ---------------------------------------------------------------------------
 // PHASE 4: PAYMENT HANDLER (Deep Logic)
 // ---------------------------------------------------------------------------
+// Delegates to the shared _process-payment.js helper so that webhook,
+// active polling (poll-terminal-payment.js), and scheduled reconciliation
+// (reconcile-pending-payments.js) all use identical confirmation logic.
+// This eliminates the "Phantom Orders" single-point-of-failure where
+// KDS visibility depended entirely on Square's webhook delivery.
+// ---------------------------------------------------------------------------
 async function handlePaymentUpdate(body, supabase) {
+  const { confirmPayment } = require('./_process-payment');
   const payment = body.data?.object?.payment;
   
+  // Detect FAILED payments — these are offline-batch declines (Ghost Revenue)
+  if (payment && (payment.status === 'FAILED' || payment.status === 'CANCELED')) {
+    return handleOfflineDecline(body, supabase);
+  }
+
   // Filter: We only care about COMPLETED payments
   if (!payment || payment.status !== 'COMPLETED') {
     return { statusCode: 200, body: JSON.stringify({ status: payment?.status || 'no payment' }) };
@@ -329,7 +353,7 @@ async function handlePaymentUpdate(body, supabase) {
 
   console.log(`[PAYMENT] Processing Order: ${orderId}`);
 
-  // 2. DEFENSE-IN-DEPTH: Per-payment idempotency guard
+  // 2. DEFENSE-IN-DEPTH: Per-payment idempotency guard (webhook-specific)
   // The top-level event_id gate already prevents duplicates, but this guards
   // against edge cases (manual retries with a fresh event_id for the same payment).
   const eventKey = `square:payment.updated:${payment.id}`;
@@ -344,172 +368,116 @@ async function handlePaymentUpdate(body, supabase) {
     });
 
   if (idempotencyError) {
-    if (idempotencyError.code === '23505') { // Postgres unique_violation
+    if (idempotencyError.code === '23505') {
       console.warn(`[IDEMPOTENCY] Payment ${payment.id} already processed. Skipping.`);
       return { statusCode: 200, body: "Duplicate webhook ignored" };
     }
-    console.error('[IDEMPOTENCY] Database error:', idempotencyError);
+    console.error('[IDEMPOTENCY] Database error:', idempotencyError?.message);
     return { statusCode: 500, body: 'Idempotency check failed' };
   }
 
-  // 3. Look up the order in Supabase
-  const { data: order, error: orderError } = await supabase
-    .from('orders')
-    .select('user_id, total_amount_cents, status, payment_id, customer_email')
-    .eq('id', orderId)
-    .single();
-
-  if (orderError || !order) {
-    console.error("[DB ERROR] Order lookup failed:", orderError);
-    return { statusCode: 500, body: "Could not link Square payment to Supabase user" };
-  }
-
-  // 4. FRAUD DETECTION BLOCK
-  
-  // Check A: Is order already paid?
-  if (order.status === 'paid' || order.payment_id) {
-    console.warn(`[FRAUD] Order ${orderId} is already marked paid.`);
-    return { statusCode: 200, body: "Order already processed" };
-  }
-
-  // Check B: Was this payment ID already used on ANOTHER order?
-  const { data: existingPayment } = await supabase
-    .from('orders')
-    .select('id')
-    .eq('payment_id', payment.id)
-    .single();
-  
-  if (existingPayment) {
-    console.error(`[FRAUD] Payment ${payment.id} is being reused!`);
-    return { statusCode: 200, body: "Payment reuse detected" };
-  }
-
-  // Check C: Amount Validation (Flat 2-cent tolerance for rounding)
-  // Coffee shop orders cap at ~$30; percentage-based tolerance is too generous.
+  // 3. Delegate to shared payment processor
+  // This is the same code path that poll-terminal-payment.js and
+  // reconcile-pending-payments.js use, ensuring identical behavior.
   const paidAmount = Number(payment.amount_money?.amount || 0);
-  const expectedAmount = order.total_amount_cents || 0;
-  const AMOUNT_TOLERANCE_CENTS = 2;
-  
-  if (Math.abs(paidAmount - expectedAmount) > AMOUNT_TOLERANCE_CENTS) {
-     console.error(`[FRAUD] Amount mismatch: Expected ${expectedAmount}, Got ${paidAmount} (tolerance: ${AMOUNT_TOLERANCE_CENTS}c)`);
-     // Flag it but don't fail the webhook, as money moved.
-     await supabase.from('orders').update({ 
-       status: 'amount_mismatch',
-       notes: `Paid: ${paidAmount}, Expected: ${expectedAmount}`
-     }).eq('id', orderId);
-     return { statusCode: 200, body: "Flagged for review" };
-  }
+  const currency = String(payment.amount_money?.currency || 'USD');
 
-  // Check D: Currency Check
-  if (payment.amount_money?.currency !== 'USD') {
-    console.error(`[FRAUD] Invalid currency: ${payment.amount_money?.currency}`);
-    return { statusCode: 200, body: "Invalid currency" };
-  }
-
-  // 5. Update Order Status
-  // Transition: pending → preparing (payment confirmed, show on KDS)
-  // The .neq('status','paid') guard is defense-in-depth for crash recovery.
-  // We set status to 'preparing' so the KDS picks it up; only a final
-  // fulfillment action (staff mark-done) moves it to 'completed'.
-  const { data: updatedRows, error: updateError } = await supabase
-    .from('orders')
-    .update({ 
-      status: 'preparing',
-      payment_id: payment.id,
-      paid_at: new Date().toISOString(),
-      paid_amount_cents: paidAmount  // Persisted for increment_loyalty re-entry guard
-    })
-    .eq('id', orderId)
-    .neq('status', 'paid')
-    .neq('status', 'preparing')
-    .select('id');
-
-  // If no rows matched, the order was already paid (concurrent/crash recovery)
-  if (!updateError && (!updatedRows || updatedRows.length === 0)) {
-    console.warn(`[SELF-HEAL] Order ${orderId} already paid. Skipping downstream.`);
-    return { statusCode: 200, body: 'Order already paid (self-heal)' };
-  }
-
-  if (updateError) {
-    console.error("[DB ERROR] Failed to update order:", updateError);
-    return { statusCode: 500, body: "DB Update Failed" };
-  }
-
-  // 5b. RECEIPT GENERATION
-  try {
-    const { data: lineItems } = await supabase
-      .from('coffee_orders')
-      .select('drink_name, price')
-      .eq('order_id', orderId);
-
-    const { data: fullOrder } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('id', orderId)
-      .single();
-
-    if (fullOrder && lineItems) {
-      const receiptText = generateReceiptString(fullOrder, lineItems);
-      await queueReceipt(supabase, orderId, receiptText);
-    }
-  } catch (receiptErr) {
-    // Non-fatal: don't break the payment flow for a receipt failure
-    console.error('[RECEIPT] Non-fatal receipt error:', receiptErr.message);
-  }
-
-  // 6. LOYALTY & VOUCHER ENGINE
-  const userId = order.user_id;
-  if (!userId) {
-     console.log(`[INFO] Guest checkout for order ${orderId}. No loyalty points awarded.`);
-     return { statusCode: 200, body: "Guest checkout processed" };
-  }
-
-  // Call the "Atomic Increment" RPC function
-  const { data: loyaltyResult, error: loyaltyError } = await supabase.rpc('increment_loyalty', { 
-    target_user_id: userId,
-    amount_cents: paidAmount,
-    p_order_id: orderId
+  const result = await confirmPayment({
+    supabase,
+    orderId,
+    paymentId: payment.id,
+    paidAmountCents: paidAmount,
+    currency,
+    confirmedVia: 'webhook'
   });
 
-  if (loyaltyError) {
-    console.error("[LOYALTY ERROR]", loyaltyError);
-  } else if (loyaltyResult && loyaltyResult.length > 0) {
-    const { loyalty_points, voucher_earned } = loyaltyResult[0];
-    
-    console.log(`[LOYALTY] User ${userId} now has ${loyalty_points} points.`);
+  if (result.ok) {
+    console.log(`[PAYMENT:WEBHOOK] Order ${orderId} → ${result.reason}`);
+    return { statusCode: 200, body: JSON.stringify({ success: true, orderId, reason: result.reason }) };
+  }
 
-    if (voucher_earned) {
-      console.log(`[LOYALTY] Threshold reached! Generating voucher...`);
-      
-      try {
-        const newVoucherCode = generateVoucherCode();
-        const codeHash = hashVoucherCode(newVoucherCode);
-        
-        // Generate QR Code
-        const qrDataUrl = await QRCode.toDataURL(newVoucherCode, {
-          color: { dark: '#000000', light: '#FFFFFF' },
-          width: 300,
-          margin: 2
-        });
-        
-        // Save Voucher to DB — store SHA-256 hash for verification.
-        // Plaintext code is kept temporarily so the customer's QR works;
-        // it is scrubbed to '***REDEEMED***' at burn time by the RPC.
-        await supabase.from('vouchers').insert([{ 
-          user_id: userId, 
-          code: newVoucherCode,
-          code_hash: codeHash,
-          qr_code_base64: qrDataUrl,
-          status: 'active',
-          created_at: new Date().toISOString()
-        }]);
+  console.error(`[PAYMENT:WEBHOOK] Confirmation failed for ${orderId}: ${result.reason}`);
+  // Return 200 to Square so it doesn't retry (the issue is on our end)
+  return { statusCode: 200, body: JSON.stringify({ error: result.reason }) };
+}
 
-        console.log(`[VOUCHER] Generated ${newVoucherCode.slice(0, 8)}*** for user ${userId}`);
-      } catch (qrError) {
-        console.error("[QR ERROR] Failed to generate voucher:", qrError);
-      }
+// ---------------------------------------------------------------------------
+// PHASE 5: OFFLINE DECLINE HANDLER (Ghost Revenue Detection)
+// ---------------------------------------------------------------------------
+// When Square processes an offline-mode batch and a card declines, we get
+// a payment.updated or payment.created with status FAILED/CANCELED.
+// These represent real money lost — drinks were already given away.
+// We record each decline in the offline_loss_ledger for tracking.
+// ---------------------------------------------------------------------------
+async function handleOfflineDecline(body, supabase) {
+  const payment = body.data?.object?.payment;
+  if (!payment) {
+    return { statusCode: 200, body: 'No payment in decline event' };
+  }
+
+  const paymentId = payment.id;
+  const orderId = payment.reference_id;
+  const amountCents = Number(payment.amount_money?.amount || 0);
+  const cardDetails = payment.card_details || {};
+  const cardLast4 = cardDetails.card?.last_4 || null;
+  const cardBrand = cardDetails.card?.card_brand || null;
+  const declineReason = cardDetails.errors?.[0]?.code
+    || payment.failure_reason
+    || payment.status
+    || 'unknown';
+
+  console.error(
+    `[GHOST-REVENUE] ⚠️ OFFLINE DECLINE DETECTED: $${(amountCents / 100).toFixed(2)}`,
+    `| Card: ${cardBrand || '?'} ****${cardLast4 || '????'}`,
+    `| Reason: ${declineReason}`,
+    `| Order: ${orderId || 'unlinked'}`,
+    `| Payment: ${paymentId}`
+  );
+
+  // Record in the loss ledger
+  try {
+    const { data: lossId, error: lossErr } = await supabase.rpc('record_offline_decline', {
+      p_square_payment_id: paymentId,
+      p_square_checkout_id: null,
+      p_order_id: orderId || null,
+      p_amount_cents: amountCents,
+      p_decline_reason: sanitizeString(declineReason, 200),
+      p_card_last_four: cardLast4,
+      p_card_brand: cardBrand,
+    });
+
+    if (lossErr) {
+      console.error('[GHOST-REVENUE] Failed to record decline:', lossErr.message);
+    } else {
+      console.log(`[GHOST-REVENUE] Recorded loss ${lossId}`);
+    }
+  } catch (err) {
+    console.error('[GHOST-REVENUE] Exception recording decline:', err.message);
+  }
+
+  // If we have a linked order, mark it as failed
+  if (orderId && orderId !== 'undefined') {
+    try {
+      await supabase
+        .from('orders')
+        .update({
+          status: 'cancelled',
+          notes: `Offline batch decline: ${declineReason} (${cardBrand || '?'} ****${cardLast4 || '????'})`,
+        })
+        .eq('id', orderId)
+        .eq('status', 'pending');
+    } catch (orderErr) {
+      console.error('[GHOST-REVENUE] Failed to cancel declined order:', orderErr.message);
     }
   }
 
-  return { statusCode: 200, body: JSON.stringify({ success: true, orderId }) };
+  return {
+    statusCode: 200,
+    body: JSON.stringify({
+      processed: true,
+      type: 'offline_decline',
+      amount_cents: amountCents,
+      decline_reason: declineReason,
+    }),
+  };
 }

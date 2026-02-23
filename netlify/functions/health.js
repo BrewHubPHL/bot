@@ -47,10 +47,23 @@ exports.handler = async (event) => {
   // Config status: only report whether required services are reachable, not which are configured
   // (prevents reconnaissance of which third-party services are in use)
 
+  // --- Strict CORS allowlist ---
+  const ALLOWED_ORIGINS = [
+    process.env.URL,
+    'https://brewhubphl.com',
+    'https://www.brewhubphl.com',
+  ].filter(Boolean);
+  const requestOrigin = (event.headers || {}).origin || (event.headers || {}).Origin;
+  const allowedOrigin = (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin))
+    ? requestOrigin
+    : 'https://brewhubphl.com';
+
   return {
     statusCode: checks.status === 'ok' ? 200 : 503,
     headers: { 
       'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': allowedOrigin,
+      'Vary': 'Origin',
       'Cache-Control': 'no-cache'
     },
     body: JSON.stringify(checks, null, 2)

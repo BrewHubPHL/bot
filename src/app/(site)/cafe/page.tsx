@@ -17,11 +17,16 @@ interface CartEntry {
   quantity: number;
 }
 
+const MAX_ITEM_QTY = 50;
+const MAX_CART_ITEMS = 25;
+
 export default function CafePage() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [menuError, setMenuError] = useState(false);
   const [orderStatus, setOrderStatus] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   // Auth state
   const [user, setUser] = useState<User | null>(null);
@@ -53,12 +58,17 @@ export default function CafePage() {
   }, []);
 
   const loadLoyalty = useCallback(async (userId: string) => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("loyalty_points")
-      .eq("id", userId)
-      .maybeSingle();
-    if (data) setLoyaltyPoints(data.loyalty_points ?? 0);
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("loyalty_points")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) { console.error("Loyalty load error:", error.message); return; }
+      if (data) setLoyaltyPoints(data.loyalty_points ?? 0);
+    } catch (err: unknown) {
+      console.error("Loyalty load failed:", (err as Error)?.message);
+    }
   }, []);
 
   useEffect(() => {
@@ -71,7 +81,12 @@ export default function CafePage() {
         .is("archived_at", null)
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true });
-      if (!error && data) setMenu(data);
+      if (error) {
+        console.error("Menu fetch error:", error.message);
+        setMenuError(true);
+      } else if (data) {
+        setMenu(data);
+      }
       setLoading(false);
     }
     fetchMenu();
@@ -80,7 +95,11 @@ export default function CafePage() {
   function addToCart(item: MenuItem) {
     setCart((c) => {
       const existing = c.find((e) => e.product_id === item.id);
-      if (existing) return c.map((e) => e.product_id === item.id ? { ...e, quantity: e.quantity + 1 } : e);
+      if (existing) {
+        if (existing.quantity >= MAX_ITEM_QTY) return c; // cap per-item qty
+        return c.map((e) => e.product_id === item.id ? { ...e, quantity: e.quantity + 1 } : e);
+      }
+      if (c.length >= MAX_CART_ITEMS) return c; // cap total distinct items
       return [...c, { product_id: item.id, name: item.name, price_cents: item.price_cents, quantity: 1 }];
     });
   }
@@ -90,11 +109,13 @@ export default function CafePage() {
 
   async function handleOrder(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return; // guard against double-submit
     setOrderStatus("");
     if (cart.length === 0) {
       setOrderStatus("Please add at least one item.");
       return;
     }
+    setSubmitting(true);
     try {
       // Build headers — attach Supabase JWT when logged in for loyalty tracking
       const headers: Record<string, string> = {
@@ -125,8 +146,11 @@ export default function CafePage() {
       );
       // Refresh loyalty points after successful order
       if (user) loadLoyalty(user.id);
-    } catch (err: any) {
-      setOrderStatus(err.message || "Order failed. Try again.");
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message;
+      setOrderStatus(msg && !msg.includes("supabase") ? msg : "Order failed. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -187,6 +211,8 @@ export default function CafePage() {
         <h2 className="font-bold mb-2">Menu</h2>
         {loading ? (
           <div className="bg-stone-100 p-4 rounded text-center text-stone-500">Loading menu...</div>
+        ) : menuError ? (
+          <div className="bg-red-50 border border-red-200 p-4 rounded text-center text-red-600 text-sm">Unable to load menu. Please refresh the page.</div>
         ) : menu.length === 0 ? (
           <div className="bg-stone-100 p-4 rounded text-center text-stone-500">No menu items available.</div>
         ) : (
@@ -222,8 +248,8 @@ export default function CafePage() {
           </ul>
         )}
         <form onSubmit={handleOrder}>
-          <button type="submit" className="w-full bg-stone-900 text-white py-2 rounded font-bold mt-2" disabled={cart.length === 0}>
-            Place Order
+          <button type="submit" className="w-full bg-stone-900 text-white py-2 rounded font-bold mt-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled={cart.length === 0 || submitting}>
+            {submitting ? "Placing Order…" : "Place Order"}
           </button>
         </form>
         {orderStatus && <div className="mt-2 text-xs text-center text-stone-600">{orderStatus}</div>}

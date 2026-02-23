@@ -5,6 +5,9 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { hashIP } = require('./_ip-hash');
+const { formBucket } = require('./_token-bucket');
+const { sanitizeInput } = require('./_sanitize');
 const { z } = require('zod');
 
 const supabase = createClient(
@@ -12,24 +15,45 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const cors = (code, data) => ({
+const ALLOWED_ORIGINS = new Set([
+  process.env.SITE_URL,
+  'https://brewhubphl.com',
+  'https://www.brewhubphl.com',
+].filter(Boolean));
+
+function validateOrigin(headers) {
+  const origin = headers['origin'] || headers['Origin'] || '';
+  if (ALLOWED_ORIGINS.has(origin)) return origin;
+  // fallback to same-origin if running from site URL
+  if (origin === '' && process.env.SITE_URL) return process.env.SITE_URL;
+  return null;
+}
+
+const cors = (code, data, headers = {}) => ({
   statusCode: code,
-  headers: {
+  headers: Object.assign({
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  },
+    'Vary': 'Origin',
+  }, headers),
   body: JSON.stringify(data),
 });
+
+function corsWithOrigin(code, data, origin) {
+  const hdrs = {};
+  if (origin) hdrs['Access-Control-Allow-Origin'] = origin;
+  return cors(code, data, hdrs);
+}
 
 // ── Zod schema ──────────────────────────────────────────────
 const AdjustmentSchema = z.object({
   employee_email: z
     .string({ required_error: 'employee_email is required' })
     .email('employee_email must be a valid email address')
+    .max(254, 'employee_email must be at most 254 characters')
     .transform((v) => v.toLowerCase().trim()),
 
   delta_minutes: z
@@ -51,15 +75,13 @@ const AdjustmentSchema = z.object({
 });
 
 exports.handler = async (event) => {
+  if (MISSING_ENV) return cors(500, { error: 'Server misconfiguration' });
   // ── CORS preflight ──────────────────────────────────────
   if (event.httpMethod === 'OPTIONS') {
+    const origin = validateOrigin(event.headers || {});
     return {
       statusCode: 204,
-      headers: {
-        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      },
+      headers: Object.assign({ 'Vary': 'Origin' }, origin ? { 'Access-Control-Allow-Origin': origin } : {}),
       body: '',
     };
   }
@@ -72,20 +94,38 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  // ── Manager auth + PIN required ─────────────────────────
-  const auth = await authorize(event, { requireManager: true, requirePin: true });
+  // ── Manager auth + PIN required + challenge nonce for insider-threat defense ─
+  const auth = await authorize(event, {
+    requireManager: true,
+    requirePin: true,
+    requireManagerChallenge: true,
+    challengeActionType: 'adjust_hours',
+  });
   if (!auth.ok) return auth.response;
 
   try {
+    // ── Enforce conservative request body size cap (pre-parse) ──
+    const bodyBytes = Buffer.byteLength(event.body || '', 'utf8');
+    const MAX_BYTES = 8 * 1024; // 8KB
+    if (bodyBytes > MAX_BYTES) {
+      const origin = validateOrigin(event.headers || {});
+      return corsWithOrigin(413, { error: 'Request body too large' }, origin);
+    }
+
+    // ── Rate limiting: per-manager (or per-IP) token bucket
+    const clientIP = event.headers['x-nf-client-connection-ip']
+      || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+      || 'unknown';
     // ── Parse body ────────────────────────────────────────
     let body;
     try {
       body = JSON.parse(event.body || '{}');
     } catch {
-      return cors(422, {
+      const origin = validateOrigin(event.headers || {});
+      return corsWithOrigin(422, {
         error: 'Request body must be valid JSON',
         details: [],
-      });
+      }, origin);
     }
 
     // ── Validate with Zod ─────────────────────────────────
@@ -119,15 +159,53 @@ exports.handler = async (event) => {
       .single();
 
     if (mgrErr || !managerRow) {
-      console.error('[UPDATE-HOURS] Manager lookup failed:', mgrErr);
-      return cors(403, { error: 'Manager not found in staff directory' });
+      console.error('[UPDATE-HOURS] Manager lookup failed:', mgrErr?.message || 'unknown');
+      const origin = validateOrigin(event.headers || {});
+      return corsWithOrigin(403, { error: 'Manager not found in staff directory' }, origin);
+    }
+
+    // Rate limit key: manager id + client IP (prevents hot-client flood)
+    try {
+      const rlKey = `${managerRow.id}:${clientIP}`;
+      const take = formBucket.consume(rlKey);
+      if (!take.allowed) {
+        const origin = validateOrigin(event.headers || {});
+        const resp = {
+          error: 'Rate limit exceeded',
+          retryAfterMs: take.retryAfterMs,
+        };
+        return {
+          statusCode: 429,
+          headers: Object.assign({ 'Retry-After': Math.ceil((take.retryAfterMs || 0) / 1000) }, origin ? { 'Access-Control-Allow-Origin': origin } : {}, { 'Vary': 'Origin' }),
+          body: JSON.stringify(resp),
+        };
+      }
+    } catch (rlErr) {
+      console.error('[UPDATE-HOURS] Rate-limit check failed (continuing):', rlErr?.message || 'unknown');
     }
 
     // ── Call the atomic RPC ───────────────────────────────
+    // Sanitize and redact reason before passing to RPC / audit log
+    const sanitizedReason = sanitizeInput(reason);
+
+    function redactPII(s) {
+      if (!s) return '';
+      let out = String(s);
+      // redact emails
+      out = out.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[REDACTED_EMAIL]');
+      // redact phone-like sequences (7+ digits)
+      out = out.replace(/\b\d[\d\-\s]{6,}\d\b/g, '[REDACTED_PHONE]');
+      // redact long digit sequences (possible SSN/IDs)
+      out = out.replace(/\b\d{4,}\b/g, '[REDACTED_NUMBER]');
+      return out;
+    }
+
+    const redactedReason = redactPII(sanitizedReason);
+
     const rpcParams = {
       p_employee_email: employee_email,
       p_delta_minutes: delta_minutes,
-      p_reason: reason,
+      p_reason: redactedReason,
       p_manager_id: managerRow.id,
     };
 
@@ -141,7 +219,7 @@ exports.handler = async (event) => {
     );
 
     if (rpcErr) {
-      console.error('[UPDATE-HOURS] RPC error:', rpcErr);
+      console.error('[UPDATE-HOURS] RPC error:', rpcErr?.message || 'unknown');
 
       // Surface known validation errors from the DB as 422
       if (rpcErr.code === 'P0002') {
@@ -157,19 +235,42 @@ exports.handler = async (event) => {
         return cors(422, { error: 'Manager not found', details: [{ field: 'manager_id', message: rpcErr.message }] });
       }
 
-      return cors(500, { error: 'Failed to record adjustment. Please try again.' });
+      const origin = validateOrigin(event.headers || {});
+      return corsWithOrigin(500, { error: 'Failed to record adjustment. Please try again.' }, origin);
     }
 
-    console.log(
-      `[UPDATE-HOURS] Manager ${managerEmail} adjusted ${employee_email} by ${delta_minutes} min: ${reason}`
-    );
+    console.log(`[UPDATE-HOURS] Manager ${managerRow.id} recorded adjustment id=${result?.id} delta=${delta_minutes}`);
 
-    return cors(200, {
+    // ── Schema 47: Immutable manager override audit log ────
+    try {
+      await supabase.from('manager_override_log').insert({
+        action_type: 'adjust_hours',
+        manager_email: managerEmail,
+        manager_staff_id: managerRow.id,
+        target_entity: 'time_logs',
+        target_id: result?.id || null,
+        target_employee: employee_email,
+        details: {
+          delta_minutes,
+          reason: redactedReason,
+          target_date: target_date || null,
+        },
+        device_fingerprint: auth.deviceFingerprint || null,
+        ip_address: hashIP(clientIP),
+        challenge_method: 'totp',
+      });
+    } catch (auditLogErr) {
+      console.error('[UPDATE-HOURS] Override audit log failed (non-fatal):', auditLogErr?.message || 'unknown');
+    }
+
+    const origin = validateOrigin(event.headers || {});
+    return corsWithOrigin(200, {
       success: true,
       adjustment: result,
-    });
+    }, origin);
   } catch (err) {
-    console.error('[UPDATE-HOURS] Unhandled error:', err?.message || err);
-    return cors(500, { error: 'An unexpected error occurred. Please try again.' });
+    console.error('[UPDATE-HOURS] Unhandled error:', err?.message || 'unknown');
+    const origin = validateOrigin(event.headers || {});
+    return corsWithOrigin(500, { error: 'An unexpected error occurred. Please try again.' }, origin);
   }
 };

@@ -1,12 +1,21 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import type { User as SupaUser } from "@supabase/supabase-js";
 import {
   LogOut, Package, Coffee, QrCode, Mail, Lock, User, Phone,
   ShoppingBag, Clock, ChevronRight, Truck,
 } from "lucide-react";
 import Link from "next/link";
+
+/* ─── Constants ──────────────────────────────────────────── */
+const MAX_NAME = 100;
+const MAX_EMAIL = 254;
+const MAX_PHONE = 20;
+const MAX_PASSWORD = 128;
+const MAX_AUTH_ATTEMPTS = 5;
+const AUTH_COOLDOWN_MS = 30_000; // 30 seconds
 
 /* ─── Types ──────────────────────────────────────────────── */
 interface ParcelRow {
@@ -77,7 +86,7 @@ function CardSkeleton() {
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════ */
 export default function ResidentPortal() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<SupaUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
@@ -87,6 +96,12 @@ export default function ResidentPortal() {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [signupDone, setSignupDone] = useState(false);
+
+  /* Auth rate-limiting state */
+  const authAttemptsRef = useRef(0);
+  const cooldownUntilRef = useRef(0);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
   /* Dashboard state */
   const [parcels, setParcels] = useState<ParcelRow[]>([]);
@@ -143,7 +158,7 @@ export default function ResidentPortal() {
 
       // If any query returned an error, surface maintenance mode
       if (parcelRes.error || orderRes.error || loyaltyRes.error) {
-        console.error("Portal data load errors:", parcelRes.error, orderRes.error, loyaltyRes.error);
+        console.error("Portal data load errors:", parcelRes.error?.message, orderRes.error?.message, loyaltyRes.error?.message);
         setIsMaintenanceMode(true);
         setDataLoading(false);
         return;
@@ -152,41 +167,75 @@ export default function ResidentPortal() {
       if (parcelRes.data) setParcels(parcelRes.data);
       if (orderRes.data) setOrders(orderRes.data);
       if (loyaltyRes.data) setLoyalty({ points: loyaltyRes.data.loyalty_points });
-    } catch (err) {
-      console.error("Portal data load failed:", err);
+    } catch (err: unknown) {
+      console.error("Portal data load failed:", (err as Error)?.message);
       setIsMaintenanceMode(true);
     }
     setDataLoading(false);
   }
 
-  /* ── Auth handler ──────────────────────────────────────── */
+  /* ── Auth handler (with client-side rate limiting) ──────── */
   async function handleAuth(e: React.FormEvent) {
     e.preventDefault();
     setAuthError("");
+
+    // Rate-limit check: cooldown active?
+    const now = Date.now();
+    if (now < cooldownUntilRef.current) {
+      const secs = Math.ceil((cooldownUntilRef.current - now) / 1000);
+      setAuthError(`Too many attempts. Please wait ${secs}s.`);
+      return;
+    }
+
     setAuthLoading(true);
+
+    // Cap inputs before sending
+    const safeEmail = email.slice(0, MAX_EMAIL);
+    const safePassword = password.slice(0, MAX_PASSWORD);
+    const safeName = name.slice(0, MAX_NAME);
+    const safePhone = phone.slice(0, MAX_PHONE);
 
     try {
       if (authMode === "signup") {
         const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { data: { full_name: name, phone } },
+          email: safeEmail,
+          password: safePassword,
+          options: { data: { full_name: safeName, phone: safePhone } },
         });
         if (error) throw error;
         setAuthError("Check your email to confirm your account!");
+        setSignupDone(true);
+        authAttemptsRef.current = 0; // reset on success
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({ email: safeEmail, password: safePassword });
         if (error) throw error;
+        authAttemptsRef.current = 0; // reset on success
       }
-    } catch (err: any) {
-      setAuthError(err.message || "Authentication failed");
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || "Authentication failed";
+      setAuthError(msg);
+      // Increment attempts + enforce cooldown
+      authAttemptsRef.current += 1;
+      if (authAttemptsRef.current >= MAX_AUTH_ATTEMPTS) {
+        cooldownUntilRef.current = Date.now() + AUTH_COOLDOWN_MS;
+        setCooldownRemaining(AUTH_COOLDOWN_MS / 1000);
+        const timer = setInterval(() => {
+          setCooldownRemaining((prev) => {
+            if (prev <= 1) { clearInterval(timer); return 0; }
+            return prev - 1;
+          });
+        }, 1000);
+        authAttemptsRef.current = 0; // reset counter after cooldown triggers
+      }
     }
     setAuthLoading(false);
   }
 
   /* ── Print keychain ────────────────────────────────────── */
   const printKeychain = () => {
-    const barcodeUrl = `https://barcodeapi.org/api/128/${encodeURIComponent(user.email)}`;
+    if (!user?.id) return;
+    const uid = user.id;
+    const barcodeUrl = `https://barcodeapi.org/api/128/${encodeURIComponent(uid)}`;
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
     const doc = printWindow.document;
@@ -200,9 +249,11 @@ export default function ResidentPortal() {
     img.src = barcodeUrl;
     img.style.width = "100%";
     container.appendChild(img);
-    const emailP = doc.createElement("p");
-    emailP.textContent = user.email;
-    container.appendChild(emailP);
+    const idP = doc.createElement("p");
+    idP.textContent = uid;
+    idP.style.fontSize = "8px";
+    idP.style.wordBreak = "break-all";
+    container.appendChild(idP);
     doc.body.appendChild(container);
     printWindow.print();
   };
@@ -292,13 +343,13 @@ export default function ResidentPortal() {
               </div>
             )}
 
-            <button type="submit" disabled={authLoading} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+            <button type="submit" disabled={authLoading || signupDone || cooldownRemaining > 0} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
               {authLoading ? (
                 <>
                   <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                   Please wait…
                 </>
-              ) : authMode === "login" ? "Sign In" : "Create Account"}
+              ) : cooldownRemaining > 0 ? `Wait ${cooldownRemaining}s…` : authMode === "login" ? "Sign In" : signupDone ? "Check Your Email" : "Create Account"}
             </button>
           </form>
 
@@ -377,7 +428,7 @@ export default function ResidentPortal() {
             <span className="uppercase tracking-[0.2em] text-[10px] font-bold">Loyalty QR</span>
           </div>
           <img
-            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(user?.email || "")}&bgcolor=0C0A09&color=FFFFFF`}
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(user?.id || "")}&bgcolor=0C0A09&color=FFFFFF`}
             alt="Loyalty QR Code"
             className="mx-auto rounded-lg border border-stone-700"
             width={160}

@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, verifyServiceSecret } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { checkQuota } = require('./_usage');
+const { sendSMS } = require('./_sms');
 
 // HTML-escape user-supplied strings to prevent injection in emails
 const escapeHtml = (s) => String(s || '')
@@ -55,51 +56,39 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { recipient_name, phone, email, tracking } = JSON.parse(event.body || '{}');
+    const { recipient_name, phone, email, tracking, pickup_code, value_tier } = JSON.parse(event.body || '{}');
 
     if (!phone && !email) {
       return json(400, { error: 'Missing phone or email' });
     }
 
-    const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking || 'Parcel'}) is at the Hub. 📦 Grab a coffee when you swing by! Reply STOP to opt out.`;
+    const codeSnippet = pickup_code ? ` Your pickup code: ${pickup_code}.` : '';
+    const idWarning = (value_tier === 'high_value' || value_tier === 'premium') ? ' Photo ID required for pickup.' : '';
+    const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking || 'Parcel'}) is at the Hub.${codeSnippet}${idWarning} 📦 Grab a coffee when you swing by! Reply STOP to opt out.`;
     let smsSuccess = false;
     let emailSuccess = false;
     let smsSid = null;
+    let smsBlocked = false;
+    let smsBlockReason = null;
 
-    // Try SMS first if phone provided
+    // Try SMS first if phone provided — routed through TCPA-compliant gateway
     if (phone) {
-      const cleanPhone = phone.replaceAll(/\D/g, '');
-      const formattedPhone = cleanPhone.startsWith('1') ? `+${cleanPhone}` : `+1${cleanPhone}`;
+      const smsResult = await sendSMS({
+        to: phone,
+        body: message,
+        messageType: 'parcel_arrived',
+        sourceFunction: 'send-sms-email',
+      });
 
-      const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-      const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-      const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-
-      if (twilioSid && twilioToken && messagingServiceSid) {
-        const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-        const authHeader = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
-
-        const res = await fetch(twilioUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${authHeader}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            MessagingServiceSid: messagingServiceSid,
-            To: formattedPhone,
-            Body: message
-          }).toString()
-        });
-
-        const data = await res.json();
-        if (res.ok) {
-          smsSuccess = true;
-          smsSid = data.sid;
-          console.log(`[SEND-SMS] Twilio success: ${data.sid}`);
-        } else {
-          console.error('[SEND-SMS] Twilio error:', data);
-        }
+      if (smsResult.sent) {
+        smsSuccess = true;
+        smsSid = smsResult.sid;
+      } else if (smsResult.blocked) {
+        smsBlocked = true;
+        smsBlockReason = smsResult.reason;
+        console.warn(`[SEND-SMS] SMS blocked: ${smsResult.reason}`);
+      } else {
+        console.error('[SEND-SMS] SMS error:', smsResult.error);
       }
     }
 
@@ -122,6 +111,13 @@ exports.handler = async (event) => {
                 <h1>Package Arrived!</h1>
                 <p>Hi ${escapeHtml(recipient_name) || 'Neighbor'},</p>
                 <p>Your package <strong>(${escapeHtml(tracking) || 'Parcel'})</strong> is at <strong>BrewHub PHL</strong>.</p>
+                ${pickup_code ? `
+                <div style="margin: 20px 0; padding: 15px; background: #f8f4e8; border: 2px solid #d4a843; border-radius: 8px; text-align: center;">
+                  <p style="margin: 0 0 5px 0; font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 2px;">Your Pickup Code</p>
+                  <p style="margin: 0; font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #333; font-family: monospace;">${escapeHtml(pickup_code)}</p>
+                  <p style="margin: 8px 0 0 0; font-size: 11px; color: #888;">Show this code to the barista when you pick up your package.</p>
+                  ${(value_tier === 'high_value' || value_tier === 'premium') ? '<p style="margin: 8px 0 0 0; font-size: 11px; color: #c0392b; font-weight: bold;">⚠️ Government-issued photo ID required for high-value pickup.</p>' : ''}
+                </div>` : ''}
                 <p>Stop by during cafe hours to pick it up. Fresh coffee waiting!</p>
                 <p>— Thomas & The BrewHub PHL Team</p>
               </div>
@@ -145,7 +141,14 @@ exports.handler = async (event) => {
     return {
       statusCode: 200,
       headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },
-      body: JSON.stringify({ success: true, sms: smsSuccess, email: emailSuccess, sid: smsSid })
+      body: JSON.stringify({
+        success: true,
+        sms: smsSuccess,
+        email: emailSuccess,
+        sid: smsSid,
+        sms_blocked: smsBlocked || undefined,
+        sms_block_reason: smsBlockReason || undefined,
+      })
     };
   } catch (error) {
     console.error('[SEND-SMS] Error:', error);

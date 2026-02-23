@@ -83,13 +83,13 @@ export default function HiringViewer() {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/get-applications`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'X-BrewHub-Action': 'true' },
       });
       if (!res.ok) throw new Error("Failed to fetch applications");
       const json = await res.json();
       setApplicants(json.applications ?? []);
     } catch (err) {
-      console.error("Hiring fetch failed:", err);
+      console.error("Hiring fetch failed:", (err as Error)?.message);
     }
     setLoading(false);
   }, [token]);
@@ -118,6 +118,7 @@ export default function HiringViewer() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
         },
         body: JSON.stringify({ id, status: newStatus }),
       });

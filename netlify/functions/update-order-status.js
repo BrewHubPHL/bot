@@ -103,9 +103,15 @@ async function buildPgErrorResponse(err, orderId, authEmail, corsHeaders) {
 }
 
 exports.handler = async (event) => {
-  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+  const ALLOWED_ORIGINS = [
+    process.env.SITE_URL,
+    'https://brewhubphl.com',
+    'https://www.brewhubphl.com',
+  ].filter(Boolean);
+  const origin = event.headers?.origin || '';
+  const corsOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   const CORS_HEADERS = {
-    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+    'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   };
@@ -371,7 +377,7 @@ exports.handler = async (event) => {
       }
     );
 
-    console.error(`[UPDATE-ORDER] ${errorId} [${sqlState}]:`, err);
+    console.error(`[UPDATE-ORDER] ${errorId} [${sqlState}]:`, err?.message || String(err));
     return {
       statusCode: 500,
       headers: CORS_HEADERS,

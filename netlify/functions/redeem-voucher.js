@@ -1,7 +1,16 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, sanitizedError } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 const { checkVoucherRateLimit, logVoucherFail } = require('./_usage');
 const { redactIP } = require('./_ip-hash');
+
+const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+const CORS_HEADERS = {
+  'Content-Type': 'application/json',
+  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, X-BrewHub-Action, Authorization, Cookie',
+};
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(
@@ -15,22 +24,52 @@ function getClientIP(event) {
     || 'unknown';
 }
 
+function json(status, data) {
+  return { statusCode: status, headers: CORS_HEADERS, body: JSON.stringify(data) };
+}
+
 exports.handler = async (event) => {
+  // RV-4: CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 204, headers: CORS_HEADERS, body: '' };
+  }
+
   const auth = await authorize(event);
   if (!auth.ok) return auth.response;
 
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: "Method Not Allowed" };
+    return json(405, { error: 'Method Not Allowed' });
   }
 
-  const { code, orderId, managerOverride } = JSON.parse(event.body || '{}');
+  // RV-1: CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
+
+  // RV-3: Safe JSON parse
+  let body;
+  try {
+    body = JSON.parse(event.body || '{}');
+  } catch {
+    return json(400, { error: 'Invalid request body' });
+  }
+
+  const { code, orderId, managerOverride } = body;
+
+  // RV-2: Input length caps (DB validates too, but reject early)
+  if (code && String(code).length > 100) {
+    return json(400, { error: 'Voucher code too long' });
+  }
+  if (orderId && String(orderId).length > 36) {
+    return json(400, { error: 'Invalid order ID' });
+  }
+
   const voucherCode = (code || '').toUpperCase();
 
   // Manager override for the daily-3 cap — only honoured for manager/admin roles
   const isManager = auth.role === 'manager' || auth.role === 'admin';
   const applyOverride = !!(managerOverride && isManager);
 
-  if (!voucherCode) return { statusCode: 400, body: "Voucher code required" };
+  if (!voucherCode) return json(400, { error: 'Voucher code required' });
 
   const clientIP = getClientIP(event);
 
@@ -41,13 +80,10 @@ exports.handler = async (event) => {
   const rateResult = await checkVoucherRateLimit(clientIP);
   if (!rateResult.allowed) {
     console.warn(`[REDEEM] IP ${redactIP(clientIP)} locked out (${rateResult.failCount} failures)`);
-    return {
-      statusCode: 429,
-      body: JSON.stringify({
-        error: 'Too many failed attempts. Please wait before trying again.',
-        retryAfter: rateResult.lockoutSeconds
-      })
-    };
+    return json(429, {
+      error: 'Too many failed attempts. Please wait before trying again.',
+      retryAfter: rateResult.lockoutSeconds
+    });
   }
 
   console.log(`[REDEEM] Attempt burn: code prefix "${voucherCode.slice(0, 8)}***"`);
@@ -77,8 +113,8 @@ exports.handler = async (event) => {
     }
 
     if (rpcError) {
-      console.error('[REDEEM] RPC error:', rpcError);
-      return { statusCode: 500, body: JSON.stringify({ error: 'Redemption failed' }) };
+      console.error('[REDEEM] RPC error:', rpcError.message || rpcError);
+      return json(500, { error: 'Redemption failed' });
     }
 
     const redeemResult = result?.[0] || result;
@@ -107,18 +143,12 @@ exports.handler = async (event) => {
         'INVALID_CODE': 400
       };
       
-      return { 
-        statusCode: statusMap[errorCode] || 400, 
-        body: JSON.stringify({ error: errorMessage, code: errorCode }) 
-      };
+      return json(statusMap[errorCode] || 400, { error: errorMessage, code: errorCode });
     }
 
     console.log(`[VOUCHER REDEEMED] ${voucherCode.slice(0, 8)}*** applied to order ${orderId} (voucher ID: ${redeemResult.voucher_id})`);
 
-    return { 
-      statusCode: 200, 
-      body: JSON.stringify({ message: "Success! Order is now free." }) 
-    };
+    return json(200, { message: 'Success! Order is now free.' });
   } catch (err) {
     console.error("Redemption Error:", err.message);
     return sanitizedError(err, 'REDEEM');

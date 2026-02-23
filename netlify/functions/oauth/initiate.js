@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const { authorize, json } = require('../_auth');
 const { oauthBucket } = require('../_token-bucket');
 
 const supabase = createClient(
@@ -20,18 +21,12 @@ exports.handler = async (event) => {
     return { statusCode: 429, body: JSON.stringify({ error: 'Too many requests. Please slow down.' }) };
   }
 
-  // Only managers should be starting OAuth — require auth header
-  const authHeader = event.headers?.authorization;
-  if (!authHeader) {
-    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
-  }
-
-  // Verify the caller is a logged-in manager via Supabase JWT
-  const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-  if (authErr || !user) {
-    return { statusCode: 401, body: JSON.stringify({ error: 'Invalid session' }) };
-  }
+  // ── Centralized auth: require manager role ──────────────────
+  // This enforces: staff_directory lookup, role check, revoked_users,
+  // token version (fired-is-fired), and IP guard — all atomically.
+  const auth = await authorize(event, { requireManager: true });
+  if (!auth.ok) return auth.response;
+  const user = auth.user;
 
   // Generate a cryptographic random state token
   const state = crypto.randomBytes(32).toString('hex');

@@ -38,32 +38,39 @@ const SITE_PAGES = {
 
 // --- Strict CORS allowlist ---
 const ALLOWED_ORIGINS = [
-  process.env.URL,                   // Netlify deploy URL
+  process.env.URL, // Netlify deploy URL
   'https://brewhubphl.com',
   'https://www.brewhubphl.com',
 ].filter(Boolean);
 
 function corsOrigin(requestOrigin) {
-  if (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin)) return requestOrigin;
-  return 'https://brewhubphl.com'; // strict default
+  if (!requestOrigin) return undefined;
+  return ALLOWED_ORIGINS.includes(requestOrigin) ? requestOrigin : undefined;
+}
+
+function sanitizeString(s, max = 200) {
+  if (!s) return '';
+  const str = String(s).replace(/<[^>]*>?/g, '').trim();
+  return str.length > max ? str.slice(0, max) : str;
 }
 
 function json(status, data, event) {
-  const origin = (event && event.headers)
-    ? (event.headers.origin || event.headers.Origin)
-    : undefined;
-  return {
-    statusCode: status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': corsOrigin(origin),
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Vary': 'Origin',
-      'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
-    },
-    body: JSON.stringify(data),
+  const hdrs = (event && event.headers)
+    ? Object.keys(event.headers).reduce((acc, k) => (acc[k.toLowerCase()] = event.headers[k], acc), {})
+    : {};
+  const origin = hdrs.origin;
+  const validated = corsOrigin(origin);
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
   };
+  if (validated) {
+    headers['Access-Control-Allow-Origin'] = validated;
+    headers['Vary'] = 'Origin';
+  }
+  return { statusCode: status, headers, body: JSON.stringify(data) };
 }
 
 exports.handler = async (event) => {
@@ -71,11 +78,11 @@ exports.handler = async (event) => {
     return json(200, {}, event);
   }
 
-  // Per-IP rate limit
-  const clientIp = event.headers['x-nf-client-connection-ip']
-    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
-    || 'unknown';
-  const ipLimit = publicBucket.consume('nav:' + clientIp);
+  // Per-IP rate limit (normalize headers and use shared bucket for unknown)
+  const hdrs = Object.keys(event.headers || {}).reduce((m, k) => (m[k.toLowerCase()] = event.headers[k], m), {});
+  const clientIp = hdrs['x-nf-client-connection-ip'] || (hdrs['x-forwarded-for'] || '').split(',')[0]?.trim() || null;
+  const bucketKey = clientIp ? `nav:${clientIp}` : 'nav:global';
+  const ipLimit = publicBucket.consume(bucketKey);
   if (!ipLimit.allowed) {
     return json(429, { success: false, error: 'Too many requests.' }, event);
   }
@@ -86,8 +93,13 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'GET') {
     destination = (event.queryStringParameters || {}).destination;
   } else {
-    const body = JSON.parse(event.body || '{}');
-    destination = body.destination;
+    let parsed;
+    try {
+      parsed = JSON.parse(event.body || '{}');
+    } catch (e) {
+      return json(400, { success: false, error: 'Invalid JSON body' }, event);
+    }
+    destination = parsed.destination;
   }
 
   // If no destination, return all available pages
@@ -103,7 +115,10 @@ exports.handler = async (event) => {
     }, event);
   }
 
-  const dest = destination.toLowerCase().trim();
+  if (typeof destination !== 'string') {
+    return json(400, { success: false, error: 'destination must be a string' }, event);
+  }
+  const dest = sanitizeString(destination).toLowerCase().trim();
   const page = SITE_PAGES[dest];
 
   if (page) {

@@ -5,6 +5,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, sanitizedError } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -21,9 +22,13 @@ exports.handler = async (event) => {
     return json(405, { error: 'Method not allowed' });
   }
 
-  // Require staff-level auth (matches the RLS policy intent)
-  const auth = await authorize(event);
+  // Require manager-level auth — only managers should change hiring decisions (API-H2 fix).
+  const auth = await authorize(event, { requireManager: true });
   if (!auth.ok) return auth.response;
+
+  // CSRF protection (was missing — HIRE-3 fix)
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
 
   let body;
   try {

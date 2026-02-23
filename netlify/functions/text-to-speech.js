@@ -12,9 +12,16 @@ function getClientIP(event) {
 }
 
 exports.handler = async (event) => {
-    const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+    // TTS-1: strict CORS allowlist
+    const ALLOWED_ORIGINS = [
+        process.env.URL || process.env.SITE_URL,
+        'https://brewhubphl.com',
+        'https://www.brewhubphl.com',
+    ].filter(Boolean);
+    const origin = event.headers?.origin || '';
+    const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
     const corsHeaders = {
-        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+        'Access-Control-Allow-Origin': allowedOrigin,
         'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
     };
@@ -61,18 +68,24 @@ exports.handler = async (event) => {
     }
 
     try {
-        const { text } = JSON.parse(event.body);
+        // TTS-4: safe JSON parse
+        let text;
+        try {
+            ({ text } = JSON.parse(event.body || '{}'));
+        } catch {
+            return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'Invalid JSON body' }) };
+        }
         
         if (!text) {
-            return { statusCode: 400, headers: corsHeaders, body: 'No text provided' };
+            return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'No text provided' }) };
         }
 
         // Limit text length to prevent cost amplification
         const MAX_TTS_LENGTH = 500;
         const safeText = String(text).slice(0, MAX_TTS_LENGTH);
 
-        // Use Elise's voice (or a default ElevenLabs voice)
-        const voiceId = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'; // Sarah voice as fallback
+        // TTS-3: sanitize voiceId from env
+        const voiceId = (process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL').slice(0, 50);
         
         const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
             method: 'POST',
@@ -93,7 +106,7 @@ exports.handler = async (event) => {
 
         if (!response.ok) {
             console.error('ElevenLabs TTS error:', response.status);
-            return { statusCode: 500, headers: corsHeaders, body: 'TTS failed' };
+            return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: 'TTS failed' }) };
         }
 
         const audioBuffer = await response.arrayBuffer();
@@ -109,7 +122,7 @@ exports.handler = async (event) => {
             isBase64Encoded: true
         };
     } catch (error) {
-        console.error('TTS error:', error);
-        return { statusCode: 500, headers: corsHeaders, body: 'TTS error' };
+        console.error('TTS error:', error?.message);
+        return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: 'TTS error' }) };
     }
 };

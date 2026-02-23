@@ -30,7 +30,7 @@ export default function ServiceWorkerRegistrar() {
         });
       })
       .catch((err) => {
-        console.warn("[SW] Registration failed:", err);
+        console.warn("[SW] Registration failed:", (err as Error)?.message);
       });
   }, []);
 

@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { hashIP } = require('./_ip-hash');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -69,7 +70,7 @@ exports.handler = async (event) => {
       const isWildcard = allowedRaw.trim() === '*';
 
       if (allowedIPs.length > 0 && !isLocal && !isWildcard && !allowedIPs.includes(ip)) {
-        console.warn(`[PIN-CLOCK] IP blocked for non-manager clock: ${ip}`);
+        console.warn(`[PIN-CLOCK] IP blocked for non-manager clock: ${hashIP(ip)}`);
         return {
           statusCode: 403,
           headers: corsHeaders,
@@ -94,7 +95,7 @@ exports.handler = async (event) => {
     );
 
     if (rpcError) {
-      console.error('[PIN-CLOCK] RPC error:', rpcError);
+      console.error('[PIN-CLOCK] RPC error:', rpcError?.message);
       return {
         statusCode: 500,
         headers: corsHeaders,
@@ -133,7 +134,7 @@ exports.handler = async (event) => {
     };
 
   } catch (err) {
-    console.error('[PIN-CLOCK] Error:', err);
+    console.error('[PIN-CLOCK] Error:', err?.message);
     return {
       statusCode: 500,
       headers: corsHeaders,

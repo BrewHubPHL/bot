@@ -2,6 +2,7 @@ const { checkQuota } = require('./_usage');
 const { requireCsrfHeader } = require('./_csrf');
 const { createClient } = require('@supabase/supabase-js');
 const { chatBucket } = require('./_token-bucket');
+const { sendSMS } = require('./_sms');
 
 // ═══════════════════════════════════════════════════════════════════
 // ALLERGEN / DIETARY / MEDICAL SAFETY LAYER
@@ -254,7 +255,7 @@ async function executeTool(toolName, toolInput, supabase) {
                 };
             }
         } catch (err) {
-            console.error('Waitlist check error:', err);
+            console.error('Waitlist check error:', err?.message);
             return { result: 'Unable to check the waitlist right now.' };
         }
     }
@@ -288,17 +289,17 @@ async function executeTool(toolName, toolInput, supabase) {
                 price: `$${(cents / 100).toFixed(2)}`
             }));
             return { 
-                result: 'Menu loaded (fallback)',
+                result: '⚠️ Menu loaded from cache — prices may not be current. Please confirm at the counter.',
                 menu_items: fallbackItems
             };
         } catch (err) {
-            console.error('Get menu error:', err);
+            console.error('Get menu error:', err?.message);
             const fallbackItems = Object.entries(FALLBACK_MENU).map(([name, cents]) => ({
                 name,
                 price: `$${(cents / 100).toFixed(2)}`
             }));
             return { 
-                result: 'Menu loaded (fallback)',
+                result: '⚠️ Menu loaded from cache — prices may not be current. Please confirm at the counter.',
                 menu_items: fallbackItems
             };
         }
@@ -324,8 +325,8 @@ async function executeTool(toolName, toolInput, supabase) {
         const MAX_ITEM_QUANTITY = 20;
 
         try {
-            // Load menu prices
-            let menuPrices = FALLBACK_MENU;
+            // Load menu prices — fail-closed: reject order if DB is unreachable
+            let menuPrices = null;
             if (supabase) {
                 const { data } = await supabase
                     .from('merch_products')
@@ -336,6 +337,12 @@ async function executeTool(toolName, toolInput, supabase) {
                     menuPrices = {};
                     data.forEach(item => { menuPrices[item.name] = item.price_cents; });
                 }
+            }
+            if (!menuPrices) {
+                return {
+                    success: false,
+                    result: 'Our menu system is temporarily unavailable. Please try again in a moment or order at the counter.'
+                };
             }
 
             const menuItemNames = Object.keys(menuPrices);
@@ -379,7 +386,7 @@ async function executeTool(toolName, toolInput, supabase) {
                     .single();
 
                 if (orderErr) {
-                    console.error('Order create error:', orderErr);
+                    console.error('Order create error:', orderErr?.message);
                     return { success: false, result: 'Failed to create order. Please try again.' };
                 }
 
@@ -411,7 +418,7 @@ async function executeTool(toolName, toolInput, supabase) {
 
             return { success: false, result: 'Unable to process order right now.' };
         } catch (err) {
-            console.error('Place order error:', err);
+            console.error('Place order error:', err?.message);
             return { success: false, result: 'Something went wrong placing the order.' };
         }
     }
@@ -486,35 +493,49 @@ async function executeTool(toolName, toolInput, supabase) {
             const points = profile.loyalty_points || 0;
             const pointsToReward = Math.max(0, 100 - (points % 100));
             const qrUrl = `https://brewhubphl.com/portal`;
-            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(profile.email)}`;
+            // CC-6: Use portal URL in QR data — never leak email to third-party QR service
+            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}`;
 
             // Send SMS if requested — only to the authenticated user's own verified data
             if (send_sms && phone && authedUser && process.env.TWILIO_ACCOUNT_SID) {
-                const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-                const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-                const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-                
-                const formattedPhone = phone.startsWith('+') ? phone : `+1${phone.replace(/\D/g, '')}`;
-                
-                await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': 'Basic ' + Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64'),
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: new URLSearchParams({
-                        To: formattedPhone,
-                        MessagingServiceSid: messagingServiceSid,
-                        Body: `BrewHub Loyalty\nYou have ${points} points!\n${pointsToReward} more to your next free drink.\n\nYour QR: ${qrImageUrl}\n\nPortal: ${qrUrl}`
-                    }).toString()
-                }).catch(err => console.error('SMS send error:', err));
+                const smsBody = `BrewHub Loyalty\nYou have ${points} points!\n${pointsToReward} more to your next free drink.\n\nYour QR: ${qrImageUrl}\n\nPortal: ${qrUrl}`;
 
-                return {
-                    found: true,
-                    points,
-                    points_to_next_reward: pointsToReward,
-                    result: `You have ${points} loyalty points! ${pointsToReward} more until your next free drink. I just texted your QR code to you!`
-                };
+                const smsResult = await sendSMS({
+                    to: phone,
+                    body: smsBody,
+                    messageType: 'loyalty_qr',
+                    sourceFunction: 'claude-chat',
+                });
+
+                if (smsResult.sent) {
+                    return {
+                        found: true,
+                        points,
+                        points_to_next_reward: pointsToReward,
+                        result: `You have ${points} loyalty points! ${pointsToReward} more until your next free drink. I just texted your QR code to you!`
+                    };
+                } else if (smsResult.blocked) {
+                    return {
+                        found: true,
+                        points,
+                        points_to_next_reward: pointsToReward,
+                        portal_url: qrUrl,
+                        qr_image_url: qrImageUrl,
+                        result: smsResult.reason === 'opted_out'
+                            ? `You have ${points} loyalty points! It looks like you've opted out of SMS. Visit brewhubphl.com/portal to see your QR code, or text START to our number to re-enable texts.`
+                            : `You have ${points} loyalty points! I couldn't text right now (quiet hours). Visit brewhubphl.com/portal to see your QR code!`
+                    };
+                } else {
+                    // SMS failed but non-fatal — show portal link instead
+                    return {
+                        found: true,
+                        points,
+                        points_to_next_reward: pointsToReward,
+                        portal_url: qrUrl,
+                        qr_image_url: qrImageUrl,
+                        result: `You have ${points} loyalty points! ${pointsToReward} more until your next free drink. I couldn't send the text, but you can see your QR at brewhubphl.com/portal`
+                    };
+                }
             }
 
             // Only return PII to the authenticated owner
@@ -528,7 +549,7 @@ async function executeTool(toolName, toolInput, supabase) {
                 result: `You have ${points} loyalty points! ${pointsToReward} more until your next free drink. Visit brewhubphl.com/portal to see your QR code, or I can text it to you if you give me your phone number.`
             };
         } catch (err) {
-            console.error('Loyalty lookup error:', err);
+            console.error('Loyalty lookup error:', err?.message);
             return { result: 'Unable to look up loyalty info right now.' };
         }
     }
@@ -585,7 +606,7 @@ async function executeTool(toolName, toolInput, supabase) {
                 .eq('id', orders.id);
 
             if (updateErr) {
-                console.error('Order cancel error:', updateErr);
+                console.error('Order cancel error:', updateErr?.message);
                 return { success: false, result: 'Failed to cancel the order. Please ask a staff member for help.' };
             }
 
@@ -603,7 +624,7 @@ async function executeTool(toolName, toolInput, supabase) {
                 result: `Order #${orderNum} has been cancelled.`
             };
         } catch (err) {
-            console.error('Cancel order error:', err);
+            console.error('Cancel order error:', err?.message);
             return { success: false, result: 'Something went wrong cancelling the order.' };
         }
     }
@@ -740,9 +761,15 @@ If a customer uses slurs, hate speech, or extremely abusive language (racial slu
 Never make up order numbers, prices, or loyalty balances. Always use the tools to get real data. Keep responses short (1-2 sentences max). NEVER use emojis — your replies are read aloud by a text-to-speech voice and emojis sound awkward when spoken. NEVER use markdown formatting (no **, *, #, - bullets, or backticks) — your replies are displayed as plain text in a chat bubble and also read aloud by TTS, so raw markdown symbols look and sound terrible.`;
 
 exports.handler = async (event) => {
-    const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+    const ALLOWED_ORIGINS = [
+        process.env.SITE_URL,
+        'https://brewhubphl.com',
+        'https://www.brewhubphl.com',
+    ].filter(Boolean);
+    const origin = event.headers?.origin || '';
+    const corsOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
     const headers = {
-        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+        'Access-Control-Allow-Origin': corsOrigin,
         'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
         'Content-Type': 'application/json'
     };
@@ -796,7 +823,7 @@ exports.handler = async (event) => {
             const body = JSON.parse(event.body);
             userText = body.text || "Hello";
             conversationHistory = (body.history || [])
-              .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+              .filter(m => m.role === 'user' && typeof m.content === 'string');
         }
 
         // Input length guard — prevent cost-amplification attacks
@@ -808,6 +835,11 @@ exports.handler = async (event) => {
         if (conversationHistory.length > MAX_HISTORY_ITEMS) {
             conversationHistory = conversationHistory.slice(-MAX_HISTORY_ITEMS);
         }
+        // CC-5: Per-item content length cap — prevent cost amplification via oversized history items
+        conversationHistory = conversationHistory.map(m => ({
+            ...m,
+            content: typeof m.content === 'string' ? m.content.slice(0, MAX_TEXT_LENGTH) : ''
+        }));
 
         // ═══════════════════════════════════════════════════════
         // ALLERGEN / MEDICAL HARD BLOCK (Layer 1 — pre-LLM)
@@ -852,7 +884,7 @@ exports.handler = async (event) => {
                 });
 
                 if (!claudeResp.ok) {
-                    console.error('Claude API error:', claudeResp.status, await claudeResp.text());
+                    console.error('Claude API error:', claudeResp.status);
                     throw new Error('Claude API failed');
                 }
 
@@ -867,7 +899,7 @@ exports.handler = async (event) => {
                     
                     if (!toolUseBlock) break;
 
-                    console.log(`Tool call [${toolRounds}]: ${toolUseBlock.name}`, toolUseBlock.input);
+                    console.log(`Tool call [${toolRounds}]: ${toolUseBlock.name}`);
                     
                     // Inject auth context into tool input for security checks
                     const toolInputWithAuth = { ...toolUseBlock.input, _authed_user: authedUser };

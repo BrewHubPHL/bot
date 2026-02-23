@@ -30,7 +30,7 @@ export default function StatsGrid() {
         setStaffCount(data.staffCount ?? 0);
         setLabor(data.labor ?? 0);
       } catch (err) {
-        console.error("Stats fetch failed:", err);
+        console.error("Stats fetch failed:", (err as Error)?.message);
       }
       setLoading(false);
     }

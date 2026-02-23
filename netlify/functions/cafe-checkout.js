@@ -26,15 +26,24 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MAX_CART_SIZE = 50;
 const MAX_QUANTITY = 20;
 
-exports.handler = async (event) => {
-  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+// ── CORS strict allowlist ─────────────────────────────────
+const ALLOWED_ORIGINS = [
+  process.env.URL,
+  'https://brewhubphl.com',
+  'https://www.brewhubphl.com',
+].filter(Boolean);
+const getCorsOrigin = (event) => {
+  const origin = event.headers?.origin || '';
+  return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+};
 
+exports.handler = async (event) => {
   // CORS — include X-BrewHub-Action in allowed headers for CSRF protection
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
       headers: {
-        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+        'Access-Control-Allow-Origin': getCorsOrigin(event),
         'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
       },
@@ -133,7 +142,7 @@ exports.handler = async (event) => {
         .eq('is_active', true)
         .is('archived_at', null);
       if (prodErr) {
-        console.error('[CAFE] Product ID lookup error:', prodErr);
+        console.error('[CAFE] Product ID lookup error:', prodErr?.message);
         return json(500, { error: 'Failed to verify product prices.' });
       }
       productsById = data || [];
@@ -149,7 +158,7 @@ exports.handler = async (event) => {
         .eq('is_active', true)
         .is('archived_at', null);
       if (prodErr) {
-        console.error('[CAFE] Product name lookup error:', prodErr);
+        console.error('[CAFE] Product name lookup error:', prodErr?.message);
         return json(500, { error: 'Failed to verify product prices.' });
       }
       productsByName = data || [];
@@ -222,7 +231,7 @@ exports.handler = async (event) => {
       .single();
 
     if (orderErr) {
-      console.error('Cafe order create error:', orderErr);
+      console.error('Cafe order create error:', orderErr?.message);
       return json(500, { error: 'Failed to create order' });
     }
 
@@ -243,12 +252,14 @@ exports.handler = async (event) => {
       .insert(coffeeItems);
 
     if (itemErr) {
-      console.error('Coffee orders insert error:', itemErr);
+      console.error('Coffee orders insert error:', itemErr?.message);
       // Order was created, items failed - log but don't fail completely
     }
 
     // Send order confirmation email if customer email provided
-    const { customer_email, customer_name } = JSON.parse(event.body || '{}');
+    // Reuse ce/cn already extracted above (no double JSON.parse)
+    const customer_email = typeof ce === 'string' ? ce.slice(0, 320) : null;
+    const customer_name = typeof cn === 'string' ? cn.slice(0, 100) : null;
     // Validate email format before sending
     const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (customer_email && EMAIL_RE.test(customer_email) && process.env.RESEND_API_KEY) {
@@ -294,7 +305,7 @@ exports.handler = async (event) => {
     });
 
   } catch (err) {
-    console.error('Cafe checkout error:', err);
+    console.error('Cafe checkout error:', err?.message);
     return json(500, { error: 'Checkout failed' });
   }
 };

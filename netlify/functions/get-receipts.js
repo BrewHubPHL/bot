@@ -4,38 +4,69 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, sanitizedError } = require('./_auth');
+const { formBucket } = require('./_token-bucket');
+const { sanitizeInput } = require('./_sanitize');
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const ALLOWED_ORIGINS = new Set([
+  process.env.SITE_URL,
+  'https://brewhubphl.com',
+  'https://www.brewhubphl.com',
+].filter(Boolean));
+
+function validateOrigin(headers) {
+  const origin = headers['origin'] || headers['Origin'] || '';
+  if (ALLOWED_ORIGINS.has(origin)) return origin;
+  return null;
+}
+
+function redactPII(text) {
+  if (!text) return text;
+  let s = String(text);
+  // redact emails
+  s = s.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig, '[REDACTED_EMAIL]');
+  // redact likely phone numbers (simple heuristic)
+  s = s.replace(/(\+?\d[\d\-\s()]{6,}\d)/g, '[REDACTED_PHONE]');
+  return s;
+}
+
+const makeHeaders = (origin) => Object.assign({ 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'Vary': 'Origin' }, origin ? { 'Access-Control-Allow-Origin': origin } : {});
 
 exports.handler = async (event) => {
-  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+  const origin = validateOrigin(event.headers || {});
+  const headers = makeHeaders(origin);
+
+  if (MISSING_ENV) return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server misconfiguration' }) };
 
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 204,
-      headers: {
-        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      },
-      body: '',
-    };
+    return { statusCode: 200, headers: Object.assign({}, headers, { 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, OPTIONS' }), body: '' };
   }
 
   if (event.httpMethod !== 'GET') {
-    return json(405, { error: 'Method not allowed' });
+    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
   // Staff-only (PIN or JWT)
   const auth = await authorize(event);
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) return Object.assign({}, auth.response, { headers: Object.assign({}, auth.response.headers || {}, headers) });
+
+  // rate limit per-staff+IP
+  const clientIp = event.headers['x-nf-client-connection-ip'] || event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'unknown';
+  const staffEmail = (auth.user && (auth.user.email || auth.user?.user?.email)) ? String(auth.user.email || auth.user?.user?.email).toLowerCase() : 'unknown_staff';
+  const rlKey = `receipts:${staffEmail}:${clientIp}`;
+  const rl = formBucket.consume(rlKey);
+  if (!rl.allowed) {
+    return { statusCode: 429, headers: Object.assign({}, headers, { 'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)) }), body: JSON.stringify({ error: 'Too many requests' }) };
+  }
 
   try {
     const params = event.queryStringParameters || {};
-    const limit = Math.min(parseInt(params.limit, 10) || 10, 25);
+    let limit = Number(params.limit);
+    if (!Number.isFinite(limit) || limit <= 0) limit = 10;
+    limit = Math.min(Math.max(1, Math.floor(limit)), 100);
+
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
     const { data, error } = await supabase
       .from('receipt_queue')
@@ -45,15 +76,17 @@ exports.handler = async (event) => {
 
     if (error) throw error;
 
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-      },
-      body: JSON.stringify({ receipts: data || [] }),
-    };
+    const receipts = (data || []).map(r => {
+      let txt = String(r.receipt_text || '').slice(0, 2000);
+      txt = sanitizeInput(txt);
+      txt = redactPII(txt);
+      return { id: r.id, receipt_text: txt, created_at: r.created_at };
+    });
+
+    return { statusCode: 200, headers, body: JSON.stringify({ receipts }) };
   } catch (err) {
-    return sanitizedError(err, 'get-receipts');
+    const res = sanitizedError(err, 'get-receipts');
+    res.headers = Object.assign({}, res.headers || {}, headers);
+    return res;
   }
 };

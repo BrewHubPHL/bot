@@ -48,6 +48,12 @@ function haptic(pattern: "tap" | "success" | "error") {
   try { navigator.vibrate(p[pattern]); } catch { /* silent */ }
 }
 
+/* ── Status normalizer ────────────────────────────────────────── */
+/** Normalize status from DB to lowercase — guards against mixed-case data */
+function ns(status: string | null | undefined): string {
+  return (status || '').toLowerCase();
+}
+
 /* ── Status workflow ─────────────────────────────────────────── */
 const STATUS_FLOW: Record<string, string> = {
   pending:   'preparing',
@@ -90,6 +96,9 @@ export default function KDS() {
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const fetchingRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // KDS-4: Track orders.length via ref to avoid stale closure in fetchOrders
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
   // Track cards that are animating out (for CSS exit transition)
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
 
@@ -118,9 +127,9 @@ export default function KDS() {
       // Cache to IndexedDB for offline display
       saveKDSSnapshot(live).catch(() => {});
     } catch (err) {
-      console.error("KDS: Fetch Error:", err);
+      console.error("KDS: Fetch Error:", err instanceof Error ? err.message : 'Unknown error');
       // If we have no orders yet, try loading from cache
-      if (orders.length === 0) {
+      if (ordersRef.current.length === 0) {
         try {
           const cached = await getKDSSnapshot();
           if (cached.length > 0) {
@@ -227,15 +236,22 @@ export default function KDS() {
 
   /* ── Elapsed time helper ──────────────────────────────────── */
   function elapsed(createdAt: string): string {
-    const diff = Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000);
+    if (!createdAt) return '';
+    const ts = new Date(createdAt).getTime();
+    if (Number.isNaN(ts)) return '';
+    const diff = Math.floor((Date.now() - ts) / 60000);
     if (diff < 1) return 'just now';
     return `${diff}m ago`;
   }
 
   /* ── Urgency helper: orders waiting too long get highlighted ── */
   function urgencyClass(createdAt: string, status: string): string {
-    if (status === "ready" || status === "completed" || status === "cancelled") return "";
-    const mins = Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000);
+    const s = ns(status);
+    if (s === "ready" || s === "completed" || s === "cancelled") return "";
+    if (!createdAt) return "";
+    const ts = new Date(createdAt).getTime();
+    if (Number.isNaN(ts)) return "";
+    const mins = Math.floor((Date.now() - ts) / 60000);
     if (mins >= 10) return "ring-2 ring-red-500/60 animate-pulse";
     if (mins >= 5) return "ring-2 ring-amber-500/40";
     return "";
@@ -270,7 +286,8 @@ export default function KDS() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 md:gap-8">
         {orders.map(order => {
-          const nextStatus = STATUS_FLOW[order.status];
+          const status = ns(order.status);
+          const nextStatus = STATUS_FLOW[status];
           const items = order.coffee_orders || [];
           const isExiting = exitingIds.has(order.id);
 
@@ -279,8 +296,8 @@ export default function KDS() {
               key={order.id}
               className={[
                 "bg-stone-900 border-t-8 rounded-sm flex flex-col h-full shadow-2xl transition-all duration-300",
-                BORDER_COLOR[order.status] || "border-stone-600",
-                urgencyClass(order.created_at, order.status),
+                BORDER_COLOR[status] || "border-stone-600",
+                urgencyClass(order.created_at, status),
                 isExiting ? "opacity-0 scale-95 translate-y-4" : "opacity-100 scale-100 translate-y-0",
               ].join(" ")}
             >
@@ -290,8 +307,8 @@ export default function KDS() {
                   <h3 className="text-2xl md:text-3xl font-playfair">{order.customer_name || 'Guest'}</h3>
                   <p className="text-stone-500 font-mono text-xs mt-1">{elapsed(order.created_at)}</p>
                 </div>
-                <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${STATUS_BADGE[order.status] || 'bg-stone-700 text-stone-300'}`}>
-                  {order.status}
+                <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${STATUS_BADGE[status] || 'bg-stone-700 text-stone-300'}`}>
+                  {status}
                 </span>
               </div>
 
@@ -325,10 +342,10 @@ export default function KDS() {
                     onClick={() => updateStatus(order.id, nextStatus)}
                     className="w-full min-h-[48px] py-4 text-xs font-bold tracking-[0.3em] uppercase bg-stone-100 text-stone-900 hover:bg-white active:bg-stone-200 transition-colors disabled:opacity-50 disabled:cursor-wait rounded-sm"
                   >
-                    {updating === order.id ? 'Updating…' : BUTTON_LABEL[order.status] || 'Next'}
+                    {updating === order.id ? 'Updating…' : BUTTON_LABEL[status] || 'Next'}
                   </button>
                 )}
-                {order.status !== 'cancelled' && (
+                {status !== 'cancelled' && (
                   <button
                     disabled={updating === order.id || isExiting}
                     onClick={() => updateStatus(order.id, 'cancelled')}

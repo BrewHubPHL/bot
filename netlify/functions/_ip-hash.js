@@ -25,15 +25,31 @@ const crypto = require('crypto');
 // that MUST NOT be used in production (deploy will fail lint check).
 const IP_SALT = process.env.IP_HASH_SALT || process.env.BREWHUB_IP_SALT || '';
 
+// Audit #24 — warn on startup if salt is empty (trivial rainbow table risk)
+if (!IP_SALT) {
+  console.warn('[_ip-hash] ⚠️  IP_HASH_SALT is empty — hashes are unsalted and trivially reversible. Set IP_HASH_SALT in production.');
+}
+
 /**
  * Hash an IP address with the installation salt.
  * Returns a 64-char hex SHA-256 digest.
+ *
+ * When the salt is empty the hash would be a trivial unsalted SHA-256,
+ * easily reversible via rainbow table.  In that case we return a random
+ * opaque hex string so that no deterministic unsalted digest is ever
+ * stored or used for rate-limit correlation.  Rate-limit lookups will
+ * fail-open (each request gets a unique key) which is preferable to
+ * storing reversible IP hashes.
  *
  * @param {string} rawIP — The raw IPv4/IPv6 address
  * @returns {string} 64-char lowercase hex hash
  */
 function hashIP(rawIP) {
   if (!rawIP || rawIP === 'unknown') return 'unknown';
+  if (!IP_SALT) {
+    // No salt → return random hex to avoid storing deterministic unsalted hashes
+    return crypto.randomBytes(32).toString('hex');
+  }
   return crypto
     .createHash('sha256')
     .update(rawIP + IP_SALT)

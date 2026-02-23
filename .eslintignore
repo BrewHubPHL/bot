@@ -1,0 +1,6 @@
+# Build artifacts and caches
+.netlify/
+.next/
+node_modules/
+dist/
+build/

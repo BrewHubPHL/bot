@@ -45,8 +45,13 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  // Manager-only + PIN auth required
-  const auth = await authorize(event, { requireManager: true, requirePin: true });
+  // Manager-only + PIN auth required + challenge nonce for insider-threat defense
+  const auth = await authorize(event, {
+    requireManager: true,
+    requirePin: true,
+    requireManagerChallenge: true,
+    challengeActionType: 'fix_clock',
+  });
   if (!auth.ok) return auth.response;
 
   try {
@@ -156,6 +161,32 @@ exports.handler = async (event) => {
       .eq('email', employee_email.toLowerCase().trim());
 
     console.log(`[FIX-CLOCK] Manager ${managerEmail} fixed clock-out for ${employee_email} → ${clockOutDate.toISOString()} (log ${openLog.id}, reason: ${reason.trim()})`);
+
+    // ── Schema 47: Immutable manager override audit log ────
+    const clientIP = event.headers['x-nf-client-connection-ip']
+      || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+      || 'unknown';
+    try {
+      await supabase.from('manager_override_log').insert({
+        action_type: 'fix_clock',
+        manager_email: managerEmail,
+        manager_staff_id: managerId,
+        target_entity: 'time_logs',
+        target_id: openLog.id,
+        target_employee: employee_email.toLowerCase().trim(),
+        details: {
+          clock_in: openLog.clock_in,
+          corrected_clock_out: clockOutDate.toISOString(),
+          shift_minutes: shiftMinutes,
+          reason: reason.trim(),
+        },
+        device_fingerprint: auth.deviceFingerprint || null,
+        ip_address: clientIP,
+        challenge_method: 'totp',
+      });
+    } catch (auditLogErr) {
+      console.error('[FIX-CLOCK] Override audit log failed (non-fatal):', auditLogErr.message);
+    }
 
     return cors(200, {
       success: true,

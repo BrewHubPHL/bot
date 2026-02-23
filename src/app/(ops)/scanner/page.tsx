@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
 import { useOpsSession } from "@/components/OpsGate";
 import {
   Camera, CameraOff, Package, Heart, ScanLine, Plus, Minus,
@@ -109,10 +108,11 @@ export default function ScannerPage() {
   const lastScannedCode = useRef<string>("");
   const lastScannedTime = useRef<number>(0);
   const animFrameRef = useRef<number>(0);
+  const handleScanRef = useRef<(raw: string) => void>(() => {}); // stable ref for barcode detection loop
 
-  /* ─── Clock ──────────────────────────────────────────────────── */
+  /* ─── Clock (60s — display is HH:MM only) ───────────────────── */
   useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 1000);
+    const t = setInterval(() => setClock(new Date()), 60_000);
     return () => clearInterval(t);
   }, []);
 
@@ -174,7 +174,7 @@ export default function ScannerPage() {
         try {
           const barcodes = await detector.detect(videoRef.current);
           if (barcodes.length > 0 && !scanLockRef.current) {
-            handleScan(barcodes[0].rawValue);
+            handleScanRef.current(barcodes[0].rawValue);
           }
         } catch {}
         animFrameRef.current = requestAnimationFrame(detect);
@@ -190,7 +190,7 @@ export default function ScannerPage() {
   const handleScan = async (rawValue: string) => {
     if (scanLockRef.current) return; // Prevent double-scan
 
-    const value = rawValue.trim();
+    const value = rawValue.trim().slice(0, 254);
     const now = Date.now();
 
     // Cooldown: ignore identical barcode scanned within 3 seconds
@@ -216,6 +216,9 @@ export default function ScannerPage() {
       await lookupBarcode(value);
     }
   };
+
+  // Keep handleScanRef in sync so the detection loop always calls the latest handleScan
+  useEffect(() => { handleScanRef.current = handleScan; });
 
   /* ─── Inventory lookup ───────────────────────────────────────── */
   const lookupBarcode = async (barcode: string) => {
@@ -259,22 +262,27 @@ export default function ScannerPage() {
     setTimeout(() => { scanLockRef.current = false; }, 1500);
   };
 
-  /* ─── Loyalty lookup ─────────────────────────────────────────── */
+  /* ─── Loyalty lookup (Audit #25: via PIN-auth'd Netlify function) ─ */
   const lookupLoyalty = async (email: string) => {
+    const safeEmail = email.toLowerCase().trim().slice(0, 254);
     setViewState("scanning");
-    setStatusMsg(`Looking up loyalty: ${email}`);
+    setStatusMsg("Looking up loyalty…");
 
     try {
-      const { data, error } = await supabase
-        .from("customers")
-        .select("email, name, loyalty_points")
-        .eq("email", email.toLowerCase().trim())
-        .maybeSingle();
+      const resp = await fetch("/.netlify/functions/get-staff-loyalty", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${opsToken}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({ email: safeEmail }),
+      });
 
-      if (error) throw error;
+      const result = await resp.json();
 
-      if (!data) {
-        setStatusMsg(`No loyalty account for ${email}`);
+      if (!resp.ok || !result.found) {
+        setStatusMsg(result.error || `No loyalty account for ${email}`);
         setViewState("idle");
         haptic("warning");
         setTimeout(() => { scanLockRef.current = false; }, 2000);
@@ -282,10 +290,10 @@ export default function ScannerPage() {
       }
 
       setLoyaltyResult({
-        email: data.email,
-        name: data.name,
-        loyalty_points: data.loyalty_points || 0,
-        drinks_toward_free: Math.floor(((data.loyalty_points || 0) % 500) / 50),
+        email: result.email,
+        name: result.name,
+        loyalty_points: result.loyalty_points || 0,
+        drinks_toward_free: result.drinks_toward_free ?? Math.floor(((result.loyalty_points || 0) % 500) / 50),
       });
       setViewState("result");
       setStatusMsg("Loyalty card found");
@@ -371,8 +379,9 @@ export default function ScannerPage() {
   /* ─── Manual entry ───────────────────────────────────────────── */
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (manualInput.trim()) {
-      handleScan(manualInput.trim());
+    const cleaned = manualInput.trim().slice(0, 254);
+    if (cleaned) {
+      handleScan(cleaned);
       setManualInput("");
     }
   };

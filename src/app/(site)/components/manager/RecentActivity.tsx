@@ -40,7 +40,7 @@ export default function RecentActivity() {
           .slice(0, 10);
         setEvents(all);
       } catch (err) {
-        console.error("Activity fetch failed:", err);
+        console.error("Activity fetch failed:", (err as Error)?.message);
       }
       setLoading(false);
     }

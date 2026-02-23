@@ -55,8 +55,8 @@ serve(async (req) => {
     })
 
     if (claimError) {
-      console.error('[WORKER] Claim error:', claimError)
-      return new Response(JSON.stringify({ error: 'Claim failed', details: claimError }), { status: 500 })
+      console.error('[WORKER] Claim error:', claimError?.message)
+      return new Response(JSON.stringify({ error: 'Claim failed', details: claimError?.message }), { status: 500 })
     }
 
     if (!tasks || tasks.length === 0) {
@@ -118,9 +118,9 @@ serve(async (req) => {
       headers: { 'Content-Type': 'application/json' } 
     })
 
-  } catch (error: any) {
-    console.error('[WORKER] Fatal error:', error)
-    return new Response(JSON.stringify({ error: error.message }), { 
+    } catch (error: any) {
+    console.error('[WORKER] Fatal error:', error?.message)
+    return new Response(JSON.stringify({ error: error?.message }), { 
       status: 500,
       headers: { 'Content-Type': 'application/json' }
     })
@@ -159,37 +159,73 @@ async function sendParcelNotification(payload: any) {
     }
   }
 
-  // Send SMS via Twilio if phone provided
+  // Send SMS via Twilio if phone provided — with TCPA opt-out + quiet hours check
   if (recipient_phone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_MESSAGING_SERVICE_SID) {
     // Format phone to E.164
     const cleanPhone = recipient_phone.replace(/\D/g, '')
     const formattedPhone = cleanPhone.startsWith('1') ? `+${cleanPhone}` : `+1${cleanPhone}`
-    
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`
-    const authHeader = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)
-    const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking_number || 'Parcel'}) is at the Hub. 📦 Grab a coffee when you swing by! Reply STOP to opt out.`
-    
-    const smsRes = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${authHeader}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID,
-        To: formattedPhone,
-        Body: message
-      }).toString()
+
+    // ── TCPA compliance gate: check opt-out + quiet hours ──
+    const supabaseForCheck = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!)
+    const { data: gateResult, error: gateErr } = await supabaseForCheck.rpc('check_sms_allowed', {
+      p_phone_e164: formattedPhone,
+      p_timezone: 'America/New_York',
+      p_quiet_start_hour: 21,
+      p_quiet_end_hour: 9,
     })
 
-    // SMS failures are logged but don't fail the whole task if email was sent
-    if (!smsRes.ok && !recipient_email) {
-      const errData = await smsRes.json()
-      throw new Error(`Twilio SMS failed: ${JSON.stringify(errData)}`)
-    } else if (smsRes.ok) {
-      console.log(`[WORKER] SMS sent to ${formattedPhone}`)
+    const gate = Array.isArray(gateResult) ? gateResult[0] : gateResult
+
+    if (gateErr) {
+      // FAIL CLOSED: if opt-out check fails, don't send (TCPA §227)
+      console.error(`[WORKER] Opt-out check failed for ${maskPhone(formattedPhone)} — blocking SMS (fail-closed):`, gateErr?.message)
+    } else if (gate?.opted_out) {
+      console.warn(`[WORKER] SMS BLOCKED: ${maskPhone(formattedPhone)} has opted out — TCPA compliance`)
+    } else if (gate?.in_quiet_hours) {
+      console.warn(`[WORKER] SMS BLOCKED: ${maskPhone(formattedPhone)} in quiet hours (9PM-9AM ET)`)
+    } else {
+      // ── Opt-out check passed — send the SMS ──
+      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`
+      const authHeader = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)
+      const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking_number || 'Parcel'}) is at the Hub. 📦 Grab a coffee when you swing by!\n\nReply STOP to opt out.`
+
+      const smsRes = await fetch(twilioUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${authHeader}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID,
+          To: formattedPhone,
+          Body: message
+        }).toString()
+      })
+
+      if (smsRes.ok) {
+        const smsData = await smsRes.json()
+        console.log(`[WORKER] SMS sent to ${maskPhone(formattedPhone)}: ${smsData.sid}`)
+
+        // Log delivery for compliance tracking
+        await supabaseForCheck.from('sms_delivery_log').insert({
+          phone_e164: formattedPhone,
+          message_type: 'parcel_arrived',
+          twilio_sid: smsData.sid,
+          status: 'sent',
+          source_function: 'notification-worker',
+        }).then(() => {}).catch((e: any) => console.error('[WORKER] Delivery log error:', e?.message))
+      } else if (!recipient_email) {
+        const errData = await smsRes.json()
+        throw new Error(`Twilio SMS failed: ${JSON.stringify(errData)}`)
+      }
     }
   }
+}
+
+function maskPhone(p?: string) {
+  if (!p) return 'REDACTED'
+  // mask all but last 4 digits
+  return p.replace(/\d(?=\d{4})/g, '*')
 }
 
 function buildEmailHtml(name: string, carrier: string, tracking: string): string {

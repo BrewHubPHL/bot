@@ -4,17 +4,9 @@ const { createHash } = require('crypto');
 const { authorize } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 
-// 1. Initialize Square for Production using your Netlify variables
-const client = new SquareClient({
-  token: process.env.SQUARE_PRODUCTION_TOKEN,
-  environment: SquareEnvironment.Production,
-});
+// Minimal sanitizer for logs
+const _truncate = (s, n = 200) => { try { return String(s).slice(0, n); } catch { return ''; } };
 
-// 2. Initialize Supabase
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 exports.handler = async (event) => {
   // Check for POST request
@@ -29,6 +21,20 @@ exports.handler = async (event) => {
   // Require staff authentication for terminal checkout
   const auth = await authorize(event, { requirePin: true });
   if (!auth.ok) return auth.response;
+
+  // Fail-closed env checks and per-request clients
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const SQUARE_PRODUCTION_TOKEN = process.env.SQUARE_PRODUCTION_TOKEN;
+  const SQUARE_LOCATION_ID = process.env.SQUARE_LOCATION_ID;
+  const MAX_CHARGE_CENTS = parseInt(process.env.MAX_CHARGE_CENTS || '200000', 10);
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SQUARE_PRODUCTION_TOKEN || !SQUARE_LOCATION_ID) {
+    console.error('collect-payment: missing required envs');
+    return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured' }) };
+  }
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const client = new SquareClient({ token: SQUARE_PRODUCTION_TOKEN, environment: SquareEnvironment.Production });
 
   let orderId, deviceId;
   try {
@@ -60,9 +66,14 @@ exports.handler = async (event) => {
       return { statusCode: 409, body: JSON.stringify({ error: `Order already ${order.status} — cannot charge again` }) };
     }
 
-    const amount = Number(order.total_amount_cents || 0);
-    if (!amount || amount <= 0) {
+    let amount = Number(order.total_amount_cents || 0);
+    if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Order total is invalid' }) };
+    }
+    // Clamp to a safe maximum to avoid accidental huge charges
+    if (amount > MAX_CHARGE_CENTS) {
+      console.warn('collect-payment: amount clamped from', amount, 'to', MAX_CHARGE_CENTS);
+      amount = MAX_CHARGE_CENTS;
     }
 
     // 5. Use provided deviceId, env var, or error if none configured
@@ -74,35 +85,49 @@ exports.handler = async (event) => {
     // 6. Create Terminal Checkout
     // Deterministic idempotency key: prevents duplicate charges on retry
     // Same orderId + deviceId always produces the same key
-    const idempotencyKey = createHash('sha256')
-      .update(`${orderId}:terminal:${terminalDeviceId}`)
-      .digest('hex')
-      .slice(0, 32);
+    const idempotencyKey = createHash('sha256').update(`${orderId}:terminal:${terminalDeviceId}`).digest('hex').slice(0, 32);
 
-    const response = await client.terminal.checkouts.create({
+    // Wrap SDK call with timeout to fail fast on upstream problems
+    const withTimeout = (p, ms) => new Promise((resolve, reject) => {
+      let done = false;
+      const t = setTimeout(() => { if (!done) { done = true; reject(new Error('timeout')); } }, ms);
+      p.then(r => { if (!done) { done = true; clearTimeout(t); resolve(r); } }).catch(e => { if (!done) { done = true; clearTimeout(t); reject(e); } });
+    });
+
+    const checkoutPromise = client.terminal.checkouts.create({
       checkout: {
-        amountMoney: {
-          amount: BigInt(Math.round(amount)), // Square SDK requires BigInt for cents
-          currency: 'USD'
-        },
-        // IMPORTANT: Tie this sale to the Point Breeze location
-        locationId: process.env.SQUARE_LOCATION_ID, 
-        deviceOptions: {
-          deviceId: terminalDeviceId, 
-          skipReceiptScreen: false,
-          collectSignature: true
-        },
-        referenceId: orderId // Links Square transaction to Supabase order ID
+        amountMoney: { amount: BigInt(amount), currency: 'USD' },
+        locationId: SQUARE_LOCATION_ID,
+        deviceOptions: { deviceId: terminalDeviceId, skipReceiptScreen: false, collectSignature: true },
+        referenceId: orderId
       },
       idempotencyKey
     });
 
+    const response = await withTimeout(checkoutPromise, 15_000);
+
+    // ── WEBHOOK RESILIENCE: Store checkout ID for active polling ──
+    // This is the critical link that enables poll-terminal-payment.js
+    // and reconcile-pending-payments.js to verify payment status
+    // WITHOUT depending on Square's webhook delivery.
+    const checkoutId = response.result?.checkout?.id;
+    if (checkoutId) {
+      const { error: updateErr } = await supabase
+        .from('orders')
+        .update({ square_checkout_id: checkoutId })
+        .eq('id', orderId)
+        .eq('status', 'pending');
+
+      if (updateErr) {
+        console.warn('[TERMINAL] Failed to store checkout ID (non-fatal):', _truncate(updateErr.message));
+      }
+    }
+
+    // Return minimal info; mask checkout id
+    const masked = checkoutId ? `••••${String(checkoutId).slice(-6)}` : null;
     return {
       statusCode: 200,
-      body: JSON.stringify({
-        message: "Checkout created",
-        checkout: response.result.checkout
-      })
+      body: JSON.stringify({ message: 'Checkout created', checkout_id: masked })
     };
 
   } catch (error) {

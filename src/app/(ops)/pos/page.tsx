@@ -12,6 +12,7 @@ import {
 import SwipeCartItem from "@/components/SwipeCartItem";
 import { useConnection } from "@/lib/useConnection";
 import OfflineBanner from "@/components/OfflineBanner";
+import OnscreenKeyboard from "@/components/OnscreenKeyboard";
 import {
   cacheMenu, getCachedMenu, queueOfflineOrder, getUnsyncedOrders,
   markOrderSynced, clearSyncedOrders, type OfflineOrder, type CachedMenuItem,
@@ -120,6 +121,21 @@ export default function POSPage() {
   const [offlineOrders, setOfflineOrders] = useState<OfflineOrder[]>([]);
   const [syncingOrders, setSyncingOrders] = useState(false);
   const [activeCategory, setActiveCategory] = useState("hot");
+
+  // Offline session management (Ghost Revenue defense)
+  const [offlineSessionId, setOfflineSessionId] = useState<string | null>(null);
+  const [offlineExposure, setOfflineExposure] = useState<{
+    cashTotalCents: number;
+    capCents: number;
+    pctUsed: number;
+    remainingCents: number;
+  } | null>(null);
+  const [offlineCapBlocked, setOfflineCapBlocked] = useState(false);
+  const [recoveryReport, setRecoveryReport] = useState<{
+    durationMinutes: number;
+    cashTotalCents: number;
+    ordersCount: number;
+  } | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [pendingMods, setPendingMods] = useState<Modifier[]>([]);
@@ -138,6 +154,9 @@ export default function POSPage() {
   const [voucherError, setVoucherError] = useState("");
   const [voucherRetryCode, setVoucherRetryCode] = useState<string | null>(null);
 
+  // Mobile cart drawer
+  const [cartDrawerOpen, setCartDrawerOpen] = useState(false);
+
   // Loyalty scanner
   const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomer | null>(null);
   const [loyaltyModalOpen, setLoyaltyModalOpen] = useState(false);
@@ -148,9 +167,21 @@ export default function POSPage() {
   const loyaltyAnimRef = useRef<number>(0);
   const loyaltyScanLock = useRef(false);
 
-  /* ─── Clock ──────────────────────────────────────────────────── */
+  // Guest-first-name modal (Option 2)
+  const [guestModalOpen, setGuestModalOpen] = useState(false);
+  const [guestFirstName, setGuestFirstName] = useState<string>("");
+  const guestInputRef = useRef<HTMLInputElement | null>(null);
+  const [showOnscreenKeyboard, setShowOnscreenKeyboard] = useState(false);
+
+  // POS-6: ref-stable handleLoyaltyScan so startLoyaltyDetection never holds a stale closure
+  const handleLoyaltyScanRef = useRef<(rawValue: string) => Promise<void>>(null!);
+
+  // POS-1: useRef lock to prevent duplicate handleSendToKDS calls (race condition fix)
+  const submittingRef = useRef(false);
+
+  /* ─── Clock (POS-7: 60s interval — display is HH:MM only) ───── */
   useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 1000);
+    const t = setInterval(() => setClock(new Date()), 60_000);
     return () => clearInterval(t);
   }, []);
 
@@ -189,11 +220,90 @@ export default function POSPage() {
     })();
   }, []);
 
+  /* ─── Auto-open offline session when connection drops ────── */
+  useEffect(() => {
+    if (isOnline || offlineSessionId) return;
+    (async () => {
+      try {
+        const token = getAccessToken();
+        if (!token) return;
+        const res = await fetch("/.netlify/functions/offline-session", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "X-BrewHub-Action": "true",
+          },
+          body: JSON.stringify({ action: "open" }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setOfflineSessionId(data.session_id);
+          setOfflineExposure({
+            cashTotalCents: 0,
+            capCents: data.cap_cents || 20000,
+            pctUsed: 0,
+            remainingCents: data.cap_cents || 20000,
+          });
+          setOfflineCapBlocked(false);
+          console.log(`[POS] Opened offline session ${data.session_id} (cap: $${(data.cap_cents / 100).toFixed(2)})`);
+        }
+      } catch {
+        // Can't reach server — that's expected, open session locally
+        const localId = `local-${Date.now()}`;
+        setOfflineSessionId(localId);
+        setOfflineExposure({
+          cashTotalCents: 0,
+          capCents: 20000, // Default $200 cap
+          pctUsed: 0,
+          remainingCents: 20000,
+        });
+      }
+    })();
+  }, [isOnline, offlineSessionId]);
+
   /* ─── Sync offline orders when connection restores ──────────── */
   useEffect(() => {
     if (!wasOffline || !isOnline) return;
     (async () => {
       setSyncingOrders(true);
+
+      // ── Close offline session and show recovery report ──
+      if (offlineSessionId && !offlineSessionId.startsWith('local-')) {
+        try {
+          const token = getAccessToken();
+          if (token) {
+            const closeRes = await fetch("/.netlify/functions/offline-session", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+                "X-BrewHub-Action": "true",
+              },
+              body: JSON.stringify({ action: "close", session_id: offlineSessionId }),
+            });
+            if (closeRes.ok) {
+              const data = await closeRes.json();
+              if (data.session_id) {
+                setRecoveryReport({
+                  durationMinutes: data.duration_minutes || 0,
+                  cashTotalCents: data.cash_total_cents || 0,
+                  ordersCount: data.orders_count || 0,
+                });
+                console.log(`[POS] Closed offline session — ${data.duration_minutes}min, $${(data.cash_total_cents / 100).toFixed(2)}, ${data.orders_count} orders`);
+                // Auto-dismiss recovery report after 10 seconds
+                setTimeout(() => setRecoveryReport(null), 10000);
+              }
+            }
+          }
+        } catch (e: unknown) {
+          console.error('[POS] Failed to close offline session:', (e as Error)?.message);
+        }
+      }
+      setOfflineSessionId(null);
+      setOfflineExposure(null);
+      setOfflineCapBlocked(false);
+
       try {
         const pending = await getUnsyncedOrders();
         const token = getAccessToken();
@@ -214,8 +324,8 @@ export default function POSPage() {
               }),
             });
             await markOrderSynced(order.id);
-          } catch (err) {
-            console.error("[POS] Failed to sync offline order:", order.id, err);
+          } catch (err: unknown) {
+            console.error("[POS] Failed to sync offline order:", order.id, (err as Error)?.message);
           }
         }
         await clearSyncedOrders();
@@ -239,13 +349,98 @@ export default function POSPage() {
     })();
   }, [wasOffline, isOnline]);
 
-  /* ─── Offline order creation (cash-only) ───────────────────── */
+  /* ─── Offline order creation (cash-only, with cap enforcement) ── */
   const handleOfflineOrder = useCallback(async () => {
     if (cart.length === 0) return;
-    const orderId = `offline-${Date.now()}-${uid()}`;
     const total = cart.reduce(
       (sum, ci) => sum + (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0)) * ci.quantity, 0
     );
+
+    // ── Check cap BEFORE accepting the order ──
+    if (offlineSessionId && !offlineSessionId.startsWith('local-')) {
+      try {
+        const token = getAccessToken();
+        if (token) {
+          const capRes = await fetch("/.netlify/functions/offline-session", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+              "X-BrewHub-Action": "true",
+            },
+            body: JSON.stringify({
+              action: "record_sale",
+              session_id: offlineSessionId,
+              amount_cents: total,
+            }),
+          });
+
+          if (capRes.status === 403) {
+            // Cap reached — block the order
+            const capData = await capRes.json();
+            setOfflineCapBlocked(true);
+            setOfflineExposure(prev => prev ? {
+              ...prev,
+              cashTotalCents: capData.total_cents || prev.cashTotalCents,
+              pctUsed: capData.pct_used || prev.pctUsed,
+              remainingCents: capData.remaining_cents || 0,
+            } : prev);
+            haptic("error");
+            setErrorMsg(`Cash cap of ${cents(capData.cap_cents || 20000)} reached. Manager override required to continue.`);
+            setTicketPhase("error");
+            return;
+          }
+
+          if (capRes.ok) {
+            const capData = await capRes.json();
+            setOfflineExposure({
+              cashTotalCents: capData.total_cents,
+              capCents: capData.cap_cents,
+              pctUsed: capData.pct_used,
+              remainingCents: capData.remaining_cents,
+            });
+          }
+        }
+      } catch {
+        // Server unreachable — check local cap estimate
+        if (offlineExposure) {
+          const newTotal = offlineExposure.cashTotalCents + total;
+          if (newTotal > offlineExposure.capCents) {
+            setOfflineCapBlocked(true);
+            haptic("error");
+            setErrorMsg(`Cash cap of ${cents(offlineExposure.capCents)} reached locally. Wait for connection to restore.`);
+            setTicketPhase("error");
+            return;
+          }
+          // Update local estimate
+          setOfflineExposure(prev => prev ? {
+            ...prev,
+            cashTotalCents: newTotal,
+            pctUsed: Math.min(100, Math.round((newTotal / prev.capCents) * 100)),
+            remainingCents: Math.max(0, prev.capCents - newTotal),
+          } : prev);
+        }
+      }
+    } else if (offlineExposure) {
+      // Local-only session — enforce cap locally
+      const newTotal = offlineExposure.cashTotalCents + total;
+      if (newTotal > offlineExposure.capCents) {
+        setOfflineCapBlocked(true);
+        haptic("error");
+        setErrorMsg(`Cash cap of ${cents(offlineExposure.capCents)} reached. Manager override required to continue.`);
+        setTicketPhase("error");
+        return;
+      }
+      setOfflineExposure(prev => prev ? {
+        ...prev,
+        cashTotalCents: newTotal,
+        pctUsed: Math.min(100, Math.round((newTotal / prev.capCents) * 100)),
+        remainingCents: Math.max(0, prev.capCents - newTotal),
+      } : prev);
+    }
+
+    // ── Cap check passed — queue the order ──
+    const orderId = `offline-${Date.now()}-${uid()}`;
     const order: OfflineOrder = {
       id: orderId,
       items: cart.map((ci) => ({
@@ -270,7 +465,7 @@ export default function POSPage() {
       setCreatedOrderId(null);
       setTerminalStatus("");
     }, 4000);
-  }, [cart]);
+  }, [cart, offlineSessionId, offlineExposure]);
 
   /* ─── Derived ────────────────────────────────────────────────── */
   const filteredItems = menuItems.filter((i) => categorize(i.name) === activeCategory);
@@ -401,7 +596,7 @@ export default function POSPage() {
         if (barcodes.length > 0 && !loyaltyScanLock.current) {
           loyaltyScanLock.current = true;
           haptic("tap");
-          await handleLoyaltyScan(barcodes[0].rawValue);
+          await handleLoyaltyScanRef.current(barcodes[0].rawValue);
         }
       } catch {}
       loyaltyAnimRef.current = requestAnimationFrame(detect);
@@ -421,9 +616,9 @@ export default function POSPage() {
   // Cleanup camera on unmount
   useEffect(() => () => closeLoyaltyScanner(), [closeLoyaltyScanner]);
 
-  /* ─── Loyalty Lookup ──────────────────────────────────────── */
+  /* ─── Loyalty Lookup (Audit #25: via PIN-auth'd Netlify function) ── */
   const handleLoyaltyScan = async (rawValue: string) => {
-    const email = rawValue.trim().toLowerCase();
+    const email = rawValue.trim().toLowerCase().slice(0, 254); // POS-4: length cap
     const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!EMAIL_RE.test(email)) {
       haptic("error");
@@ -433,34 +628,32 @@ export default function POSPage() {
     }
 
     try {
-      // Look up profile by email
-      const { data: profile, error: pErr } = await supabase
-        .from("profiles")
-        .select("id, full_name, loyalty_points")
-        .eq("email", email)
-        .maybeSingle();
+      const token = getAccessToken();
+      const resp = await fetch("/.netlify/functions/get-staff-loyalty", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({ email }),
+      });
 
-      if (pErr) throw pErr;
-      if (!profile) {
+      const result = await resp.json();
+
+      if (!resp.ok || !result.found) {
         haptic("error");
-        setLoyaltyCamError(`No account found for ${email}`);
+        setLoyaltyCamError(result.error || `No account found for ${email}`);
         loyaltyScanLock.current = false;
         return;
       }
 
-      // Fetch unredeemed vouchers
-      const { data: vouchers } = await supabase
-        .from("vouchers")
-        .select("id, code")
-        .eq("user_id", profile.id)
-        .eq("is_redeemed", false);
-
       setLoyaltyCustomer({
-        id: profile.id,
-        email,
-        name: profile.full_name,
-        points: profile.loyalty_points ?? 0,
-        vouchers: vouchers ?? [],
+        id: result.profile_id,
+        email: result.email,
+        name: result.name,
+        points: result.loyalty_points ?? 0,
+        vouchers: result.vouchers ?? [],
       });
       haptic("success");
       closeLoyaltyScanner();
@@ -471,10 +664,23 @@ export default function POSPage() {
       loyaltyScanLock.current = false;
     }
   };
+  // POS-6: keep ref in sync so startLoyaltyDetection always calls latest version
+  handleLoyaltyScanRef.current = handleLoyaltyScan;
 
   /* ─── Step 1: Send to KDS (create Supabase order immediately) ─ */
   const handleSendToKDS = async () => {
-    if (cart.length === 0 || isSubmitting) return;
+    if (cart.length === 0 || submittingRef.current) return; // POS-1: ref lock (primary guard)
+
+    // If no loyalty customer or missing name, prompt for guest first name
+    if (!loyaltyCustomer || !loyaltyCustomer.name) {
+      setGuestFirstName("");
+      setGuestModalOpen(true);
+      // Attempt to focus the input in the user gesture — fallback to autoFocus on mount
+      setTimeout(() => guestInputRef.current?.focus(), 0);
+      return;
+    }
+
+    submittingRef.current = true;
     setIsSubmitting(true);
 
     try {
@@ -519,6 +725,7 @@ export default function POSPage() {
 
       setCreatedOrderId(orderId);
       setTicketPhase("confirm");
+      setCartDrawerOpen(true); // Auto-open cart drawer on mobile for payment phase
       setOrderSuccess(orderId.slice(0, 6).toUpperCase());
       setTimeout(() => setOrderSuccess(null), 4000);
 
@@ -527,8 +734,65 @@ export default function POSPage() {
       setErrorMsg(msg);
       setTicketPhase("error");
     } finally {
+      submittingRef.current = false; // POS-1: release ref lock
       setIsSubmitting(false);
     }
+  };
+
+  // Helper to create order (shared by modal confirm)
+  const createKDSOrder = async (checkoutBody: Record<string, unknown>) => {
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    try {
+      const token = getAccessToken();
+      const resp = await fetch("/.netlify/functions/cafe-checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify(checkoutBody),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to create order");
+      }
+
+      const result = await resp.json();
+      const orderId = result.order?.id;
+      if (!orderId) throw new Error("No order ID returned");
+
+      setCreatedOrderId(orderId);
+      setTicketPhase("confirm");
+      setCartDrawerOpen(true);
+      setOrderSuccess(orderId.slice(0, 6).toUpperCase());
+      setTimeout(() => setOrderSuccess(null), 4000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Order creation failed";
+      setErrorMsg(msg);
+      setTicketPhase("error");
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
+  const confirmGuestAndSend = async () => {
+    const name = guestFirstName.trim().slice(0, 100);
+    if (!name) return; // noop if blank
+    setGuestModalOpen(false);
+
+    const payload: { product_id: string; quantity: number }[] = cart.map((ci) => ({
+      product_id: ci.productId,
+      quantity: ci.quantity,
+    }));
+
+    const checkoutBody: Record<string, unknown> = { items: payload, terminal: true };
+    checkoutBody.customer_name = name;
+
+    await createKDSOrder(checkoutBody);
   };
 
   /* ─── Step 2: Pay on Terminal (calls collect-payment) ────────── */
@@ -538,6 +802,95 @@ export default function POSPage() {
      We also add a 15-second timeout with AbortController to detect hangs. */
   const paymentRetryRef = useRef(0);
   const MAX_PAYMENT_RETRIES = 2;
+
+  /* ─── WEBHOOK RESILIENCE: Active Payment Polling ───────────────
+     Instead of passively waiting for Square's webhook (which can be delayed
+     5-15+ minutes), we actively poll Square's Terminal API every 3 seconds
+     to check if the customer has tapped/inserted their card.
+     This gives us <3 second order-to-KDS visibility. */
+  const paymentPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const paymentPollOrderRef = useRef<string | null>(null);
+
+  const stopPaymentPolling = useCallback(() => {
+    if (paymentPollRef.current) {
+      clearInterval(paymentPollRef.current);
+      paymentPollRef.current = null;
+    }
+    paymentPollOrderRef.current = null;
+  }, []);
+
+  const startPaymentPolling = useCallback((orderId: string) => {
+    stopPaymentPolling(); // Clear any existing poll
+    paymentPollOrderRef.current = orderId;
+
+    const poll = async () => {
+      // Stop if order changed or component unmounted
+      if (paymentPollOrderRef.current !== orderId) {
+        stopPaymentPolling();
+        return;
+      }
+
+      try {
+        const token = getAccessToken();
+        if (!token) return;
+
+        const res = await fetch("/.netlify/functions/poll-terminal-payment", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "X-BrewHub-Action": "true",
+          },
+          body: JSON.stringify({ orderId }),
+        });
+
+        if (!res.ok) return; // Silently retry next interval
+
+        const data = await res.json();
+
+        if (data.status === "COMPLETED" || data.status === "ALREADY_CONFIRMED") {
+          // Payment confirmed! Transition to success state.
+          stopPaymentPolling();
+          setTicketPhase("paid");
+          setTerminalStatus(
+            data.confirmedVia === "poll"
+              ? "Payment confirmed! Order is on the KDS."
+              : "Payment confirmed!"
+          );
+          haptic("success");
+          setTimeout(() => {
+            setCart([]);
+            setTicketPhase("building");
+            setCreatedOrderId(null);
+            setTerminalStatus("");
+          }, 4000);
+        } else if (data.status === "CANCELED") {
+          // Terminal checkout was cancelled
+          stopPaymentPolling();
+          setTerminalStatus("Terminal checkout was cancelled.");
+          setTicketPhase("error");
+          setErrorMsg("Terminal checkout cancelled. Try again or use cash.");
+        } else {
+          // Still pending — update status message for staff visibility
+          if (data.message) {
+            setTerminalStatus(data.message);
+          }
+        }
+      } catch {
+        // Network error — silently retry next interval
+      }
+    };
+
+    // Start polling every 3 seconds
+    paymentPollRef.current = setInterval(poll, 3000);
+    // Also run immediately (don't wait for first interval)
+    poll();
+  }, [stopPaymentPolling]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => stopPaymentPolling();
+  }, [stopPaymentPolling]);
 
   const handlePayOnTerminal = async () => {
     if (!createdOrderId) return;
@@ -586,23 +939,22 @@ export default function POSPage() {
       const result = await resp.json();
       setTerminalStatus("Waiting for customer tap/swipe…");
 
-      // Payment was sent to the Square Terminal successfully
-      // The webhook will update the order status when payment completes
-      setTicketPhase("paid");
-      setTerminalStatus(`Checkout sent! ID: ${result.checkout?.id?.slice(0, 8) || "OK"}`);
+      // ── WEBHOOK RESILIENCE: Start active polling ──────────────
+      // Instead of hoping Square's webhook arrives, we actively poll
+      // Square's Terminal API every 3 seconds. The moment the customer
+      // taps their card, we detect it and push the order to the KDS.
+      // The webhook becomes a backup, not the primary path.
+      setTicketPhase("paying");
+      setTerminalStatus(`Sent to terminal — waiting for customer tap/swipe…`);
       haptic("success");
       paymentRetryRef.current = 0;
 
-      // Clear after delay
-      setTimeout(() => {
-        setCart([]);
-        setTicketPhase("building");
-        setCreatedOrderId(null);
-        setTerminalStatus("");
-      }, 5000);
+      // Start polling for payment confirmation
+      startPaymentPolling(createdOrderId);
 
     } catch (e: unknown) {
       clearTimeout(timeout);
+      stopPaymentPolling(); // Stop any active polling on error
 
       const isNetworkError =
         (e instanceof DOMException && e.name === "AbortError") ||
@@ -816,11 +1168,23 @@ export default function POSPage() {
 
   /* ─── Render ─────────────────────────────────────────────────── */
   return (
-    <div className="h-screen w-screen flex bg-stone-950 text-white select-none overflow-hidden">
+    <div className="h-screen w-screen flex flex-col md:flex-row bg-stone-950 text-white select-none overflow-hidden">
       {/* ═══════ Offline Banner ═══════ */}
-      <OfflineBanner isOnline={isOnline} wasOffline={wasOffline} offlineSince={offlineSince} />
-      {/* ═══════ COL 1 — Categories ═══════ */}
-      <aside className="w-[140px] bg-stone-900 flex flex-col border-r border-stone-800 shrink-0">
+      <OfflineBanner
+        isOnline={isOnline}
+        wasOffline={wasOffline}
+        offlineSince={offlineSince}
+        exposure={offlineExposure ? {
+          sessionId: offlineSessionId,
+          cashTotalCents: offlineExposure.cashTotalCents,
+          capCents: offlineExposure.capCents,
+          pctUsed: offlineExposure.pctUsed,
+          remainingCents: offlineExposure.remainingCents,
+        } : null}
+      />
+
+      {/* ═══════ COL 1 — Categories (iPad sidebar / hidden on mobile) ═══════ */}
+      <aside className="hidden md:flex w-[140px] bg-stone-900 flex-col border-r border-stone-800 shrink-0">
         {/* Logo */}
         <div className="px-4 py-5 border-b border-stone-800 flex items-center gap-2">
           <img src="/logo.png" alt="BrewHub" className="w-8 h-8 rounded-full" />
@@ -833,7 +1197,7 @@ export default function POSPage() {
             <button
               key={cat.key}
               onClick={() => { setActiveCategory(cat.key); setSelectedItem(null); }}
-              className={`w-full flex items-center gap-2 px-3 py-3 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all
+              className={`w-full flex items-center gap-2 px-3 py-3 min-h-[48px] rounded-lg text-xs font-semibold uppercase tracking-wider transition-all
                 ${activeCategory === cat.key
                   ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                   : "text-stone-400 hover:bg-stone-800 hover:text-stone-200 border border-transparent"
@@ -855,6 +1219,24 @@ export default function POSPage() {
           </div>
         </div>
       </aside>
+
+      {/* ═══════ Mobile Category Bar (phone only) ═══════ */}
+      <div className="flex md:hidden bg-stone-900 border-b border-stone-800 overflow-x-auto shrink-0 px-2 py-2 gap-1.5 scrollbar-hide">
+        {CATEGORIES.map((cat) => (
+          <button
+            key={cat.key}
+            onClick={() => { setActiveCategory(cat.key); setSelectedItem(null); }}
+            className={`flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap shrink-0 transition-all
+              ${activeCategory === cat.key
+                ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                : "text-stone-400 bg-stone-800/60 border border-transparent"
+              }`}
+          >
+            {cat.icon}
+            <span>{cat.label}</span>
+          </button>
+        ))}
+      </div>
 
       {/* ═══════ COL 2 — Product Builder (Item Grid + Modifier Panel) ═══════ */}
       <div className="flex-1 flex flex-col min-w-0 relative">
@@ -885,7 +1267,7 @@ export default function POSPage() {
         </header>
 
         {/* Item Grid */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="animate-spin text-stone-600" size={32} />
@@ -901,7 +1283,7 @@ export default function POSPage() {
                   key={item.id}
                   onClick={() => quickAdd(item)}
                   disabled={ticketPhase !== "building"}
-                  className="group bg-stone-900 hover:bg-stone-800 border border-stone-800 hover:border-amber-500/40 rounded-xl p-5 text-left transition-all active:scale-[0.97] flex flex-col justify-between min-h-[140px] disabled:opacity-40 disabled:pointer-events-none"
+                  className="group bg-stone-900 hover:bg-stone-800 border border-stone-800 hover:border-amber-500/40 rounded-xl p-4 md:p-5 text-left transition-all active:scale-[0.97] flex flex-col justify-between min-h-[120px] md:min-h-[140px] disabled:opacity-40 disabled:pointer-events-none"
                 >
                   <div>
                     <h3 className="font-bold text-base text-stone-100 group-hover:text-amber-300 transition-colors">
@@ -960,7 +1342,7 @@ export default function POSPage() {
                       <button
                         key={mod.name}
                         onClick={() => toggleMod(mod)}
-                        className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-all text-sm
+                        className={`w-full flex items-center justify-between px-4 py-3 min-h-[48px] rounded-lg border transition-all text-sm
                           ${active
                             ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
                             : "bg-stone-800/50 border-stone-700 text-stone-300 hover:border-stone-600"
@@ -996,8 +1378,23 @@ export default function POSPage() {
         )}
       </div>
 
-      {/* ═══════ COL 3 — Live Ticket ═══════ */}
-      <aside className="w-[340px] bg-stone-900 border-l border-stone-800 flex flex-col shrink-0">
+      {/* ═══════ COL 3 — Live Ticket (desktop sidebar / mobile bottom sheet) ═══════ */}
+      <aside className={`
+        fixed inset-x-0 bottom-0 z-40 h-[85vh] rounded-t-2xl shadow-2xl
+        transition-transform duration-300 ease-out
+        ${cartDrawerOpen ? "translate-y-0" : "translate-y-full"}
+        md:relative md:inset-auto md:z-auto md:h-auto md:rounded-none md:shadow-none
+        md:translate-y-0 md:w-[340px] md:shrink-0
+        bg-stone-900 border-l border-stone-800 flex flex-col
+      `}>
+        {/* Mobile drawer grab handle */}
+        <div className="md:hidden flex justify-center pt-2 pb-1">
+          <button
+            onClick={() => setCartDrawerOpen(false)}
+            className="w-12 h-1.5 rounded-full bg-stone-700 active:bg-stone-500"
+            aria-label="Close cart"
+          />
+        </div>
         {/* Ticket Header */}
         <div className="px-5 py-4 border-b border-stone-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -1111,14 +1508,82 @@ export default function POSPage() {
                 </button>
               ) : (
                 <button
-                  disabled={cart.length === 0}
+                  disabled={cart.length === 0 || offlineCapBlocked}
                   onClick={handleOfflineOrder}
                   className="w-full min-h-[48px] py-4 bg-red-700 hover:bg-red-600 active:bg-red-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 animate-pulse"
                 >
-                  <WifiOff size={16} /> Queue Order (Cash Only)
+                  <WifiOff size={16} /> {offlineCapBlocked ? 'Cap Reached — Manager Override Needed' : 'Queue Order (Cash Only)'}
                 </button>
               )}
             </>
+          )}
+
+          {/* Guest name modal (first-name only) */}
+          {guestModalOpen && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="guest-modal-title"
+              onKeyDown={(e) => {
+                // Simple focus trap: keep focus on the input; Escape closes modal
+                if (e.key === "Escape") {
+                  setGuestModalOpen(false);
+                }
+                if (e.key === "Tab") {
+                  e.preventDefault();
+                  guestInputRef.current?.focus();
+                }
+              }}
+            >
+              <div className="w-full max-w-md bg-stone-900 border border-stone-800 rounded-lg p-6">
+                <h3 id="guest-modal-title" className="text-lg font-bold mb-2">Enter customer first name</h3>
+                <p className="text-sm text-stone-400 mb-4">This will appear on the KDS as the customer's first name.</p>
+                <input
+                  ref={guestInputRef}
+                  autoFocus
+                  name="guestFirstName"
+                  aria-label="Customer first name"
+                  value={guestFirstName}
+                  onChange={(e) => setGuestFirstName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmGuestAndSend(); } }}
+                  maxLength={100}
+                  inputMode="text"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="First name"
+                  readOnly={showOnscreenKeyboard}
+                  onFocus={() => { if (!showOnscreenKeyboard) guestInputRef.current?.focus(); }}
+                  className="w-full p-3 bg-stone-800 border border-stone-700 rounded-lg mb-2 outline-none"
+                />
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm text-stone-400">Max 100 chars</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setShowOnscreenKeyboard((s) => !s); guestInputRef.current?.focus(); }}
+                      type="button"
+                      className="px-3 py-1 bg-stone-700 rounded-lg text-sm"
+                    >{showOnscreenKeyboard ? 'Hide Keyboard' : 'Use On-screen Keyboard'}</button>
+                    <button onClick={() => setGuestModalOpen(false)} className="px-4 py-2 bg-stone-700 rounded-lg">Cancel</button>
+                    <button onClick={confirmGuestAndSend} className="px-4 py-2 bg-emerald-600 rounded-lg">Send to KDS</button>
+                  </div>
+                </div>
+
+                {showOnscreenKeyboard && (
+                  <div className="mt-2">
+                    <OnscreenKeyboard
+                      onKey={(k) => {
+                        // Append character, enforce maxLength
+                        setGuestFirstName((prev) => (prev + k).slice(0, 100));
+                        haptic('tap');
+                      }}
+                      onBackspace={() => { setGuestFirstName((prev) => prev.slice(0, -1)); haptic('tap'); }}
+                      onEnter={() => { confirmGuestAndSend(); haptic('success'); }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Phase: CONFIRM — Pay on Terminal / Mark Paid */}
@@ -1254,6 +1719,37 @@ export default function POSPage() {
         </div>
       </aside>
 
+      {/* ═══════ Mobile: Backdrop when drawer is open ═══════ */}
+      {cartDrawerOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={() => setCartDrawerOpen(false)}
+        />
+      )}
+
+      {/* ═══════ Mobile: Sticky bottom cart bar (shown when drawer closed) ═══════ */}
+      {!cartDrawerOpen && (
+        <div className="fixed bottom-0 inset-x-0 z-30 md:hidden safe-area-bottom">
+          <button
+            onClick={() => setCartDrawerOpen(true)}
+            className="w-full flex items-center justify-between px-5 py-4 bg-stone-900 border-t border-stone-800"
+          >
+            <div className="flex items-center gap-2">
+              <ShoppingCart size={18} className="text-amber-400" />
+              <span className="text-sm font-bold text-white">
+                {cartCount > 0 ? `${cartCount} ${cartCount === 1 ? "item" : "items"}` : "Cart"}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {cartTotal > 0 && (
+                <span className="text-lg font-bold text-amber-400 font-mono">{cents(cartTotal)}</span>
+              )}
+              <ChevronRight size={16} className="text-stone-500 rotate-[-90deg]" />
+            </div>
+          </button>
+        </div>
+      )}
+
       {/* ═══════ Order Success Toast ═══════ */}
       {orderSuccess && (
         <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white px-8 py-4 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-top duration-300">
@@ -1262,6 +1758,36 @@ export default function POSPage() {
             <p className="font-bold text-sm">Order on KDS!</p>
             <p className="text-emerald-200 text-xs font-mono">#{orderSuccess}</p>
           </div>
+        </div>
+      )}
+
+      {/* ═══════ Offline Recovery Report Toast ═══════ */}
+      {recoveryReport && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-stone-900 border border-stone-700 text-white px-6 py-4 rounded-xl shadow-2xl max-w-sm animate-in slide-in-from-top duration-300">
+          <div className="flex items-center gap-2 mb-2">
+            <WifiOff size={16} className="text-amber-400" />
+            <p className="font-bold text-sm uppercase tracking-wider text-amber-300">Offline Session Ended</p>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-2xl font-bold font-mono text-white">{recoveryReport.durationMinutes}</p>
+              <p className="text-[10px] text-stone-500 uppercase">minutes</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold font-mono text-white">{recoveryReport.ordersCount}</p>
+              <p className="text-[10px] text-stone-500 uppercase">orders</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold font-mono text-amber-400">${(recoveryReport.cashTotalCents / 100).toFixed(2)}</p>
+              <p className="text-[10px] text-stone-500 uppercase">cash</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setRecoveryReport(null)}
+            className="mt-3 w-full text-xs text-stone-500 hover:text-stone-300 text-center transition-colors"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

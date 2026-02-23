@@ -48,7 +48,7 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
       try {
         setCart(JSON.parse(saved));
       } catch (e) {
-        console.error('Failed to load cart:', e);
+        console.error('Failed to load cart:', (e as Error)?.message);
       }
     }
   }, []);

@@ -23,6 +23,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { publicBucket } = require('./_token-bucket');
+const { sanitizeInput } = require('./_sanitize');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY);
@@ -117,7 +118,8 @@ exports.handler = async (event) => {
       .eq('is_active', true)
       .is('archived_at', null)
       .order('sort_order', { ascending: true })
-      .order('name', { ascending: true });
+      .order('name', { ascending: true })
+      .limit(200);
 
     // Use fallback if DB unavailable
     const menuItems = (error || !products || products.length === 0)
@@ -125,14 +127,28 @@ exports.handler = async (event) => {
       : products;
 
     // Format for AI-friendly consumption
-    const formattedMenu = menuItems.map(item => ({
-      name: item.name,
-      price_cents: item.price_cents,
-      price_dollars: item.price_cents / 100,
-      price_display: `$${(item.price_cents / 100).toFixed(2)}`,
-      description: item.description || '',
-      available: true,
-    }));
+    const formattedMenu = (menuItems || []).slice(0, 200).map(item => {
+      // Defensive normalization
+      const rawName = sanitizeInput(item.name || '');
+      const rawDescription = sanitizeInput(item.description || '');
+      const name = String(rawName).slice(0, 100);
+      const description = String(rawDescription).slice(0, 500);
+
+      // Ensure numeric positive price_cents
+      let price_cents = Number(item.price_cents) || 0;
+      if (!Number.isFinite(price_cents) || price_cents < 0) price_cents = 0;
+      // Clamp unrealistic prices (e.g., > $1000)
+      if (price_cents > 100000) price_cents = 100000;
+
+      return {
+        name,
+        price_cents,
+        price_dollars: price_cents / 100,
+        price_display: `$${(price_cents / 100).toFixed(2)}`,
+        description,
+        available: true,
+      };
+    });
 
     return {
       statusCode: 200,
@@ -148,7 +164,7 @@ exports.handler = async (event) => {
       }),
     };
   } catch (err) {
-    console.error('[GET-MENU] Error:', err);
+    console.error('[GET-MENU] Error:', err?.message);
     
     // Return fallback menu even on error
     const fallbackFormatted = FALLBACK_MENU.map(item => ({

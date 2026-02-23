@@ -1,10 +1,23 @@
 ﻿const { createClient } = require('@supabase/supabase-js');
+const crypto = require('crypto');
 const { authorize } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { sanitizeInput } = require('./_sanitize');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+/** Generate a cryptographically random 6-digit pickup code */
+function generatePickupCode() {
+  return String(crypto.randomInt(100000, 999999));
+}
+
+/** HMAC-SHA256 hash a pickup code (same algorithm as parcel-pickup.js) */
+function hashPickupCode(code) {
+  const secret = process.env.PICKUP_CODE_SECRET || process.env.INTERNAL_SYNC_SECRET;
+  if (!secret) throw new Error('PICKUP_CODE_SECRET or INTERNAL_SYNC_SECRET env var required');
+  return crypto.createHmac('sha256', secret).update(String(code).trim()).digest('hex');
+}
 
 // Fire-and-forget trigger for notification worker (best-effort, cron is backup)
 function triggerWorker() {
@@ -42,10 +55,16 @@ function identifyCarrier(tracking) {
 }
 
 exports.handler = async (event) => {
-  const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
+  const ALLOWED_ORIGINS = [process.env.URL, 'https://brewhubphl.com', 'https://www.brewhubphl.com'].filter(Boolean);
+  const origin = event.headers?.origin || '';
+  const ALLOWED_ORIGIN = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
 
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action' }, body: '' };
+  }
+
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
   const auth = await authorize(event, { requirePin: true });
@@ -62,13 +81,20 @@ exports.handler = async (event) => {
   }
 
   try {
-    const body = JSON.parse(event.body);
-    const tracking_number = (body.tracking_number || '').trim();
-    const carrier = body.carrier;
+    let body;
+    try {
+      body = JSON.parse(event.body || '{}');
+    } catch {
+      return { statusCode: 400, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN }, body: JSON.stringify({ error: 'Invalid JSON body' }) };
+    }
+    const tracking_number = (body.tracking_number || '').trim().slice(0, 100);
+    const carrier = body.carrier ? String(body.carrier).trim().slice(0, 50) : null;
     const recipient_name = sanitizeInput(body.recipient_name);
-    const resident_id = body.resident_id;
+    const resident_id = body.resident_id ? String(body.resident_id).slice(0, 36) : undefined;
     const scan_only = body.scan_only;
     const skip_notification = body.skip_notification;
+    const value_tier = ['standard', 'high_value', 'premium'].includes(body.value_tier)
+      ? body.value_tier : 'standard';
 
     if (!tracking_number) {
       return { 
@@ -91,13 +117,17 @@ exports.handler = async (event) => {
 
     if (expected) {
       // Found a pre-registered parcel! Auto-match it
-      console.log(`[PRO-MATCH] ${tracking_number} matches pre-registration for ${expected.customer_name}`);
+      console.log(`[PRO-MATCH] ${tracking_number} matches pre-registration`);
 
       // Mark expected parcel as arrived
       await supabase
         .from('expected_parcels')
         .update({ status: 'arrived', arrived_at: new Date().toISOString() })
         .eq('id', expected.id);
+
+      // ── Generate pickup code for this parcel ──
+      const pickupCode = generatePickupCode();
+      const pickupCodeHash = hashPickupCode(pickupCode);
 
       // Skip notification for shop packages
       if (skip_notification) {
@@ -108,10 +138,13 @@ exports.handler = async (event) => {
             carrier: detectedCarrier,
             recipient_name: sanitizeInput(expected.customer_name),
             recipient_phone: sanitizeInput(expected.customer_phone),
+            recipient_email: sanitizeInput(expected.customer_email),
             unit_number: sanitizeInput(expected.unit_number),
             status: 'arrived',
             received_at: new Date().toISOString(),
-            match_type: 'pre-registered'
+            match_type: 'pre-registered',
+            pickup_code_hash: pickupCodeHash,
+            estimated_value_tier: value_tier,
           })
           .select()
           .single();
@@ -129,7 +162,9 @@ exports.handler = async (event) => {
             recipient: expected.customer_name,
             unit: expected.unit_number,
             notified: false,
-            message: `âœ… Shop package checked in (no notification)`
+            pickup_code: pickupCode,
+            value_tier,
+            message: `Shop package checked in (no notification). Pickup code: ${pickupCode}`
           })
         };
       }
@@ -145,12 +180,33 @@ exports.handler = async (event) => {
         p_recipient_phone: sanitizeInput(expected.customer_phone),
         p_recipient_email: sanitizeInput(expected.customer_email),
         p_unit_number: sanitizeInput(expected.unit_number),
-        p_match_type: 'pre-registered'
+        p_match_type: 'pre-registered',
+        p_pickup_code_hash: pickupCodeHash,
+        p_value_tier: value_tier,
       });
 
       if (error) throw error;
 
       console.log(`[QUEUE] Notification queued: ${data[0]?.queue_task_id}`);
+
+      // Patch notification payload with pickup code so worker can include it in SMS/email
+      if (data[0]?.queue_task_id) {
+        await supabase.from('notification_queue')
+          .update({
+            payload: {
+              recipient_name: sanitizeInput(expected.customer_name),
+              recipient_phone: sanitizeInput(expected.customer_phone),
+              recipient_email: sanitizeInput(expected.customer_email),
+              tracking_number,
+              carrier: detectedCarrier,
+              unit_number: sanitizeInput(expected.unit_number),
+              value_tier,
+              pickup_code: pickupCode,
+            }
+          })
+          .eq('id', data[0].queue_task_id)
+          .catch(() => {}); // Best-effort
+      }
 
       // Fire-and-forget: Immediately trigger worker (cron is backup)
       triggerWorker();
@@ -167,7 +223,9 @@ exports.handler = async (event) => {
           recipient: expected.customer_name,
           unit: expected.unit_number,
           queue_task_id: data[0]?.queue_task_id,
-          message: `âœ… Auto-matched! Package for ${expected.customer_name} (Unit ${expected.unit_number || 'N/A'})`
+          pickup_code: pickupCode,
+          value_tier,
+          message: `Auto-matched! Package for ${expected.customer_name} (Unit ${expected.unit_number || 'N/A'}). Pickup code: ${pickupCode}`
         })
       };
     }
@@ -221,6 +279,10 @@ exports.handler = async (event) => {
       }
     }
 
+    // ── Generate pickup code for this parcel ──
+    const phillyPickupCode = generatePickupCode();
+    const phillyPickupCodeHash = hashPickupCode(phillyPickupCode);
+
     // Skip notification for shop packages
     if (skip_notification) {
       const { data: parcel, error } = await supabase
@@ -229,10 +291,13 @@ exports.handler = async (event) => {
           tracking_number,
           carrier: detectedCarrier,
           recipient_name: sanitizeInput(finalRecipient),
+          recipient_email: sanitizeInput(recipientEmail),
           unit_number: sanitizeInput(unitNumber),
           status: 'arrived',
           received_at: new Date().toISOString(),
-          match_type: 'manual'
+          match_type: 'manual',
+          pickup_code_hash: phillyPickupCodeHash,
+          estimated_value_tier: value_tier,
         })
         .select()
         .single();
@@ -249,7 +314,9 @@ exports.handler = async (event) => {
           carrier: detectedCarrier,
           recipient: finalRecipient,
           notified: false,
-          message: `ðŸ“¦ Shop package checked in (no notification)`
+          pickup_code: phillyPickupCode,
+          value_tier,
+          message: `Shop package checked in (no notification). Pickup code: ${phillyPickupCode}`
         })
       };
     }
@@ -265,13 +332,34 @@ exports.handler = async (event) => {
       p_recipient_phone: sanitizeInput(recipientPhone),
       p_recipient_email: sanitizeInput(recipientEmail),
       p_unit_number: sanitizeInput(unitNumber),
-      p_match_type: 'manual'
+      p_match_type: 'manual',
+      p_pickup_code_hash: phillyPickupCodeHash,
+      p_value_tier: value_tier,
     });
 
     if (error) throw error;
 
-    console.log(`[PHILLY] ${detectedCarrier} package ${tracking_number} checked in for ${finalRecipient}`);
+    console.log(`[PHILLY] ${detectedCarrier} package ${tracking_number} checked in`);
     console.log(`[QUEUE] Notification queued: ${data[0]?.queue_task_id}`);
+
+    // Patch notification payload with pickup code so worker includes it in SMS/email
+    if (data[0]?.queue_task_id) {
+      await supabase.from('notification_queue')
+        .update({
+          payload: {
+            recipient_name: sanitizeInput(finalRecipient),
+            recipient_phone: sanitizeInput(recipientPhone),
+            recipient_email: sanitizeInput(recipientEmail),
+            tracking_number,
+            carrier: detectedCarrier,
+            unit_number: sanitizeInput(unitNumber),
+            value_tier,
+            pickup_code: phillyPickupCode,
+          }
+        })
+        .eq('id', data[0].queue_task_id)
+        .catch(() => {}); // Best-effort
+    }
 
     // Fire-and-forget: Immediately trigger worker (cron is backup)
     triggerWorker();
@@ -288,12 +376,15 @@ exports.handler = async (event) => {
         recipient: finalRecipient,
         unit: unitNumber,
         queue_task_id: data[0]?.queue_task_id,
-        message: `ðŸ“¦ Checked in for ${finalRecipient}`
+        pickup_code: phillyPickupCode,
+        value_tier,
+        message: `Checked in for ${finalRecipient}. Pickup code: ${phillyPickupCode}`
       })
     };
 
   } catch (err) {
-    console.error('[PARCEL-CHECK-IN ERROR]', err);
+
+    console.error('[PARCEL-CHECK-IN ERROR]', err?.message);
     return {
       statusCode: 500,
       headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN },

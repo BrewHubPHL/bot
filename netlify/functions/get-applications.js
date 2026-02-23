@@ -20,8 +20,9 @@ exports.handler = async (event) => {
     return json(405, { error: 'Method not allowed' });
   }
 
-  // Require staff-level auth (manager or staff — both can view applicants)
-  const auth = await authorize(event);
+  // Require manager-level auth — applicant PII (name, email, phone, resume)
+  // must not be accessible to non-manager staff (API-H2 fix).
+  const auth = await authorize(event, { requireManager: true });
   if (!auth.ok) return auth.response;
 
   try {

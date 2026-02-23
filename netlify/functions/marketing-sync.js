@@ -1,92 +1,144 @@
 const { createClient } = require('@supabase/supabase-js');
 const { filterTombstoned } = require('./_gdpr');
 const { verifyServiceSecret } = require('./_auth');
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const { sanitizeInput } = require('./_sanitize');
+
+// Config
+const EXPORT_ROW_LIMIT = Math.min(Math.max(Number(process.env.EXPORT_ROW_LIMIT) || 1000, 10), 10000);
+
+function fetchWithTimeout(url, options = {}, ms = 15000, label = 'fetch') {
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return fetch(url, { ...options, signal }).finally(() => clearTimeout(timer));
+  } catch (e) {
+    clearTimeout(timer);
+    return Promise.reject(e);
+  }
+}
 
 exports.handler = async (event) => {
+  // CORS allowlist + headers (echo validated origin)
+  const ALLOWED_ORIGINS = [process.env.SITE_URL, 'https://brewhubphl.com', 'https://www.brewhubphl.com'].filter(Boolean);
+  const origin = (event.headers?.['origin'] || '').replace(/\/$/, '');
+  const referer = (event.headers?.['referer'] || '');
+  const isLocalDev = process.env.NODE_ENV !== 'production' && (origin.includes('://localhost') || referer.includes('://localhost'));
+  const isValidOrigin = ALLOWED_ORIGINS.some(a => a === origin || referer.startsWith(a));
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Headers': 'Content-Type, X-BrewHub-Action, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    Vary: 'Origin',
+    'Cache-Control': 'no-store',
+  };
+  if (isValidOrigin || isLocalDev) headers['Access-Control-Allow-Origin'] = origin || ALLOWED_ORIGINS[0];
+
+  // Preflight
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+
+  // Method guard
+  if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+
   // Internal-only: called by supabase-to-sheets.js or scheduled tasks
   // Uses timing-safe comparison with null guard
   const serviceAuth = verifyServiceSecret(event);
-  if (!serviceAuth.valid) return serviceAuth.response;
+  if (!serviceAuth.valid) return { ...serviceAuth.response, headers };
 
   const mode = event.queryStringParameters?.mode || 'push';
 
-  // Check env vars first
-  if (!process.env.MARKETING_SHEET_URL) {
-    console.error('MARKETING_SHEET_URL not set');
-    return { statusCode: 500, body: 'MARKETING_SHEET_URL not configured' };
+  // Check env vars first (sheet URL and auth key are required for outbound calls)
+  if (!process.env.MARKETING_SHEET_URL || !process.env.GOOGLE_SHEETS_AUTH_KEY) {
+    console.error('MARKETING_SHEET_URL or GOOGLE_SHEETS_AUTH_KEY not set');
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'MARKETING_SHEET_URL/GOOGLE_SHEETS_AUTH_KEY not configured' }) };
   }
+
+  // Create Supabase client per-request when needed
+  const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+    : null;
 
   try {
     // DIRECTION A: PUSH (Supabase -> Sheets)
     if (mode === 'push') {
-      const body = JSON.parse(event.body || '{}');
-      const record = body.record;
-      
-      console.log('[MARKETING] Received:', JSON.stringify(record));
-      
-      if (!record) {
-        return { statusCode: 400, body: 'Missing record in body' };
+      let body;
+      try {
+        body = JSON.parse(event.body || '{}');
+      } catch (e) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON' }) };
       }
+      const record = body.record;
+
+      if (!record) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing record in body' }) };
+      }
+
+      // Sanitize record for logs and downstream
+      const safeRecord = {
+        day_of_week: sanitizeInput(record.day_of_week || ''),
+        topic: sanitizeInput(record.topic || ''),
+        caption: sanitizeInput((record.caption || '')).slice(0, 1000),
+        username: sanitizeInput(record.username || '').slice(0, 200),
+        likes: Number(record.likes) || 0,
+        id: sanitizeInput(record.id || '')
+      };
+
+      console.log('[MARKETING] Received safeRecord preview:', JSON.stringify({ day_of_week: safeRecord.day_of_week, topic: safeRecord.topic, caption_preview: safeRecord.caption.slice(0,120) }));
 
       // DETECT: Marketing Bot Post vs Instagram Lead
       if (record.day_of_week && record.topic) {
         // Marketing Bot Post -> SocialPosts tab
         const sheetPayload = {
           auth_key: process.env.GOOGLE_SHEETS_AUTH_KEY,
-          target_sheet: "SocialPosts",
-          day: record.day_of_week,
-          topic: record.topic,
-          caption: record.caption,
-          added: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          target_sheet: 'SocialPosts',
+          day: safeRecord.day_of_week,
+          topic: safeRecord.topic,
+          caption: safeRecord.caption,
+          added: new Date().toISOString()
         };
 
-        console.log('[MARKETING] Sending Social Post:', JSON.stringify(sheetPayload));
+        console.log('[MARKETING] Sending Social Post preview:', JSON.stringify({ day: sheetPayload.day, topic: sheetPayload.topic, caption_preview: sheetPayload.caption.slice(0,120) }));
 
-        const response = await fetch(process.env.MARKETING_SHEET_URL, {
+        const response = await fetchWithTimeout(process.env.MARKETING_SHEET_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(sheetPayload)
-        });
+        }, 15000, 'marketing-sheets-push');
 
-        const responseText = await response.text();
-        console.log('[MARKETING] Sheets response:', response.status, responseText);
+        const responseText = await (response ? response.text().catch(() => '') : '');
+        console.log('[MARKETING] Sheets response:', response?.status || 'no-response', String(responseText).slice(0, 200));
 
-        return { statusCode: 200, body: "Social post pushed to Sheets" };
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'Social post pushed to Sheets' }) };
       }
 
       // Instagram Lead -> IG_Leads tab
       // Format timestamp for easy reading in Sheets
       const postedDate = record.posted_at ? new Date(record.posted_at) : new Date();
-      const formattedDate = postedDate.toLocaleDateString('en-US', { 
-        month: 'short', day: 'numeric', year: 'numeric' 
-      });
-      const formattedTime = postedDate.toLocaleTimeString('en-US', { 
-        hour: 'numeric', minute: '2-digit', hour12: true 
-      });
+      const postedISO = postedDate.toISOString();
 
       const sheetPayload = {
         auth_key: process.env.GOOGLE_SHEETS_AUTH_KEY,
-        username: record.username,
-        likes: record.likes,
-        caption: record.caption,
-        link: record.id,
-        posted: `${formattedDate} @ ${formattedTime}`,
-        added: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        username: safeRecord.username,
+        likes: safeRecord.likes,
+        caption: safeRecord.caption,
+        link: safeRecord.id,
+        posted: postedISO,
+        added: new Date().toISOString()
       };
-      
-      console.log('[MARKETING] Sending to Sheets:', JSON.stringify(sheetPayload));
 
-      const response = await fetch(process.env.MARKETING_SHEET_URL, {
+      console.log('[MARKETING] Sending to Sheets preview:', JSON.stringify({ username: sheetPayload.username, caption_preview: sheetPayload.caption.slice(0,120) }));
+
+      const response = await fetchWithTimeout(process.env.MARKETING_SHEET_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sheetPayload)
-      });
-      
-      const responseText = await response.text();
-      console.log('[MARKETING] Sheets response:', response.status, responseText);
-      
-      return { statusCode: 200, body: "Pushed to Sheets" };
+      }, 15000, 'marketing-sheets-push');
+
+      const responseText = await (response ? response.text().catch(() => '') : '');
+      console.log('[MARKETING] Sheets response:', response?.status || 'no-response', String(responseText).slice(0,200));
+
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'Pushed to Sheets' }) };
     }
 
     // DIRECTION B: PULL (Sheets -> Supabase)
@@ -124,6 +176,7 @@ exports.handler = async (event) => {
       
       return { 
           statusCode: 403, 
+          headers,
           body: JSON.stringify({
             error: 'Pull disabled',
             reason: 'Supabase is the Single Source of Truth. Google Sheets are downstream-only.',
@@ -142,41 +195,42 @@ exports.handler = async (event) => {
 
     // DIRECTION C: EXPORT (Bulk Supabase -> Sheets)
     if (mode === 'export') {
-      // Fetch all local_mentions from Supabase
+      // Fetch local_mentions from Supabase with a safe limit
+      if (!supabase) {
+        console.error('[MARKETING SYNC] Missing SUPABASE env for export mode');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'SUPABASE not configured for export' }) };
+      }
+
       const { data: mentions, error } = await supabase
         .from('local_mentions')
         .select('*')
-        .order('likes', { ascending: false });
+        .order('likes', { ascending: false })
+        .limit(EXPORT_ROW_LIMIT);
 
       if (error) throw error;
 
       // GDPR FIX: Filter out tombstoned records before export
       const safeMentions = await filterTombstoned('local_mentions', mentions, 'username');
 
-      console.log(`[MARKETING] Exporting ${safeMentions.length} mentions to Sheets`);
+      console.log(`[MARKETING] Exporting ${safeMentions.length} mentions to Sheets (limit ${EXPORT_ROW_LIMIT})`);
 
       // Format all records
       const records = safeMentions.map(record => {
         const postedDate = record.posted_at ? new Date(record.posted_at) : new Date();
-        const formattedDate = postedDate.toLocaleDateString('en-US', { 
-          month: 'short', day: 'numeric', year: 'numeric' 
-        });
-        const formattedTime = postedDate.toLocaleTimeString('en-US', { 
-          hour: 'numeric', minute: '2-digit', hour12: true 
-        });
+        const postedISO = postedDate.toISOString();
 
         return {
-          username: record.username,
-          likes: record.likes,
-          caption: record.caption,
-          link: record.id,
-          posted: `${formattedDate} @ ${formattedTime}`,
-          added: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          username: sanitizeInput(record.username || ''),
+          likes: Number(record.likes) || 0,
+          caption: sanitizeInput(String(record.caption || '')).slice(0, 2000),
+          link: sanitizeInput(String(record.id || '')),
+          posted: postedISO,
+          added: new Date().toISOString()
         };
       });
 
-      // Send bulk payload
-      const response = await fetch(process.env.MARKETING_SHEET_URL, {
+      // Send bulk payload with timeout
+      const response = await fetchWithTimeout(process.env.MARKETING_SHEET_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -184,19 +238,20 @@ exports.handler = async (event) => {
           bulk: true,
           records: records
         })
-      });
+      }, 30000, 'marketing-sheets-bulk');
 
-      const result = await response.text();
-      console.log('[MARKETING] Bulk export result:', result);
+      const result = await (response ? response.text().catch(() => '') : '');
+      console.log('[MARKETING] Bulk export result:', String(result).slice(0, 500));
 
-      return { 
-        statusCode: 200, 
-        body: `Exported ${mentions.length} records to Sheets. Result: ${result}` 
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ success: true, exported: safeMentions.length })
       };
     }
 
   } catch (err) {
     console.error("Sync Error:", err);
-    return { statusCode: 500, body: JSON.stringify({ error: 'Sync failed' }) };
+    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Sync failed' }) };
   }
 };

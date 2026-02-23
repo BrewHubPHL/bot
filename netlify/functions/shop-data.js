@@ -73,7 +73,7 @@ exports.handler = async (event) => {
             .order('name', { ascending: true });
 
         if (error) {
-            console.error('Shop data fetch error:', error);
+            console.error('Shop data fetch error:', error?.message);
             return {
                 statusCode: 500,
                 headers,
@@ -87,7 +87,7 @@ exports.handler = async (event) => {
             body: JSON.stringify({ shopEnabled: true, products: products || [] }),
         };
     } catch (err) {
-        console.error('Shop data error:', err);
+        console.error('Shop data error:', err?.message);
         return {
             statusCode: 500,
             headers,

@@ -5,11 +5,21 @@ const { authorize, json } = require('./_auth');
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
+const ALLOWED_ORIGINS = [
+  process.env.URL,
+  'https://brewhubphl.com',
+  'https://www.brewhubphl.com',
+].filter(Boolean);
+
+function getCorsOrigin(event) {
+  const origin = event.headers?.origin || '';
+  return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+}
+
 exports.handler = async (event) => {
   // CORS preflight must be handled BEFORE auth (OPTIONS carries no Authorization)
   if (event.httpMethod === 'OPTIONS') {
-    const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
-    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': ALLOWED_ORIGIN, 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action' }, body: '' };
+    return { statusCode: 200, headers: { 'Access-Control-Allow-Origin': getCorsOrigin(event), 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action', 'Access-Control-Allow-Methods': 'GET, OPTIONS' }, body: '' };
   }
 
   // 1. Staff auth (contains resident PII - parcels workflow)
@@ -62,7 +72,7 @@ exports.handler = async (event) => {
     });
 
   } catch (err) {
-    console.error('[SEARCH-RESIDENTS ERROR]', err);
+    console.error('[SEARCH-RESIDENTS ERROR]', err?.message);
     return json(500, { error: 'Search failed' });
   }
 };

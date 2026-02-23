@@ -49,8 +49,8 @@ exports.handler = async (event) => {
   const isValidOrigin = ALLOWED_ORIGINS.some(allowed =>
     origin === allowed || referer.startsWith(allowed)
   );
-  // Allow localhost for development
-  const isLocalDev = origin.includes('localhost') || referer.includes('localhost');
+  // Allow localhost ONLY in non-production environments
+  const isLocalDev = process.env.NODE_ENV !== 'production' && (origin.includes('://localhost') || referer.includes('://localhost'));
   if (!isValidOrigin && !isLocalDev) {
     console.warn(`[MERCH-PAY] Rejected: origin=${origin} referer=${referer}`);
     return { statusCode: 403, headers, body: JSON.stringify({ error: 'Invalid request origin' }) };
@@ -144,7 +144,7 @@ exports.handler = async (event) => {
         };
       }
 
-      const qty = Math.max(1, parseInt(item.quantity) || 1);
+      const qty = Math.min(50, Math.max(1, parseInt(item.quantity) || 1));
       totalCents += serverPrice * qty;
 
       lineItems.push({
@@ -158,8 +158,36 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid order total' }) };
     }
 
-    const idempotencyKey = randomUUID();
-    const referenceId = `MERCH-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    // Deterministic idempotency key: same cart + same customer = same key
+    // Prevents double-charges on retry/double-click while allowing
+    // intentional re-orders (different timestamp window)
+    const cartFingerprint = lineItems.map(i => `${i.name}:${i.quantity}`).sort().join('|');
+    const idempotencyInput = `${cartFingerprint}:${customerEmail || clientIp}:${totalCents}:${Math.floor(Date.now() / 60000)}`;
+    const internalSyncSecret = process.env.INTERNAL_SYNC_SECRET;
+    const internalSyncSalt = process.env.INTERNAL_SYNC_SALT;
+    if (!internalSyncSecret || !internalSyncSalt) {
+      console.error('[MERCH-PAY] Missing INTERNAL_SYNC_SECRET or INTERNAL_SYNC_SALT env');
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ error: 'Server misconfiguration' }),
+      };
+    }
+
+    // Derive a fixed-length key from the secret using PBKDF2 to satisfy SAST rules
+    const derivedKey = require('crypto').pbkdf2Sync(
+      internalSyncSecret,
+      internalSyncSalt,
+      100000,
+      32,
+      'sha256'
+    );
+
+    const idempotencyKey = createHmac('sha256', derivedKey)
+      .update(idempotencyInput)
+      .digest('hex')
+      .slice(0, 32);
+    const referenceId = `MERCH-${Date.now()}-${idempotencyKey.slice(0, 8)}`;
 
     // Create Square Payment
     const paymentResponse = await square.payments.create({

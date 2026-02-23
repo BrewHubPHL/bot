@@ -4,6 +4,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { requireCsrfHeader } = require('./_csrf');
 const { formBucket } = require('./_token-bucket');
+const { sanitizeInput } = require('./_sanitize');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -155,14 +156,21 @@ exports.handler = async (event) => {
   }
 
   // ── Insert into Supabase ──────────────────────────────────
+  // Sanitize free-text fields to prevent stored XSS (API-M5 fix)
+  const safeName = sanitizeInput(name);
+  const safeEmail = email.trim(); // email validated by regex above — don't strip chars
+  const safePhone = phone ? sanitizeInput(phone) : null;
+  const safeAvailability = availability ? sanitizeInput(availability) : null;
+  const safeScenario = sanitizeInput(scenario_answer);
+
   const { error: insertError } = await supabase
     .from('job_applications')
     .insert({
-      name: name.trim(),
-      email: email.trim(),
-      phone: phone ? String(phone).trim() : null,
-      availability: availability || null,
-      scenario_answer: scenario_answer.trim(),
+      name: safeName,
+      email: safeEmail,
+      phone: safePhone,
+      availability: safeAvailability,
+      scenario_answer: safeScenario,
       resume_url: safeResumeUrl,
       status: 'pending',
     });

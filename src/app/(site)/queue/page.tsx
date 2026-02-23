@@ -144,7 +144,7 @@ export default function QueuePage() {
       setQueue(items);
       setCount(typeof data.count === "number" ? data.count : items.length);
     } catch (err) {
-      console.error("Queue refresh error:", err);
+      console.error("Queue refresh error:", (err as Error)?.message);
     }
   }, []);
 

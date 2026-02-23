@@ -17,22 +17,33 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body' }) };
   }
 
+  // OA-4: validate record shape before use
+  if (!record?.user_id || typeof record.total_amount_cents !== 'number') {
+    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid record: user_id and total_amount_cents required' }) };
+  }
+
   try {
-    // Get the customer's name for logging
+    // Get the customer's name for logging (redacted)
     const { data: profile } = await supabase
       .from('profiles')
       .select('full_name')
       .eq('id', record.user_id)
       .single();
 
-    const name = profile?.full_name || "Guest";
+    // OA-1: redact PII — log initials only, never full name
+    const full = profile?.full_name || '';
+    const initials = full
+      ? full.split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('.')
+      : 'G';
     
-    // Log for monitoring - orders show up in real-time on cafe.html via Supabase subscription
-    console.log(`🔔 ORDER PAID: ${name} - $${(record.total_amount_cents / 100).toFixed(2)}`);
+    // Log order ID + redacted initials only — no dollar amounts, no full names
+    const orderId = String(record.id || 'unknown').slice(0, 8);
+    console.log(`🔔 ORDER PAID: ${initials} [${orderId}]`);
 
-    return { statusCode: 200, body: JSON.stringify({ success: true, customer: name }) };
+    // OA-2: don't return customer name in response
+    return { statusCode: 200, body: JSON.stringify({ success: true }) };
   } catch (err) {
-    console.error("Order announcer error:", err);
+    console.error('Order announcer error:', err?.message);
     return { statusCode: 500, body: JSON.stringify({ error: 'Announcement failed' }) };
   }
 };
