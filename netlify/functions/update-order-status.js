@@ -164,6 +164,7 @@ exports.handler = async (event) => {
     // Enforce valid transitions to prevent going backwards or from terminal states.
     // Self-transitions (e.g. ready→ready) are idempotent — handled below.
     const VALID_TRANSITIONS = {
+      unpaid:    ['unpaid', 'preparing', 'paid', 'cancelled'],  // chatbot orders — staff prepares, collects payment on pickup
       pending:   ['paid', 'preparing', 'cancelled'],
       paid:      ['paid', 'preparing', 'cancelled'],
       preparing: ['preparing', 'ready', 'cancelled'],

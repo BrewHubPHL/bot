@@ -56,6 +56,7 @@ function ns(status: string | null | undefined): string {
 
 /* ── Status workflow ─────────────────────────────────────────── */
 const STATUS_FLOW: Record<string, string> = {
+  unpaid:    'preparing',
   pending:   'preparing',
   paid:      'preparing',
   preparing: 'ready',
@@ -63,6 +64,7 @@ const STATUS_FLOW: Record<string, string> = {
 };
 
 const BUTTON_LABEL: Record<string, string> = {
+  unpaid:    'Prepare (Collect on Pickup)',
   pending:   'Start Preparing',
   paid:      'Start Preparing',
   preparing: 'Mark Ready',
@@ -70,6 +72,7 @@ const BUTTON_LABEL: Record<string, string> = {
 };
 
 const BORDER_COLOR: Record<string, string> = {
+  unpaid:    'border-orange-500',
   pending:   'border-rose-500',
   paid:      'border-emerald-500',
   preparing: 'border-amber-400',
@@ -78,6 +81,7 @@ const BORDER_COLOR: Record<string, string> = {
 };
 
 const STATUS_BADGE: Record<string, string> = {
+  unpaid:    'bg-orange-900 text-orange-200',
   pending:   'bg-rose-800 text-rose-200',
   paid:      'bg-emerald-800 text-emerald-200',
   preparing: 'bg-amber-800 text-amber-200',

@@ -1,5 +1,7 @@
 // get-kds-orders.js — Server-side proxy for KdsSection.
-// Returns active orders (paid / preparing / ready) with their drink items.
+// Returns active orders (unpaid / paid / preparing / ready) with their drink items.
+// 'unpaid' orders come from the AI chatbot — customer pays on arrival, staff
+// pre-prepares so the drink is ready when they walk in.
 // Uses service_role to bypass RLS on orders / coffee_orders tables.
 
 const { createClient } = require('@supabase/supabase-js');
@@ -36,7 +38,7 @@ exports.handler = async (event) => {
     const { data, error } = await supabase
       .from('orders')
       .select('id, customer_name, status, created_at, coffee_orders(id, drink_name, customizations, price)')
-      .in('status', ['pending', 'paid', 'preparing', 'ready'])
+      .in('status', ['unpaid', 'pending', 'paid', 'preparing', 'ready'])
       .order('created_at', { ascending: true })
       .limit(200);
 
