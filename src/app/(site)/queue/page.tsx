@@ -145,6 +145,16 @@ export default function QueuePage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [lastSync, setLastSync]     = useState<Date | null>(null);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  /* ── Auto-fullscreen on mount ────────────────── */
+  useEffect(() => {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
 
   /* ── Clock ─────────────────────────────────── */
   useEffect(() => {
@@ -310,6 +320,18 @@ export default function QueuePage() {
           </span>
         </footer>
       </div>
+
+      {/* ── Fullscreen exit button ───────────────── */}
+      {isFullscreen && (
+        <button
+          onClick={() => document.exitFullscreen?.()}
+          title="Exit fullscreen"
+          className="fixed bottom-3 right-3 z-[99999] w-5 h-5 flex items-center justify-center rounded text-[10px] text-gray-700 hover:text-gray-400 hover:bg-white/5 transition-colors duration-200 opacity-30 hover:opacity-100"
+          aria-label="Exit fullscreen"
+        >
+          ✕
+        </button>
+      )}
     </>
   );
 }

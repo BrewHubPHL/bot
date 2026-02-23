@@ -84,6 +84,16 @@ export default function ParcelMonitor() {
   const [tick, setTick] = useState(Date.now());
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [lastSuccess, setLastSuccess] = useState<number>(Date.now());
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  /* ---- Auto-fullscreen on mount --------------------------------- */
+  useEffect(() => {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
 
   /* ---- Backoff ref (doubles on consecutive errors, resets on success) */
   const backoffRef = React.useRef(POLL_MS);
@@ -292,6 +302,18 @@ export default function ParcelMonitor() {
         <span>Please bring your ID for pickup &bull; Ask a barista for help</span>
         <span className="font-medium text-gray-600">BrewHub PHL</span>
       </footer>
+
+      {/* ── Fullscreen exit button ───────────────── */}
+      {isFullscreen && (
+        <button
+          onClick={() => document.exitFullscreen?.()}
+          title="Exit fullscreen"
+          className="fixed bottom-3 right-3 z-[99999] w-5 h-5 flex items-center justify-center rounded text-[10px] text-gray-700 hover:text-gray-400 hover:bg-white/5 transition-colors duration-200 opacity-30 hover:opacity-100"
+          aria-label="Exit fullscreen"
+        >
+          ✕
+        </button>
+      )}
 
       {/* Keyframe for the amber pulse on new arrivals + burn-in prevention */}
       <style>{`
