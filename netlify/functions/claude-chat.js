@@ -3,6 +3,7 @@ const { requireCsrfHeader } = require('./_csrf');
 const { createClient } = require('@supabase/supabase-js');
 const { chatBucket } = require('./_token-bucket');
 const { sendSMS } = require('./_sms');
+const { hashIP } = require('./_ip-hash');
 
 // ═══════════════════════════════════════════════════════════════════
 // ALLERGEN / DIETARY / MEDICAL SAFETY LAYER
@@ -51,6 +52,20 @@ function getClientIP(event) {
   return event.headers?.['x-nf-client-connection-ip']
     || event.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
     || 'unknown';
+}
+
+/**
+ * Haversine distance in miles between two lat/lon points
+ */
+function getDistanceInMiles(lat1, lon1, lat2, lon2) {
+    const R = 3958.8; // Radius of the Earth in miles
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
 }
 
 // Lightweight JWT user extraction (token is validated by Supabase, not us)
@@ -308,14 +323,9 @@ async function executeTool(toolName, toolInput, supabase) {
     if (toolName === 'place_order') {
         const { items, customer_name, notes } = toolInput;
 
-        // Security: require authentication to place orders
-        if (!toolInput._authed_user) {
-            return {
-                success: false,
-                requires_login: true,
-                result: 'You need to be logged in to place an order! Sign in or create an account at brewhubphl.com/portal, then come back and I\'ll get your order going.'
-            };
-        }
+        // Guest orders are allowed — authedUser may be null.
+        // user_id / customer_email are only stamped when the user is authenticated.
+        // The order is still created with status: 'unpaid' and customer_name for KDS display.
 
         if (!items || !Array.isArray(items) || items.length === 0) {
             return { success: false, result: 'No items provided for the order.' };
@@ -325,24 +335,31 @@ async function executeTool(toolName, toolInput, supabase) {
         const MAX_ITEM_QUANTITY = 20;
 
         try {
-            // Load menu prices — fail-closed: reject order if DB is unreachable
+            // Load menu prices — prefer DB, fall back to FALLBACK_MENU if DB is unreachable
             let menuPrices = null;
+            let usingFallbackPrices = false;
             if (supabase) {
-                const { data } = await supabase
-                    .from('merch_products')
-                    .select('name, price_cents')
-                    .eq('is_active', true)
-                    .is('archived_at', null);
-                if (data && data.length > 0) {
-                    menuPrices = {};
-                    data.forEach(item => { menuPrices[item.name] = item.price_cents; });
+                try {
+                    const { data, error } = await supabase
+                        .from('merch_products')
+                        .select('name, price_cents')
+                        .eq('is_active', true)
+                        .is('archived_at', null);
+                    if (error) {
+                        console.error('[place_order] merch_products fetch error:', error.message);
+                    } else if (data && data.length > 0) {
+                        menuPrices = {};
+                        data.forEach(item => { menuPrices[item.name] = item.price_cents; });
+                    }
+                } catch (dbErr) {
+                    console.error('[place_order] merch_products fetch threw:', dbErr?.message);
                 }
             }
             if (!menuPrices) {
-                return {
-                    success: false,
-                    result: 'Our menu system is temporarily unavailable. Please try again in a moment or order at the counter.'
-                };
+                // Fallback to hardcoded prices when DB is unreachable
+                console.warn('[place_order] Using FALLBACK_MENU — DB unavailable');
+                menuPrices = { ...FALLBACK_MENU };
+                usingFallbackPrices = true;
             }
 
             const menuItemNames = Object.keys(menuPrices);
@@ -372,6 +389,73 @@ async function executeTool(toolName, toolInput, supabase) {
                 // IDENTITY-BOUND: Stamp the order with the authenticated user's ID
                 // so cancel_order ownership checks work and the order is linked to the account.
                 const authedUser = toolInput._authed_user;
+                const isGuest = !authedUser;
+                const ipHash = hashIP(toolInput._client_ip || '');
+
+                if (isGuest) {
+                    console.log(`[place_order] Guest order from ip_hash=${ipHash.slice(0, 12)}... name="${customer_name}"`);
+                }
+
+                // ── Denylist check (guest orders only) ──────────────────────────────
+                // Fail-closed on a hash match; fail-open on a DB error so a denylist
+                // outage never blocks the entire order flow.
+                if (isGuest && ipHash && ipHash !== 'unknown') {
+                    try {
+                        const { data: blocked } = await supabase
+                            .from('guest_order_denylist')
+                            .select('id')
+                            .eq('client_ip_hash', ipHash)
+                            .or('expires_at.is.null,expires_at.gt.now()')
+                            .maybeSingle();
+
+                        if (blocked) {
+                            console.warn(`[place_order] DENYLIST HIT ip_hash=${ipHash.slice(0, 12)}... name="${customer_name}"`);
+                            return {
+                                success: false,
+                                result: "Sorry, we're unable to process orders from your connection right now. Please order at the counter or contact info@brewhubphl.com for help."
+                            };
+                        }
+                    } catch (denyErr) {
+                        // Denylist lookup failed — fail-open so a DB hiccup never blocks all guests
+                        console.error('[place_order] Denylist lookup error (fail-open):', denyErr?.message);
+                    }
+                }
+
+                // ── Geo/IP Security Checks (guest orders only) ───────────────────
+                // Use IP geolocation to block VPN/proxy/Tor and enforce a 15-mile geofence
+                const ipKey = process.env.IPGEOLOCATION_API_KEY;
+                const clientIp = toolInput._client_ip;
+
+                if (isGuest && clientIp && clientIp !== 'unknown' && ipKey) {
+                    try {
+                        const geoRes = await fetch(`https://api.ipgeolocation.io/ipgeo?apiKey=${ipKey}&ip=${clientIp}`);
+                        const geoData = await geoRes.json();
+
+                        // 1) VPN / Proxy / Tor block (if api provides security info)
+                        if (geoData.security?.is_vpn || geoData.security?.is_proxy || geoData.security?.is_tor) {
+                            console.warn(`[SECURITY] VPN/Proxy/Tor Blocked: ip_hash=${ipHash.slice(0,12)}`);
+                            return { success: false, result: "For security, guest orders cannot be placed over a VPN or proxy. Please connect to a standard network." };
+                        }
+
+                        // 2) 15-mile geofence around Point Breeze (hardcoded SSOT)
+                        const shopLat = 39.9324;
+                        const shopLon = -75.1855;
+                        const guestLat = parseFloat(geoData.latitude);
+                        const guestLon = parseFloat(geoData.longitude);
+
+                        if (!isNaN(guestLat) && !isNaN(guestLon)) {
+                            const milesFromShop = getDistanceInMiles(shopLat, shopLon, guestLat, guestLon);
+                            if (milesFromShop > 15) {
+                                console.warn(`[GEOFENCE] Rejected: ${milesFromShop.toFixed(1)} miles away`);
+                                return { success: false, result: "Guest ordering is only available for neighbors within 15 miles of our Point Breeze shop. Hope to see you in person soon!" };
+                            }
+                        }
+                    } catch (err) {
+                        // Fail-open: if the Geo API is down, allow the order but log the error
+                        console.error('[GEOFENCE] API Error:', err?.message);
+                    }
+                }
+
                 const { data: order, error: orderErr } = await supabase
                     .from('orders')
                     .insert({
@@ -379,6 +463,8 @@ async function executeTool(toolName, toolInput, supabase) {
                         total_amount_cents: totalCents,
                         customer_name: customer_name || 'Voice Order',
                         notes: notes || null,
+                        is_guest_order: isGuest,
+                        client_ip_hash: ipHash !== 'unknown' ? ipHash : null,
                         ...(authedUser?.id ? { user_id: authedUser.id } : {}),
                         ...(authedUser?.email ? { customer_email: authedUser.email } : {}),
                     })
@@ -412,7 +498,7 @@ async function executeTool(toolName, toolInput, supabase) {
                     order_number: orderNumber,
                     items: validatedItems,
                     total: `$${(totalCents / 100).toFixed(2)}`,
-                    result: `Order #${orderNumber} placed! ${itemSummary} - Total: $${(totalCents / 100).toFixed(2)}`
+                    result: `Order #${orderNumber} placed! ${itemSummary} - Total: $${(totalCents / 100).toFixed(2)}${usingFallbackPrices ? ' (prices from cached menu — confirm at counter if needed)' : ''}`
                 };
             }
 
@@ -706,12 +792,14 @@ You have access to real APIs - ALWAYS use them instead of making up information:
 6. **navigate_site** - Use when customers want to see a specific page (menu, shop, checkout, rewards, account, parcels, etc.)
 
 ## ORDERING RULES — FOLLOW THESE EXACTLY
-1. Before calling place_order, you MUST have BOTH: (a) the specific item(s) confirmed, AND (b) the customer's name for callout.
-2. If the customer hasn't given their name yet, ASK FOR IT before placing the order. Say something like "What name should I put on that?"
-3. NEVER call place_order more than once for the same order. Once you get an order number back, that's it — do not create another.
-4. If the customer wants to change something after the order is placed, cancel the old order first with cancel_order, then place a fresh one.
-5. If you accidentally place duplicate orders, immediately cancel the extras with cancel_order and apologize.
-6. The ordering flow should be: customer says what they want → you confirm the items and ask for their name → customer gives name → you call place_order ONCE with items + name → done.
+1. When a customer wants to place an order and you do NOT know whether they are logged in, FIRST offer them this exact choice: "Would you like to login to order with your loyalty rewards, or would you like to checkout as a guest? If you'd like to checkout as a guest, I'll just need your name."
+2. If they choose login, direct them to [brewhubphl.com/portal](https://brewhubphl.com/portal) and tell them to come back once signed in.
+3. If they choose guest (or simply provide their name), proceed directly — guest orders are fully supported.
+4. Before calling place_order, you MUST have BOTH: (a) the specific item(s) confirmed, AND (b) the customer's name for callout. If you already have both (e.g. they said "guest, I'm Alex, one latte"), call place_order immediately — do not ask for the name a second time.
+5. NEVER call place_order more than once for the same order. Once you get an order number back, that's it — do not create another.
+6. If the customer wants to change something after the order is placed, cancel the old order first with cancel_order, then place a fresh one.
+7. If you accidentally place duplicate orders, immediately cancel the extras with cancel_order and apologize.
+8. The full ordering flow: customer says what they want → offer login/guest choice if not established → confirm items → get name → call place_order ONCE with items + customer_name → read back order number and total.
 
 ## Response Guidelines
 - After calling place_order, read back the order number and total from the API response
@@ -745,10 +833,10 @@ NEVER read the entire menu aloud or list every item. If someone asks "what's on 
 Point Breeze, Philadelphia, PA 19146
 
 ## Login & Registration
-- When a customer needs to log in to place orders or check loyalty, direct them to brewhubphl.com/portal where they can sign in or create an account.
-- Always format the URL as a clickable link: [brewhubphl.com/portal](https://brewhubphl.com/portal)
-- If a tool returns requires_login: true, tell the customer they need to sign in first and give the link.
-- Never try to work around login requirements - security first!
+- Ordering is available to both logged-in users AND guests. Logged-in users earn loyalty points; guests do not.
+- When a customer wants to order, offer the login/guest choice as described in ORDERING RULES above.
+- If a tool returns requires_login: true (e.g. check_waitlist, get_loyalty_info), tell the customer they need to sign in first and direct them to [brewhubphl.com/portal](https://brewhubphl.com/portal).
+- Always format the portal URL as a clickable link: [brewhubphl.com/portal](https://brewhubphl.com/portal)
 
 ## Handling Abusive Language
 If a customer uses slurs, hate speech, or extremely abusive language (racial slurs, disability slurs, sexual harassment, etc.):
@@ -822,8 +910,12 @@ exports.handler = async (event) => {
         if (event.body) {
             const body = JSON.parse(event.body);
             userText = body.text || "Hello";
+            // Keep both user AND assistant turns so Claude retains full conversation
+            // context across multi-turn flows (e.g. name collection before place_order).
+            // Filtering to only 'user' messages caused Elise to loop on name requests
+            // because she never saw her own "What name should I put on that?" turn.
             conversationHistory = (body.history || [])
-              .filter(m => m.role === 'user' && typeof m.content === 'string');
+              .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
         }
 
         // Input length guard — prevent cost-amplification attacks
@@ -901,8 +993,8 @@ exports.handler = async (event) => {
 
                     console.log(`Tool call [${toolRounds}]: ${toolUseBlock.name}`);
                     
-                    // Inject auth context into tool input for security checks
-                    const toolInputWithAuth = { ...toolUseBlock.input, _authed_user: authedUser };
+                    // Inject auth context + client IP into tool input for security checks
+                    const toolInputWithAuth = { ...toolUseBlock.input, _authed_user: authedUser, _client_ip: getClientIP(event) };
                     // Execute the tool
                     const toolResult = await executeTool(toolUseBlock.name, toolInputWithAuth, supabase);
                     

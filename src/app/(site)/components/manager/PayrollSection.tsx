@@ -16,7 +16,7 @@ const MISSED_PUNCH_THRESHOLD_MS = 16 * 60 * 60 * 1000; // 16 hours
 const SHOP_TZ = "America/New_York";
 
 /* ------------------------------------------------------------------ */
-/* Timezone helpers â€” display & input always use America/New_York       */
+/* Timezone helpers — display & input always use America/New_York       */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -38,7 +38,7 @@ function datetimeLocalToEasternISO(dtLocal: string): string {
   const asUTC = Date.UTC(y, mo - 1, d, h, mi);
 
   // Find how America/New_York renders that same UTC instant,
-  // then measure the gap â€” that gap is the NY offset.
+  // then measure the gap — that gap is the NY offset.
   const fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: SHOP_TZ,
     year: "numeric", month: "2-digit", day: "2-digit",
@@ -48,10 +48,10 @@ function datetimeLocalToEasternISO(dtLocal: string): string {
   const g = (t: string) => Number(parts.find((p) => p.type === t)!.value);
   const nyAtUTC = Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") === 24 ? 0 : g("hour"), g("minute"));
 
-  // offsetMs is negative when NY is behind UTC (e.g. âˆ’5 h for EST)
+  // offsetMs is negative when NY is behind UTC (e.g. −5 h for EST)
   const offsetMs = nyAtUTC - asUTC;
 
-  // The user typed Eastern values, so trueâ€UTC = raw âˆ’ offset
+  // The user typed Eastern values, so true UTC = raw − offset
   return new Date(asUTC - offsetMs).toISOString();
 }
 
@@ -377,9 +377,9 @@ export default function PayrollSection() {
   return (
     <section className="space-y-4 mb-8">
 
-      {/* â”€â”€ Header â”€â”€ */}
+      {/* ── Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">ðŸ’° Payroll</h2>
+        <h2 className="text-lg font-semibold">💰 Payroll</h2>
 
         <div className="flex items-center gap-2 text-sm">
           <input
@@ -451,7 +451,7 @@ export default function PayrollSection() {
         ))}
       </div>
 
-      {/* â”€â”€ Stat tiles â”€â”€ */}
+      {/* -- Stat tiles -- */}
       {!summaryLoading && summaryRows.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-4 flex flex-col justify-center">
@@ -477,7 +477,7 @@ export default function PayrollSection() {
         </div>
       )}
 
-      {/* â”€â”€ Fix success / error banners â”€â”€ */}
+      {/* -- Fix success / error banners -- */}
       {fixSuccess && (
         <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 rounded-xl px-4 py-3 text-green-400 text-sm">
           âœ“ {fixSuccess}
@@ -489,12 +489,12 @@ export default function PayrollSection() {
         </div>
       )}
 
-      {/* â”€â”€ Open Shifts Card â”€â”€ */}
+      {/* -- Open Shifts Card -- */}
       {openShifts.length > 0 && !summaryLoading && (
         <div className="bg-[#1a1a1a] border border-amber-500/30 rounded-xl p-4">
           <h3 className="text-sm font-bold text-amber-400 mb-3 flex items-center gap-2">
-            <span>â±</span>
-            Open Shifts â€” {openShifts.length} Unfinalised
+            <span>⏱</span>
+            Open Shifts — {openShifts.length} Unfinalised
           </h3>
           <p className="text-xs text-gray-400 mb-3">
             These employees are still clocked in. Their hours will{" "}
@@ -571,7 +571,7 @@ export default function PayrollSection() {
         </div>
       )}
 
-      {/* â”€â”€ Pay Period Summary Table (single source of truth) â”€â”€ */}
+      {/* -- Pay Period Summary Table (single source of truth) -- */}
       <div className="bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden">
         <div className="px-5 py-3 border-b border-[#333] flex items-center justify-between min-h-[56px]">
           <h3 className="text-sm font-bold text-[#f5f5f5] flex items-center gap-2">
@@ -660,7 +660,7 @@ export default function PayrollSection() {
         )}
       </div>
 
-      {/* â”€â”€ Manager Challenge Modal â”€â”€ */}
+      {/* -- Manager Challenge Modal -- */}
       {showChallengeModal && token && (
         <ManagerChallengeModal
           actionType="fix_clock"

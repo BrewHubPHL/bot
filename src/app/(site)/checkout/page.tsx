@@ -346,7 +346,7 @@ export default function CheckoutPage() {
 
             {/* Payment Form */}
             <div>
-              <h2 className="font-playfair text-2xl text-[var(--hub-espresso)] mb-6">Payment Details</h2>
+              <h2 className="font-playfair text-2xl text-[var(--hub-espresso)] mb-6 mt-8 md:mt-0">Payment Details</h2>
               <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-stone-200 p-6 space-y-5">
                 {/* Name */}
                 <div>
@@ -362,7 +362,7 @@ export default function CheckoutPage() {
 
                 {/* Email */}
                 <div>
-                  <label className="block text-sm font-medium text-stone-600 mb-2">Email *</label>
+                  <label className="block text-sm font-medium text-stone-600 mb-2">Email <span className="ml-1 text-red-500" aria-hidden="true">*</span></label>
                   <input
                     type="email"
                     value={email}
@@ -384,13 +384,16 @@ export default function CheckoutPage() {
                     {applePayReady && (
                       <button
                         type="button"
+                        aria-label="Pay with Apple Pay"
                         onClick={() => handleWalletPayment(applePayRef.current!, 'Apple Pay')}
                         disabled={loading || walletProcessing}
-                        className="w-full h-12 bg-black text-white rounded-lg font-medium text-base disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-900 transition-colors"
-                        style={{ WebkitAppearance: '-apple-pay-button' } as React.CSSProperties}
-                      >
-                         Pay with Apple Pay
-                      </button>
+                        className="w-full h-12 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{
+                          WebkitAppearance: '-apple-pay-button',
+                          '--apple-pay-button-type': 'pay',
+                          '--apple-pay-button-style': 'black',
+                        } as React.CSSProperties}
+                      />
                     )}
 
                     {googlePayReady && (

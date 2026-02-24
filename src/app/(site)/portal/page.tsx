@@ -107,6 +107,7 @@ export default function ResidentPortal() {
   const [parcels, setParcels] = useState<ParcelRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loyalty, setLoyalty] = useState({ points: 0 });
+  const [qrError, setQrError] = useState(false);
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
 
   /* ── Auth bootstrap ────────────────────────────────────── */
@@ -124,6 +125,7 @@ export default function ResidentPortal() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session) {
         setUser(session.user);
+        setQrError(false);
         loadData(session.user.id, String(session.user.email));
       } else {
         setUser(null);
@@ -445,6 +447,16 @@ export default function ResidentPortal() {
           </div>
           {dataLoading ? (
             <Skeleton className="mx-auto h-[160px] w-[160px] rounded-lg" />
+          ) : qrError ? (
+            <div className="mx-auto w-[160px] rounded-xl border border-stone-700 bg-stone-800/60 px-3 py-4 text-center">
+              <QrCode size={28} className="mx-auto mb-2 text-stone-600" />
+              <p className="text-[10px] text-stone-500 leading-snug mb-2">
+                QR unavailable — show this ID at the counter
+              </p>
+              <span className="font-mono text-[11px] text-stone-300 break-all select-all">
+                {user?.id?.slice(0, 13)}…
+              </span>
+            </div>
           ) : (
             <img
               src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(user?.id || "")}&bgcolor=0C0A09&color=FFFFFF`}
@@ -452,18 +464,9 @@ export default function ResidentPortal() {
               className="mx-auto rounded-lg border border-stone-700"
               width={160}
               height={160}
-              onError={(e) => {
-                const img = e.currentTarget as HTMLImageElement;
-                img.style.display = "none";
-                const fallback = img.nextElementSibling as HTMLElement | null;
-                if (fallback) fallback.style.display = "flex";
-              }}
+              onError={() => setQrError(true)}
             />
           )}
-          <div className="hidden mx-auto w-[160px] h-[160px] rounded-lg border border-stone-700 items-center justify-center text-stone-600 text-xs text-center p-2">
-            QR unavailable — show this ID at the counter<br />
-            <span className="font-mono text-[9px] break-all mt-1 text-stone-500">{user?.id?.slice(0, 12)}…</span>
-          </div>
           <p className="text-stone-600 text-xs mt-3">Show this at the cafe to earn rewards</p>
         </div>
 

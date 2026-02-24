@@ -1,7 +1,7 @@
 # SYSTEM-BLUEPRINT.md
 
-**Updated:** February 22, 2026  
-**Scope:** Architecture, security layers, operational hardening, and all schema migrations (1–43)
+**Updated:** February 23, 2026  
+**Scope:** Architecture, security layers, operational hardening, and all schema migrations (1–53)
 
 ## Part 1: Core Systems
 
@@ -20,7 +20,7 @@
 ### Virtual Receipt System
 - **Thermal Receipt Formatter**: Shared 32-column receipt generator (`_receipt.js`).
 - **Receipt Queue**: Persistent `receipt_queue` table, real-time updates via Supabase Realtime (schema-33).
-- **Note**: Anon SELECT policy exists on `receipt_queue` for Realtime subscriptions — review exposure risk.
+- **Note**: Anon SELECT on `receipt_queue` time-scoped to last 30 minutes (schema-51) — sufficient for Realtime subscriptions without exposing full receipt history.
 
 ---
 
@@ -69,7 +69,7 @@
 - **Schema-43**: `atomic_payroll_adjustment()` — never edits existing rows; inserts immutable adjustment records.
   - Mandatory reason, manager_id, audit note with UTC timestamp.
   - `v_payroll_summary` aggregated VIEW per staff per ISO week.
-- **Known Gap**: `log-time.js` and `fix-clock.js` bypass immutable model with direct mutations.
+- **Note**: `log-time.js` and `fix-clock.js` still bypass immutable model with direct mutations — tracked in gaps below.
 
 ### Loyalty Point SSoT (Single Source of Truth)
 - **Schema-38/40**: `trg_sync_loyalty_to_customers` trigger syncs `profiles.loyalty_points` → `customers.loyalty_points`.
@@ -86,6 +86,20 @@
 
 ---
 
+## Part 3b: AI / Chatbot Ordering
+
+### Bot Order Flow
+- **Endpoint**: `ai-order.js` — authenticated via `X-API-Key` header, key stored in env.
+  - Server-side price lookup from `merch_products` (fail-closed — rejects if DB unreachable).
+  - Rate-limited via `_token-bucket.js` + daily quota via `_usage.js`.
+  - Creates order with `status: 'unpaid'`; customer pays on arrival at the counter.
+- **KDS Display**: `unpaid` orders appear on KDS with orange border/badge and "Prepare (Collect on Pickup)" button label.
+  - State machine allows `unpaid → preparing / paid / cancelled`.
+- **Queue Display**: `unpaid` orders appear in the public queue "In Queue" section with red border and animated "⚠️ UNPAID" badge alerting staff to collect payment.
+- **Fallback Prices**: Hardcoded `FALLBACK_PRICES` constant exists but is no longer used — endpoint is fail-closed; rejects orders if DB is unreachable.
+
+---
+
 ## Part 4: Operational Hardening (Feb 2026)
 
 ### POS Double-Tap Guard
@@ -96,6 +110,16 @@
 ### Scanner Barcode Cooldown
 - **Target**: `src/app/(ops)/scanner/page.tsx` — `handleScan()`.
 - **Fix**: `lastScannedCode` + `lastScannedTime` refs enforce 3-second dedup window.
+
+### KDS Status Normalization
+- **Target**: `src/app/(ops)/kds/page.tsx` — `ns()` helper function.
+- **Fix**: All status comparisons run through `ns(status)` (`.toLowerCase()`), eliminating silent case-sensitive key mismatches from mixed-case DB data.
+
+### Kiosk Fullscreen Mode
+- **Queue** (`src/app/(site)/queue/page.tsx`) and **Monitor** (`src/app/(site)/parcels/monitor/page.tsx`) auto-request fullscreen on mount via `document.documentElement.requestFullscreen()`.
+- `fullscreenchange` event tracked to set `isFullscreen` state.
+- A tiny `×` escape button is fixed bottom-right (`opacity-30`, fades to full on hover) — rendered only while in fullscreen, invisible during normal kiosk display.
+- Burn-in prevention on monitor: `antiburn` CSS keyframe shifts layout ±1px every 240s; 4K scaling breakpoints at 2560px and 3840px.
 
 ### API Rate Limiting
 - **Utility**: `src/lib/rateLimit.ts` — sliding-window `Map<IP, timestamps[]>` limiter.
@@ -146,20 +170,83 @@
 
 ---
 
+## Part 5b: Schema Evolution (44–53)
+
+### Voucher & Webhook Resilience (Schemas 44–45)
+- **Schema-44** (`voucher-hash-restore`): Restores hash-first voucher lookup regressed by schema-39. Preserves schema-39 timeout guards (5s statement, 3s lock). Re-adds plaintext fallback + opportunistic hash backfill.
+- **Schema-45** (`webhook-resilience`): Fixes "Phantom Orders" — Square webhook delays (5–15+ min) left paid terminal orders stuck in `pending`. Adds `square_checkout_id` column to `orders` with index; enables active Square API polling instead of passive webhook wait.
+
+### Parcel Security (Schema 46)
+- **Schema-46** (`parcel-handoff-hardening`): Fixes "Fake SMS Walk-Out" vulnerability.
+  - Cryptographic 6-digit pickup codes (SHA-256 hashed in DB, never stored plaintext).
+  - Value-tier escalation: `standard` vs `high_value` (requires ID check at handoff).
+  - Immutable `parcel_pickup_audit` log for every pickup attempt.
+  - Brute-force lockout after repeated failed code attempts.
+  - Bug fix: `atomic_parcel_checkin` now correctly inserts `recipient_email`.
+
+### Manager PIN Hardening (Schema 47)
+- **Schema-47** (`manager-pin-hardening`): Fixes "Shoulder-Surfed God Mode".
+  - `pin_hash` column (bcrypt) — plaintext PINs eliminated from `staff_directory`.
+  - Forced PIN rotation (configurable, default 30 days) via `pin_changed_at` + `pin_rotation_days`.
+  - Per-action TOTP challenge for sensitive manager operations (`totp_secret` column).
+  - Immutable `manager_override_log` with device fingerprint + witness tracking.
+  - Anomaly detection: comp velocity, overtime spikes, session abuse patterns.
+
+### SMS Compliance (Schema 48)
+- **Schema-48** (`tcpa-sms-compliance`): Full TCPA / 10DLC compliance layer.
+  - `sms_opt_outs` — application-level registry, honored instantly (not just via Twilio built-in).
+  - `sms_consent_audit` — immutable opt-in/out event history.
+  - `sms_delivery_log` — every outbound message tracked for audit.
+  - `check_sms_send_allowed(phone)` RPC — atomic pre-send gate before every send.
+  - Quiet hours: blocks messages 9 PM – 9 AM recipient local time.
+
+### Offline & Race Condition Hardening (Schemas 49–50)
+- **Schema-49** (`offline-payment-guard`): Fixes "Square Offline Mode Trap" (30–40% batch decline rate after outages).
+  - `offline_sessions` table tracks every connectivity outage event.
+  - `offline_payment_loss_ledger` records each declined charge with staff accountability.
+  - Cash-only exposure caps during outages; post-recovery aggressive decline reconciliation.
+- **Schema-50** (`tracking-unique`): Fixes TOCTOU race on `register-tracking.js`.
+  - Replaces non-unique `idx_expected_tracking` with `UNIQUE CONSTRAINT` on `expected_parcels.tracking_number`.
+  - Enables atomic `INSERT … ON CONFLICT` (upsert) instead of SELECT-then-INSERT.
+
+### View & Trigger Hardening (Schemas 51–52)
+- **Schema-51** (`receipt-view-hardening`): Audit #16.
+  - Time-scopes `receipt_queue` anon SELECT to last 30 minutes — prevents full receipt history exposure via anon key.
+  - REVOKEs SELECT on `daily_sales_report` from anon/authenticated (service_role only via Netlify functions).
+  - REVOKEs SELECT on `v_payroll_summary` (PII: emails, hourly rates, gross pay).
+- **Schema-52** (`trigger-hardening`): Audit #23.
+  - `sync_coffee_order_status`: EXCEPTION handler prevents coffee_orders UPDATE failure from blocking parent order status change; errors logged to `system_sync_logs`.
+  - `comp_audit`: FK constraints added on `order_id` and `staff_id`.
+  - `time_logs`: functional index added on `lower(employee_email)`.
+
+### OAuth Token Storage (Schema 53)
+- **Schema-53** (`shop_settings`): `shop_settings` table for Square OAuth tokens + shop metadata.
+  - Deny-all RLS policy (`USING (false)`) — accessible only via service_role.
+  - Columns: `id`, `access_token`, `refresh_token`, `merchant_id`, `updated_at`.
+
+---
+
 ## Part 6: Known Architecture Gaps
 
-| Area | Gap | Severity |
-|---|---|---|
-| Auth | `/admin/*` pages not in middleware `OPS_PATHS` — accessible unauthenticated | CRITICAL |
-| Auth | `oauth/initiate.js` bypasses `_auth.js` centralized auth | HIGH |
-| Payments | `collect-payment.js` uses random idempotency key — double-charge risk | CRITICAL |
-| Payments | `process-merch-payment.js` has zero authentication | CRITICAL |
-| Audit Trail | `log-time.js` and `fix-clock.js` bypass immutable time_logs model | CRITICAL |
-| Vouchers | Schema-39 `atomic_redeem_voucher` regresses schema-35 hash-first lookup | CRITICAL |
-| PII | `/parcels` page exposes resident PII without authentication | CRITICAL |
-| CSRF | 3 endpoints missing CSRF header validation | HIGH |
-| KDS | Case-sensitive status keys — no normalization | HIGH |
-| Rate Limits | 6 public endpoints with zero rate limiting | HIGH |
-| Tests | <5% function test coverage; zero payment/frontend/edge function tests | HIGH |
-| Docs | `README_SECURITY.md` linked but does not exist | HIGH |
-| Docs | 15 schemas (29–43), ~30 functions, ~13 pages undocumented in README | HIGH |
+| Area | Gap | Severity | Status |
+|---|---|---|---|
+| Auth | `/admin/*` pages not in middleware `OPS_PATHS` — accessible unauthenticated | CRITICAL | Open |
+| Auth | `oauth/initiate.js` bypasses `_auth.js` centralized auth | HIGH | Open |
+| Payments | `collect-payment.js` uses random idempotency key — double-charge risk | CRITICAL | Open |
+| Payments | `process-merch-payment.js` has zero authentication | CRITICAL | Open |
+| Audit Trail | `log-time.js` and `fix-clock.js` bypass immutable time_logs model | CRITICAL | Open |
+| Vouchers | Schema-39 `atomic_redeem_voucher` regressed schema-35 hash-first lookup | CRITICAL | ✅ Fixed (schema-44) |
+| PII | `/parcels` page exposed resident PII without authentication | CRITICAL | ✅ Fixed (parcel_departure_board VIEW + schema-14 RLS) |
+| Parcels | "Fake SMS Walk-Out" — no cryptographic pickup code verification | CRITICAL | ✅ Fixed (schema-46) |
+| Staff Auth | Manager PIN stored in plaintext | CRITICAL | ✅ Fixed (schema-47, bcrypt hash) |
+| SMS | No application-level STOP/opt-out enforcement — TCPA exposure | HIGH | ✅ Fixed (schema-48) |
+| Payments | Square Offline Mode — batch declines eat revenue with no trace | HIGH | ✅ Fixed (schema-49) |
+| DB Race | `expected_parcels` TOCTOU allows duplicate tracking rows | HIGH | ✅ Fixed (schema-50, UNIQUE constraint) |
+| Receipt PII | `receipt_queue` anon SELECT exposed all historical receipt text | HIGH | ✅ Fixed (schema-51, 30-min time window) |
+| Views | `daily_sales_report` and `v_payroll_summary` readable by anon | HIGH | ✅ Fixed (schema-51, REVOKE) |
+| KDS | Case-sensitive status keys — silent mismatches | HIGH | ✅ Fixed (`ns()` normalizer in kds/page.tsx) |
+| CSRF | `redeem-voucher.js`, `register-tracking.js`, `update-application-status.js` missing CSRF | HIGH | Open |
+| Rate Limits | 6 public endpoints with zero rate limiting (`get-menu`, `get-merch`, `get-queue`, `health`, `shop-data`, `public-config`) | HIGH | Open |
+| POS | Double-tap guard uses `setState` — ultra-fast race still possible, should use `useRef` | MEDIUM | Open |
+| Tests | <5% function test coverage; zero payment/frontend/edge function tests | HIGH | Open |
+| Docs | `README_SECURITY.md` linked but does not exist | HIGH | Open |

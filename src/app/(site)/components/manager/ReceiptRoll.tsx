@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
+import { supabase } from "@/lib/supabase";
 
 const API_BASE =
   typeof window !== "undefined" && window.location.hostname === "localhost"
@@ -110,6 +111,20 @@ export default function ReceiptRoll() {
     };
   }, [token, loadReceipts]);
 
+  // Supabase Realtime — instant update when a new receipt is inserted
+  useEffect(() => {
+    if (!token) return;
+    const channel = supabase
+      .channel("receipt-queue-inserts")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "receipt_queue" },
+        () => { loadReceipts(); }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [token, loadReceipts]);
+
   if (!token) {
     return (
       <section className="mb-8">
@@ -147,6 +162,7 @@ export default function ReceiptRoll() {
           border-radius: 4px 4px 0 0;
           position: relative;
           max-width: 340px;
+          overflow-x: auto;
           box-shadow: 2px 4px 12px rgba(0,0,0,0.45);
         }
 

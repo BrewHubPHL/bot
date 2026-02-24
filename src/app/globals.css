@@ -486,6 +486,26 @@ html, body {
   50% { opacity: 0.7; }
 }
 
+/* ===== SQUARE WEB PAYMENTS SDK ===== */
+/* Force Square-injected wallet containers to lay out correctly on narrow screens */
+[data-format="google-pay"],
+[data-format="apple-pay"] {
+  min-height: 48px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Apple Pay button CSS variable overrides */
+.apple-pay-button {
+  --apple-pay-button-padding: 10px 30px;
+}
+
+/* Match the Square card iframe corner radius to its rounded-lg container */
+#card-container iframe {
+  border-radius: 0.5rem !important;
+}
+
 /* ===== FOOTER ===== */
 .footer-glass {
   background: rgba(250,250,250,0.95);

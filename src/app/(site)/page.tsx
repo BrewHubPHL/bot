@@ -87,6 +87,7 @@ export default function BrewHubLanding() {
   const [voiceStatus, setVoiceStatus] = useState("");
   const [initialRender, setInitialRender] = useState(true);
   const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const isSpeakingRef = useRef(false);
   const isVoiceActiveRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -99,6 +100,15 @@ export default function BrewHubLanding() {
   // Keep mutable refs so speech callbacks always see latest state (avoids stale closures)
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { isVoiceActiveRef.current = isVoiceActive; }, [isVoiceActive]);
+
+  // Anti-echo: the moment isSpeaking flips true, hard-abort the recogniser so the
+  // mic cannot pick up TTS output and feed it back as a new user transcript.
+  // Using .abort() (not .stop()) drops any in-flight result immediately.
+  useEffect(() => {
+    if (isSpeaking && recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch { /* ok if not started */ }
+    }
+  }, [isSpeaking]);
 
   // Splash screen timer and scroll to top
   useEffect(() => {
@@ -167,11 +177,11 @@ export default function BrewHubLanding() {
       }
 
       // Stop listening BEFORE playing audio to prevent echo feedback loop
-      // (mic picks up speaker output and feeds it back as a new transcript)
+      // (mic picks up speaker output and feeds it back as a new transcript).
+      // Setting isSpeaking state triggers the anti-echo useEffect which calls
+      // .abort() — stronger than .stop() — dropping any in-flight result.
       isSpeakingRef.current = true;
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch { /* not started */ }
-      }
+      setIsSpeaking(true);
 
       const audioBlob = await res.blob();
       const arrayBuffer = await audioBlob.arrayBuffer();
@@ -194,6 +204,7 @@ export default function BrewHubLanding() {
           source.onended = () => {
             audioRef.current = null;
             isSpeakingRef.current = false;
+            setIsSpeaking(false);
             if (recognitionRef.current && isVoiceActiveRef.current) {
               setVoiceStatus("Listening...");
               try { recognitionRef.current.start(); } catch { /* already started */ }
@@ -218,6 +229,7 @@ export default function BrewHubLanding() {
         URL.revokeObjectURL(audioUrl);
         audioRef.current = null;
         isSpeakingRef.current = false;
+        setIsSpeaking(false);
         if (recognitionRef.current && isVoiceActiveRef.current) {
           setVoiceStatus("Listening...");
           try { recognitionRef.current.start(); } catch { /* already started */ }
@@ -228,6 +240,7 @@ export default function BrewHubLanding() {
       await audio.play();
     } catch (err) {
       isSpeakingRef.current = false;
+      setIsSpeaking(false);
       console.error('TTS playback error:', (err as Error)?.message);
       // Resume listening so the user isn't stuck
       if (recognitionRef.current && isVoiceActiveRef.current) {
@@ -354,6 +367,7 @@ export default function BrewHubLanding() {
       audioContextRef.current = null;
     }
     isSpeakingRef.current = false;
+    setIsSpeaking(false);
     setIsVoiceActive(false);
     setIsVoiceProcessing(false);
     setVoiceStatus("");
