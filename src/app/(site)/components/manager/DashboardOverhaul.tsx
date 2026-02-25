@@ -393,7 +393,7 @@ export default function DashboardOverhaul() {
             </div>
           </a>
           <a
-            href="/parcels-pickup"
+            href="/manager/parcels/monitor"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3 min-h-[56px] rounded-xl px-5
@@ -404,8 +404,8 @@ export default function DashboardOverhaul() {
           >
             <Package size={20} aria-hidden="true" />
             <div>
-              <div>Parcel Pickup</div>
-              <div className="text-xs font-normal text-purple-400/60">Canonical confirmation flow</div>
+              <div>Parcel Departure Board</div>
+              <div className="text-xs font-normal text-purple-400/60">80s airport-style parcel monitor</div>
             </div>
           </a>
         </div>

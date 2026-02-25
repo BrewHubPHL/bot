@@ -29,21 +29,30 @@ BrewHub PHL is a full-stack Next.js application deployed on Netlify with a Supab
 ```
 brewhubbot/
 ├── src/app/               # Next.js App Router
-│   ├── (site)/            #   Public pages (homepage, shop, about, portal)
+│   ├── (site)/            #   Public pages (home, shop, about, location, careers, etc.)
 │   ├── (ops)/             #   Staff ops — full-screen, no nav
 │   │   ├── pos/           #     3-column POS (Categories → Builder → Ticket)
 │   │   ├── kds/           #     Kitchen Display System
-│   │   └── scanner/       #     Inventory barcode scanner
+│   │   ├── scanner/       #     Inventory barcode scanner
+│   │   ├── manager/       #     Manager dashboard, fulfillment, parcels monitor
+│   │   ├── staff-hub/     #     Staff portal (clock, orders, inventory)
+│   │   └── parcels-pickup/#     Parcel pickup workflow
 │   └── api/               #   App Router API routes (rate-limited wrappers)
 │       ├── check-in/      #     Parcel check-in (rate-limited proxy)
 │       └── revalidate/    #     Cache revalidation endpoint
 ├── src/lib/               # Shared utilities
 │   ├── supabase.ts        #   Supabase client
 │   ├── rateLimit.ts       #   In-memory IP rate limiter
-│   └── escapeHtml.ts      #   HTML entity escaper for emails
-├── public/                # Static assets (icons, manifest, robots.txt)
-├── netlify/functions/     # Serverless API endpoints (50+ functions)
-├── supabase/              # DB schemas (1–33), RPC functions, RLS policies
+│   ├── tokenBucket.ts     #   Token bucket for client-side rate limiting
+│   ├── authz.ts           #   Authorization helpers
+│   ├── errorCatalog.ts    #   Standardized error codes
+│   ├── offlineStore.ts    #   IndexedDB offline queue
+│   ├── useConnection.ts   #   Online/offline hook
+│   ├── escapeHtml.ts      #   HTML entity escaper for emails
+│   └── utils.ts           #   Misc utilities
+├── public/                # Static assets (icons, manifest, robots.txt, sw.js)
+├── netlify/functions/     # Serverless API endpoints (70+ functions)
+├── supabase/              # DB schemas (1–49), RPC functions, RLS policies
 ├── scripts/               # Utilities (Apple Pay, secret rotation, AI tests)
 └── tests/                 # Jest test suite
 ```
@@ -56,23 +65,27 @@ brewhubbot/
 | `/` | Homepage — hero, waitlist, AI chat (text + voice) |
 | `/shop` | Merch storefront with Square Checkout |
 | `/cafe` | Customer cafe ordering |
+| `/location` | Location info & coming-soon page |
 | `/portal` | Resident portal (loyalty + parcels) |
 | `/pos` | **Staff POS** — 3-column layout, Square Terminal payments |
 | `/kds` | **Kitchen Display** — real-time order board |
+| `/kds-legacy` | Legacy KDS layout |
 | `/scanner` | Inventory barcode scanner |
 | `/manager` | Manager dashboard (stats, KDS, inventory) |
+| `/manager/fulfillment` | Order fulfillment management |
+| `/manager/parcels/monitor` | Real-time parcel departure board (Solari-style) |
 | `/careers` | Public job application page |
 | `/checkout` | Cart → Square payment |
 | `/login` | Staff PIN login |
 | `/menu` | Public menu display |
-| `/parcels` | Parcel history (**⚠ unauthenticated — audit issue FE-C3**) |
-| `/manager/parcels/monitor` | Real-time parcel monitor (ops-gated, C3 fix) |
+| `/parcels` | Parcel history (auth-gated, redirects to portal) |
+| `/parcels-pickup` | Parcel pickup workflow |
 | `/queue` | Public lobby order board (first names only) |
 | `/resident` | Resident lookup / parcel log |
 | `/staff-hub` | Staff portal (clock, orders, inventory) |
 | `/waitlist` | Manage/view waitlist |
-| `/admin/dashboard` | Admin dashboard (**⚠ not in middleware auth — audit issue FE-C1**) |
-| `/admin/inventory` | Admin inventory (**⚠ not in middleware auth — audit issue FE-C1**) |
+| `/admin/dashboard` | Admin dashboard (middleware auth-gated) |
+| `/admin/inventory` | Admin inventory (middleware auth-gated) |
 | `/thank-you` | Post-checkout confirmation |
 | `/about`, `/privacy`, `/terms` | Info pages |
 
@@ -94,6 +107,10 @@ brewhubbot/
 | `update-order-status` | KDS status transitions (preparing → ready → completed) via `safe_update_order_status` RPC |
 | `redeem-voucher` | Loyalty voucher redemption via `atomic_redeem_voucher` RPC |
 | `cancel-stale-orders` | Scheduled: cancels orders stuck in pending/unpaid >30 min |
+| `cancel-order` | Cancel a specific order |
+| `poll-terminal-payment` | Poll Square Terminal for payment status |
+| `poll-merch-payment` | Poll Square for merch payment completion |
+| `reconcile-pending-payments` | Reconcile pending payments with Square |
 
 ### AI & Voice
 | Function | Description |
@@ -107,24 +124,28 @@ brewhubbot/
 | `pin-login` | PIN authentication → HMAC session cookie (8h expiry) |
 | `pin-logout` | Clear session cookie |
 | `pin-verify` | Verify active PIN session |
+| `pin-change` | Change staff PIN |
 | `pin-clock` | Clock in/out via `atomic_staff_clock` RPC |
-| `log-time` | Legacy clock endpoint (direct INSERT/UPDATE — audit gap) |
-| `fix-clock` | Fix missing clock-out (direct UPDATE — audit gap) |
+| `manager-challenge` | Manager PIN challenge for elevated actions |
+| `log-time` | Legacy clock endpoint (direct INSERT/UPDATE) |
+| `fix-clock` | Fix missing clock-out (direct UPDATE) |
 
 ### Operations
 | Function | Description |
 |---|---|
 | `parcel-check-in` / `parcel-pickup` / `register-tracking` | Parcel logistics flow |
+| `get-arrived-parcels` | Fetch parcels with status |
 | `inventory-check` / `inventory-lookup` / `adjust-inventory` / `create-inventory-item` | Inventory management |
-| `get-loyalty` / `redeem-voucher` | Loyalty & rewards |
-| `manage-catalog` / `upload-menu-image` | Menu/merch catalog CRUD |
+| `get-loyalty` / `get-staff-loyalty` / `redeem-voucher` | Loyalty & rewards |
+| `manage-catalog` / `upload-menu-image` / `proxy-image` | Menu/merch catalog CRUD |
 | `update-hours` / `get-payroll` | Payroll management via `atomic_payroll_adjustment` RPC |
 | `marketing-bot` / `marketing-sync` / `supabase-to-sheets` | Marketing ops |
 | `sales-report` / `export-csv` | Reports & data export |
-| `send-sms-email` / `order-announcer` | Notifications (Resend + Twilio) |
+| `send-sms-email` / `order-announcer` / `twilio-webhook` | Notifications (Resend + Twilio) |
 | `search-residents` | Resident search (PIN + 15-min freshness) |
 | `ops-diagnostics` | Manager-only system diagnostics |
-| `get-manager-stats` / `get-kds-orders` / `get-receipts` / `get-recent-activity` | Operational data retrieval |
+| `offline-session` | Offline session management for iPads |
+| `get-manager-stats` / `get-kds-orders` / `get-receipts` / `get-recent-activity` / `get-fulfillment-orders` / `get-inventory` | Operational data retrieval |
 
 ### Hiring
 | Function | Description |
@@ -144,6 +165,8 @@ brewhubbot/
 | `site-settings-sync` | Shop/cafe mode toggle |
 | `create-customer` | Create customer record |
 | `tool-check-waitlist` | AI tool: waitlist check |
+| `supabase-webhook` | Supabase database webhook handler |
+| `apify-to-supabase` | External data import sync |
 
 ### Scheduled & Background
 | Function | Description |
@@ -161,7 +184,9 @@ brewhubbot/
 | `_ip-hash.js` | SHA-256 IP hashing with salt |
 | `_receipt.js` | 32-column thermal receipt generator |
 | `_sanitize.js` | Input sanitization (strip tags, scripts, event handlers) |
-| `_token-bucket.js` | In-memory token bucket rate limiter |
+| `_sms.js` | SMS sending helper (Twilio) |
+| `_process-payment.js` | Square payment processing helper |
+| `_token-bucket.js` | In-memory token bucket rate limiter (named buckets: `publicBucket`, `staffBucket`, `formBucket`, `orderBucket`, etc.) |
 | `_usage.js` | DB-backed daily API quota tracking |
 
 ---
@@ -222,6 +247,12 @@ The database is managed through sequential migration files (`schema-1` through `
 | `schema-41-order-status-remediation` | `safe_update_order_status` RPC, trigger EXCEPTION handlers |
 | `schema-42-atomic-staff-clock` | `atomic_staff_clock()` — sole clock-in/out path with advisory lock |
 | `schema-43-payroll-adjustment-audit` | IRS-compliant `atomic_payroll_adjustment()`, `v_payroll_summary` VIEW |
+| `schema-44-voucher-hash-restore` | Restore hash-first voucher lookup (regression fix) |
+| `schema-45-webhook-resilience` | Webhook resilience — phantom orders fix |
+| `schema-46-parcel-handoff-hardening` | Parcel handoff hardening |
+| `schema-47-manager-pin-hardening` | Manager PIN hardening (insider threat defense) |
+| `schema-48-tcpa-sms-compliance` | TCPA / 10DLC compliance (SMS opt-out & quiet hours) |
+| `schema-49-offline-payment-guard` | Offline payment guard (ghost revenue defense) |
 | `schema-free-coffee` | Manual voucher INSERT snippet (not a migration) |
 
 ---

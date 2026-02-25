@@ -72,6 +72,10 @@ self.addEventListener('fetch', (event) => {
   // Skip chrome-extension, etc.
   if (!url.protocol.startsWith('http')) return;
 
+  // Skip cross-origin requests (Unsplash images, external CDNs, etc.)
+  // The SW should only manage same-origin resources.
+  if (url.origin !== self.location.origin) return;
+
   // Never intercept protected ops routes — OpsGate middleware owns auth.
   // Caching a 302 redirect here would poison the cache with login pages.
   const isProtected = PROTECTED_ROUTES.some(p => url.pathname.startsWith(p));

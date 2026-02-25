@@ -2,7 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { hashIP } = require('./_ip-hash');
-const { formBucket } = require('./_token-bucket');
+const { staffBucket } = require('./_token-bucket');
 
 // Initialize with Service Role Key (Bypasses RLS)
 const supabase = createClient(
@@ -110,7 +110,7 @@ exports.handler = async (event) => {
     // Rate limit per-user+ip
     try {
       const rlKey = `clock:${user.id}:${ip}`;
-      const take = formBucket.consume(rlKey);
+      const take = staffBucket.consume(rlKey);
       if (!take.allowed) {
         const origin = validateOrigin(event.headers || {});
         return corsWithOrigin(429, { error: 'Too many requests. Please slow down.', retryAfterMs: take.retryAfterMs }, origin);

@@ -38,7 +38,6 @@ interface ParcelRow {
   masked_tracking: string;
   carrier: string | null;
   received_at: string | null;
-  unit_number: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -277,7 +276,7 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
   const fetchParcels = useCallback(async () => {
     const { data, error } = await supabase
       .from("parcel_departure_board")
-      .select("id, masked_name, masked_tracking, carrier, received_at, unit_number")
+      .select("id, masked_name, masked_tracking, carrier, received_at")
       .order("received_at", { ascending: false })
       .limit(100);
 
@@ -346,7 +345,7 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
   }
 
   /* Number of chars per column — adjusted for the board aesthetic */
-  const COL = { time: 5, name: 16, unit: 5, carrier: 3, tracking: 10, wait: 8, status: 9 };
+  const COL = { time: 5, name: 16, carrier: 3, tracking: 10, wait: 8, status: 9 };
 
   /* ---- Render --------------------------------------------------- */
   return (
@@ -411,7 +410,6 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
         <div className="shrink-0 solari-header" style={{ borderBottom: "1px solid #332a1a" }}>
           <span style={{ width: COL.time * 16 }}>Time</span>
           <span className="flex-1">Resident</span>
-          <span className="hidden sm:block" style={{ width: COL.unit * 16 }}>Unit</span>
           <span className="hidden sm:block" style={{ width: (COL.carrier + COL.tracking + 1) * 16 }}>Carrier / Tracking</span>
           <span style={{ width: COL.wait * 16, textAlign: "right" }}>Waiting</span>
           <span style={{ width: COL.status * 16, textAlign: "right" }}>Status</span>
@@ -472,16 +470,6 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
                       length={COL.name}
                       flapping={isFlapping}
                       color="#ffdd44"
-                    />
-                  </span>
-
-                  {/* UNIT — desktop only */}
-                  <span className="hidden sm:inline-flex">
-                    <SplitFlapText
-                      text={p.unit_number || "—"}
-                      length={COL.unit}
-                      flapping={isFlapping}
-                      color="#998860"
                     />
                   </span>
 

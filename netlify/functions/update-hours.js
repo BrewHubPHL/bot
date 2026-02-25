@@ -6,7 +6,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { hashIP } = require('./_ip-hash');
-const { formBucket } = require('./_token-bucket');
+const { staffBucket } = require('./_token-bucket');
 const { sanitizeInput } = require('./_sanitize');
 const { z } = require('zod');
 
@@ -167,7 +167,7 @@ exports.handler = async (event) => {
     // Rate limit key: manager id + client IP (prevents hot-client flood)
     try {
       const rlKey = `${managerRow.id}:${clientIP}`;
-      const take = formBucket.consume(rlKey);
+      const take = staffBucket.consume(rlKey);
       if (!take.allowed) {
         const origin = validateOrigin(event.headers || {});
         const resp = {

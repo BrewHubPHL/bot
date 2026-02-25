@@ -1092,7 +1092,7 @@ export default function POSPage() {
         if (resp.status === 409) {
           const conflict = await resp.json().catch(() => ({} as Record<string, unknown>));
           const currentStatus = (conflict.currentStatus ?? conflict.status ?? "").toString().toLowerCase();
-          const safeStatuses = ["preparing", "paid", "ready", "picked_up"];
+          const safeStatuses = ["preparing", "paid", "ready", "completed", "shipped", "picked_up"];
 
           if (safeStatuses.includes(currentStatus)) {
             console.warn(`[POS] Cash payment 409 — backend status "${currentStatus}", safe to proceed`);

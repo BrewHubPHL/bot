@@ -95,6 +95,7 @@ export default function BrewHubLanding() {
   const recognitionRef = useRef<BrewSpeechRecognition | null>(null);
   const audioRef = useRef<HTMLAudioElement | AudioBufferSourceNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const voiceCancelledRef = useRef(false);
   const messagesRef = useRef<ChatMessage[]>(messages);
 
   // Keep mutable refs so speech callbacks always see latest state (avoids stale closures)
@@ -171,6 +172,8 @@ export default function BrewHubLanding() {
 
   // ── Play Elise's reply through ElevenLabs TTS ──
   const speakReply = useCallback(async (text: string) => {
+    // Bail if voice session was cancelled while we were waiting
+    if (voiceCancelledRef.current) return;
     try {
       // Strip URLs so TTS doesn't read them aloud:
       // [label](url) → "label (link in the chat)" | bare https://… → "link in the chat"
@@ -187,6 +190,9 @@ export default function BrewHubLanding() {
       if (!res.ok) {
         return;
       }
+
+      // Bail if voice session was cancelled during the TTS fetch
+      if (voiceCancelledRef.current) return;
 
       // Stop listening BEFORE playing audio to prevent echo feedback loop
       // (mic picks up speaker output and feeds it back as a new transcript).
@@ -265,6 +271,8 @@ export default function BrewHubLanding() {
   // ── Handle a single voice turn: transcript → Claude → TTS ──
   const handleVoiceTurn = useCallback(async (transcript: string) => {
     if (!transcript.trim()) return;
+    // Bail if voice session was cancelled
+    if (voiceCancelledRef.current) return;
 
     setIsVoiceProcessing(true);
     setMessages(prev => [...prev, { role: 'user', content: transcript }]);
@@ -272,6 +280,11 @@ export default function BrewHubLanding() {
 
     try {
       const reply = await sendToClaude(transcript);
+      // Bail if voice session was cancelled during Claude call
+      if (voiceCancelledRef.current) {
+        setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+        return;
+      }
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       await speakReply(reply);
     } catch {
@@ -356,6 +369,11 @@ export default function BrewHubLanding() {
   };
 
   const stopVoiceSession = () => {
+    // Set cancellation flag FIRST so in-flight async chains bail out
+    voiceCancelledRef.current = true;
+    // Sync the ref immediately (don't wait for useEffect)
+    isVoiceActiveRef.current = false;
+    isSpeakingRef.current = false;
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;   // prevent auto-restart
       recognitionRef.current.abort();
@@ -375,7 +393,6 @@ export default function BrewHubLanding() {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
-    isSpeakingRef.current = false;
     setIsSpeaking(false);
     setIsVoiceActive(false);
     setIsVoiceProcessing(false);
@@ -386,6 +403,8 @@ export default function BrewHubLanding() {
     if (isVoiceActive) {
       stopVoiceSession();
     } else {
+      // Reset cancellation flag when starting a new session
+      voiceCancelledRef.current = false;
       startVoiceSession();
     }
   };
@@ -511,63 +530,6 @@ export default function BrewHubLanding() {
         </div>
       </section>
 
-      {/* LOCATION SECTION */}
-      <section id="location" className="location-section" style={{ maxWidth: 680, margin: '0 auto', padding: '3rem 1.5rem' }}>
-        <div style={{
-          background: 'linear-gradient(135deg, #fdfcfb 0%, #f8f4f0 100%)',
-          border: '1.5px solid var(--hub-tan)',
-          borderRadius: 16,
-          padding: '2.5rem 2rem',
-          textAlign: 'center',
-          boxShadow: '0 4px 24px rgba(44,24,16,0.06)',
-        }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📍</div>
-          <h3 className="font-playfair" style={{ fontSize: '1.5rem', color: 'var(--hub-espresso)', marginBottom: '0.5rem', fontWeight: 700 }}>
-            Our Location
-          </h3>
-          <p style={{ color: 'var(--hub-brown)', fontSize: '1.05rem', fontWeight: 500, marginBottom: '1.25rem' }}>
-            Point Breeze &bull; Philadelphia, PA 19146
-          </p>
-          <div style={{
-            background: 'var(--hub-espresso)',
-            color: '#fff',
-            borderRadius: 12,
-            padding: '1.5rem',
-            marginBottom: '1.25rem',
-          }}>
-            <p style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              🚧 Coming Soon
-            </p>
-            <p style={{ fontSize: '0.95rem', opacity: 0.85, lineHeight: 1.6 }}>
-              We&apos;ve secured a property and are currently building out BrewHub&apos;s permanent home.
-              Stay tuned for our grand opening!
-            </p>
-          </div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--hub-brown)', lineHeight: 1.7 }}>
-            Follow us for construction updates, sneak peeks, and opening day announcements.
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginTop: '1rem' }}>
-            <a
-              href="https://instagram.com/brewhubphl"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hero-btn"
-              style={{ fontSize: '0.85rem', padding: '0.6rem 1.25rem' }}
-            >
-              Instagram
-            </a>
-            <a
-              href="https://facebook.com/thebrewhubphl"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hero-btn"
-              style={{ fontSize: '0.85rem', padding: '0.6rem 1.25rem', background: 'var(--hub-brown)' }}
-            >
-              Facebook
-            </a>
-          </div>
-        </div>
-      </section>
     </div>
     </>
   );

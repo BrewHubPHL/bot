@@ -240,6 +240,53 @@ exports.handler = async (event) => {
       };
     }
 
+    // ── ALREADY-PAST-PREPARING GUARD (cash/comp idempotency) ──
+    // POS sends status='preparing' + paymentMethod='cash'. If the order
+    // already raced past preparing (KDS advanced it), treat as success
+    // and backfill receipt/paid_at if needed.
+    const PAST_PREPARING_STATUSES = ['preparing', 'ready', 'completed'];
+    if (status === 'preparing' && paymentMethod && ['cash', 'comp'].includes(paymentMethod)
+        && PAST_PREPARING_STATUSES.includes(currentOrder.status)
+        && currentOrder.status !== status) {
+      // Backfill receipt if missing
+      try {
+        const { data: existingReceipt } = await supabase
+          .from('receipt_queue').select('id').eq('order_id', orderId).limit(1).single();
+        if (!existingReceipt) {
+          const { data: fullOrder } = await supabase
+            .from('orders').select('*').eq('id', orderId).single();
+          const { data: lineItems } = await supabase
+            .from('coffee_orders').select('drink_name, price').eq('order_id', orderId);
+          if (fullOrder) {
+            const receiptText = generateReceiptString(fullOrder, lineItems || []);
+            await queueReceipt(supabase, orderId, receiptText);
+          }
+        }
+      } catch (receiptErr) {
+        console.error('[RECEIPT] Non-fatal receipt backfill error:', receiptErr.message);
+      }
+      // Backfill paid_at if not already set
+      try {
+        await supabase.from('orders')
+          .update({ paid_at: new Date().toISOString(), paid_amount_cents: currentOrder.total_amount_cents || 0 })
+          .eq('id', orderId)
+          .is('paid_at', null);
+      } catch (paidErr) {
+        console.error('[UPDATE-ORDER] Non-fatal paid_at backfill error:', paidErr.message);
+      }
+      return {
+        statusCode: 200,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          success: true,
+          idempotent: true,
+          alreadyPastPreparing: true,
+          currentStatus: currentOrder.status,
+          order: [currentOrder],
+        }),
+      };
+    }
+
     const allowed = VALID_TRANSITIONS[currentOrder.status] || [];
     if (!allowed.includes(status)) {
       return {
@@ -247,6 +294,7 @@ exports.handler = async (event) => {
         headers: CORS_HEADERS,
         body: JSON.stringify({
           error: `Cannot transition from '${currentOrder.status}' to '${status}'`,
+          currentStatus: currentOrder.status,
         }),
       };
     }
@@ -352,13 +400,17 @@ exports.handler = async (event) => {
       try {
         const paidAt = new Date().toISOString();
         const paidAmountCents = currentOrder.total_amount_cents || 0;
-        await supabase
+        // Only stamp paid_at if not already set (idempotent on retry)
+        const { data: paidUpdate } = await supabase
           .from('orders')
           .update({ paid_at: paidAt, paid_amount_cents: paidAmountCents })
-          .eq('id', orderId);
+          .eq('id', orderId)
+          .is('paid_at', null)
+          .select('paid_at, paid_amount_cents')
+          .maybeSingle();
         // Update local copy for receipt generation
-        data[0].paid_at = paidAt;
-        data[0].paid_amount_cents = paidAmountCents;
+        data[0].paid_at = paidUpdate?.paid_at || data[0].paid_at || paidAt;
+        data[0].paid_amount_cents = paidUpdate?.paid_amount_cents || data[0].paid_amount_cents || paidAmountCents;
       } catch (paidErr) {
         console.error('[UPDATE-ORDER] Non-fatal paid_at stamp error:', paidErr.message);
       }

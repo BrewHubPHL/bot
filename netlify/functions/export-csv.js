@@ -4,7 +4,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, sanitizedError } = require('./_auth');
-const { formBucket } = require('./_token-bucket');
+const { staffBucket } = require('./_token-bucket');
 const { sanitizeInput } = require('./_sanitize');
 
 const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -67,7 +67,7 @@ exports.handler = async (event) => {
   const clientIp = event.headers['x-nf-client-connection-ip'] || event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'unknown';
   const managerEmail = (auth.user && (auth.user.email || auth.user?.user?.email)) ? String(auth.user.email || auth.user?.user?.email).toLowerCase() : 'unknown_manager';
   const rlKey = `exportcsv:${managerEmail}:${clientIp}`;
-  const rl = formBucket.consume(rlKey);
+  const rl = staffBucket.consume(rlKey);
   if (!rl.allowed) {
     return { statusCode: 429, headers: Object.assign({}, headers, { 'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)) }), body: JSON.stringify({ error: 'Too many requests' }) };
   }

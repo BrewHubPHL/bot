@@ -231,6 +231,16 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
     prevStatuses.current = nextStatuses
   }, [orders])
 
+  // Auto-dismiss popups after 12 seconds
+  useEffect(() => {
+    if (popups.length === 0) return
+    const timer = setInterval(() => {
+      const now = Date.now()
+      setPopups((p) => p.filter((x) => now - x.when < 12_000))
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [popups.length])
+
   return (
     <>
       {/* ── Keyframe animations injected once ── */}
@@ -248,15 +258,15 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
           to   { transform: rotate(360deg); }
         }
 
-        /* ── Flying coffee mug ── */
+        /* ── Flying coffee mug (delivers AIM mail to popup corner) ── */
         @keyframes mugFly {
-          0%   { bottom: 15%; left: 70%; opacity: 0; transform: scale(0.7) rotate(5deg); }
+          0%   { top: 2%; left: 10%; opacity: 0; transform: scale(0.6) rotate(-10deg); }
           8%   { opacity: 1; transform: scale(1) rotate(0deg); }
-          25%  { bottom: 35%; left: 55%; transform: scale(1) rotate(-8deg); }
-          50%  { bottom: 55%; left: 35%; transform: scale(1.1) rotate(5deg); }
-          75%  { bottom: 72%; left: 20%; transform: scale(1) rotate(-5deg); }
+          25%  { top: 20%; left: 30%; transform: scale(1) rotate(8deg); }
+          50%  { top: 45%; left: 55%; transform: scale(1.1) rotate(-5deg); }
+          75%  { top: 65%; left: 75%; transform: scale(1) rotate(5deg); }
           92%  { opacity: 1; transform: scale(0.9) rotate(0deg); }
-          100% { bottom: 85%; left: 10%; opacity: 0; transform: scale(0.6) rotate(-10deg); }
+          100% { top: 82%; left: 92%; opacity: 0; transform: scale(0.6) rotate(10deg); }
         }
         @keyframes wingFlap {
           0%   { transform: rotateX(0deg) scaleY(1); }
@@ -324,46 +334,38 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
         }
         .aim-antiburn { animation: aimAntiburn 240s linear infinite; cursor: none; }
 
-        /* ── Portrait TV: zoom for viewing distance ── */
-        /* 1080×1920 portrait (35-40" hung vertically) */
-        @media (orientation: portrait) and (min-width: 800px) {
-          .aim-tv-scale { zoom: 1.4; }
-        }
-        /* 4K portrait */
-        @media (orientation: portrait) and (min-width: 2000px) {
-          .aim-tv-scale { zoom: 2.2; }
-        }
+        /* TV scale no longer needed — window is full-viewport */
       `}</style>
 
       {/* ── Page background ── */}
       <div
         style={{ background: "oklch(0.12 0.02 20)", minHeight: "100vh" }}
-        className="aim-antiburn flex items-center justify-center p-4"
+        className="aim-antiburn flex flex-col"
       >
-        {/* ── Buddy List window ── */}
+        {/* ── Buddy List window (full-screen Win95) ── */}
         <div
-          className="aim-window aim-tv-scale flex flex-col"
+          className="aim-window flex flex-col"
           style={{
-            width: "min(480px, 92vw)",
+            width: "100vw",
+            height: "100vh",
             background: "#c0c0c0",
-            border: "2px solid",
-            borderColor: "#fff #808080 #808080 #fff",
-            boxShadow: "2px 2px 0 1px #000",
+            border: "none",
+            boxShadow: "none",
           }}
         >
           {/* ── Title bar ── */}
           <div
-            style={{ background: "#000080", padding: "3px 6px" }}
+            style={{ background: "#000080", padding: "6px 12px" }}
             className="flex items-center justify-between select-none"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               {/* AIM flame logo approximation */}
-              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 14 14" aria-hidden="true">
                 <ellipse cx="7" cy="10" rx="5" ry="4" fill="#ffff00" />
                 <ellipse cx="7" cy="7"  rx="3" ry="5" fill="#ffa500" />
                 <ellipse cx="7" cy="5"  rx="2" ry="3" fill="#ff4400" />
               </svg>
-              <span style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>
+              <span style={{ color: "#fff", fontSize: 20, fontWeight: "bold" }}>
                 BrewHub Buddy List
               </span>
             </div>
@@ -378,9 +380,9 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
                     background: "#c0c0c0",
                     border: "2px solid",
                     borderColor: "#fff #808080 #808080 #fff",
-                    width: 18,
-                    height: 16,
-                    fontSize: 9,
+                    width: 28,
+                    height: 24,
+                    fontSize: 14,
                     lineHeight: 1,
                     cursor: "default",
                     padding: 0,
@@ -398,8 +400,8 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
 
           {/* ── Menu bar ── */}
           <div
-            className="flex gap-3 px-2 py-1 select-none"
-            style={{ fontSize: 11, borderBottom: "1px solid #808080" }}
+            className="flex gap-4 px-3 py-2 select-none"
+            style={{ fontSize: 16, borderBottom: "1px solid #808080" }}
           >
             {["People", "View", "Help"].map((m) => (
               <span
@@ -414,7 +416,7 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
           </div>
 
           {/* ── Buddy list body ── */}
-          <div className="win-inset m-1" style={{ background: "#fff", flex: 1, position: "relative", overflow: "hidden" }}>
+          <div className="win-inset m-2" style={{ background: "#fff", flex: 1, position: "relative", overflow: "hidden" }}>
             {/* ── Flying coffee mug (Win95 nostalgia) ── */}
             {mugVisible && (
               <div key={mugKey.current} className="flying-mug">
@@ -437,7 +439,7 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
                   icon={<RunningMan bounce={freshReadyIds.has(order.id)} />}
                   handle={aimHandle(order)}
                   meta={
-                    <span style={{ color: "#008000", fontWeight: "bold", fontSize: 10 }}>
+                    <span style={{ color: "#008000", fontWeight: "bold", fontSize: 16 }}>
                       READY ✓
                     </span>
                   }
@@ -462,7 +464,7 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
                   icon={<HourglassIcon />}
                   handle={aimHandle(order)}
                   meta={
-                    <span style={{ color: "#808080", fontSize: 10 }}>
+                    <span style={{ color: "#808080", fontSize: 16 }}>
                       {order.status.replace("_", " ").toUpperCase()}
                     </span>
                   }
@@ -491,7 +493,7 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
                       style={{
                         color: "#cc0000",
                         fontWeight: "bold",
-                        fontSize: 10,
+                        fontSize: 16,
                         animation: "warnBlink 1.2s steps(2,start) infinite",
                       }}
                     >
@@ -512,7 +514,7 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
               background: "#c0c0c0",
               borderTop: "1px solid #808080",
               borderBottom: "1px solid #fff",
-              padding: "4px 6px 6px",
+              padding: "6px 10px 8px",
               overflow: "hidden",
             }}
           >
@@ -569,13 +571,13 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
               key={dialupPhase}
               className="dial-phase-text"
               style={{
-                fontSize: 10,
+                fontSize: 14,
                 color: "#000080",
-                marginTop: 3,
+                marginTop: 4,
                 fontFamily: "inherit",
                 textAlign: "center",
-                height: 14,
-                lineHeight: "14px",
+                height: 18,
+                lineHeight: "18px",
               }}
             >
               {DIALUP_PHASES[dialupPhase]}
@@ -583,16 +585,16 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
           </div>
 
           {/* ── "Add Buddy" / Active Neighbors bar ── */}
-          <div className="flex items-center gap-2 px-2 py-2">
+          <div className="flex items-center gap-3 px-3 py-2">
             <div
-              className="win-inset flex-1 flex items-center gap-2 px-2"
-              style={{ background: "#fff", height: 22 }}
+              className="win-inset flex-1 flex items-center gap-2 px-3"
+              style={{ background: "#fff", height: 32 }}
             >
-              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 12 12" aria-hidden="true">
                 <circle cx="5" cy="5" r="4" fill="none" stroke="#808080" strokeWidth="1.5" />
                 <line x1="8" y1="8" x2="11" y2="11" stroke="#808080" strokeWidth="1.5" />
               </svg>
-              <span style={{ fontSize: 11, color: "#808080" }}>
+              <span style={{ fontSize: 15, color: "#808080" }}>
                 {activeCount} Active Neighbor{activeCount !== 1 ? "s" : ""}
               </span>
             </div>
@@ -602,8 +604,8 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
               className="win-raised"
               style={{
                 background: "#c0c0c0",
-                fontSize: 11,
-                padding: "2px 8px",
+                fontSize: 15,
+                padding: "4px 12px",
                 cursor: "default",
                 border: "2px solid",
                 borderColor: "#fff #808080 #808080 #fff",
@@ -615,8 +617,8 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
 
           {/* ── Status strip ── */}
           <div
-            className="win-inset mx-1 mb-1 px-2 py-1 flex items-center gap-2"
-            style={{ background: "#c0c0c0", fontSize: 10 }}
+            className="win-inset mx-2 mb-2 px-3 py-2 flex items-center gap-3"
+            style={{ background: "#c0c0c0", fontSize: 15 }}
           >
             <span
               style={{
@@ -636,34 +638,67 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
           </div>
         </div>
       </div>
-      {/* ── Ready popups (AIM-style) ── */}
-      <div style={{ position: "fixed", right: 16, bottom: 16, zIndex: 99999 }}>
+      {/* ── Ready/Completed popups (AIM Instant Message windows) ── */}
+      <div style={{ position: "fixed", right: 24, bottom: 24, zIndex: 99999, display: "flex", flexDirection: "column-reverse", gap: 10, maxHeight: "40vh", overflow: "hidden", width: "20vw", minWidth: 280 }}>
         {popups.map((pb, i) => (
           <div
-            key={pb.id + "-popup-" + i}
+            key={pb.id + "-popup-" + pb.status + "-" + i}
             className="aim-window"
             style={{
-              width: 220,
-              marginTop: 8,
+              width: "100%",
               background: "#c0c0c0",
               border: "2px solid",
               borderColor: "#fff #808080 #808080 #fff",
               boxShadow: "2px 2px 0 1px #000",
+              animation: "aimBounce 0.4s ease-out",
             }}
             aria-live="polite"
           >
-            <div style={{ background: "#000080", padding: "4px 8px", display: "flex", justifyContent: "space-between" }}>
-              <div style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>Buddy</div>
-              <div style={{ color: "#fff", fontSize: 12 }}>{new Date(pb.when).toLocaleTimeString()}</div>
+            {/* IM title bar */}
+            <div style={{ background: pb.status === "completed" ? "#800080" : "#000080", padding: "5px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="flex items-center gap-2">
+                <img src="/aol.png" alt="" width={16} height={16} style={{ imageRendering: "pixelated" }} />
+                <span style={{ color: "#fff", fontSize: 14, fontWeight: "bold" }}>
+                  {pb.handle} - Instant Message
+                </span>
+              </div>
+              <button
+                onClick={() => setPopups((p) => p.filter((_, idx) => idx !== i))}
+                style={{
+                  background: "#c0c0c0",
+                  border: "2px solid",
+                  borderColor: "#fff #808080 #808080 #fff",
+                  width: 22, height: 20, fontSize: 12, lineHeight: 1,
+                  cursor: "default", padding: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+                aria-label="Close"
+              >
+                ✕
+              </button>
             </div>
-            <div style={{ padding: 8, display: "flex", alignItems: "center", gap: 8 }}>
-              <img src="/aol.png" alt="AIM" width={20} height={20} style={{ imageRendering: "pixelated" }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: "bold" }}>{pb.handle}</div>
-                <div style={{ color: pb.status === "completed" ? "#0000c0" : "#008000", fontSize: 12 }}>
-                  {pb.status === "completed" ? "PICKED UP ✓" : "READY ✓"}
+            {/* IM body */}
+            <div className="win-inset" style={{ margin: 6, background: "#fff", padding: 10 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <img src="/aol.png" alt="AIM" width={28} height={28} style={{ imageRendering: "pixelated", flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontWeight: "bold", fontSize: 15, color: pb.status === "completed" ? "#800080" : "#000080" }}>
+                    {pb.handle}:
+                  </div>
+                  <div style={{ fontSize: 15, marginTop: 3 }}>
+                    {pb.status === "completed"
+                      ? "Order picked up! 🎉 Goodbye!"
+                      : "Your order is READY! Come grab it! ☕"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#808080", marginTop: 4 }}>
+                    {new Date(pb.when).toLocaleTimeString()}
+                  </div>
                 </div>
               </div>
+            </div>
+            {/* IM status bar */}
+            <div style={{ padding: "4px 10px 6px", fontSize: 12, color: "#404040", borderTop: "1px solid #808080" }}>
+              {pb.status === "completed" ? "☑ Buddy has signed off" : "☕ Buddy is ready for pickup"}
             </div>
           </div>
         ))}
@@ -687,10 +722,10 @@ function CategoryHeader({
 }) {
   return (
     <div
-      className="flex items-center justify-between px-2 py-0.5 select-none"
+      className="flex items-center justify-between px-3 py-1 select-none"
       style={{
         background: "#c0c0c0",
-        fontSize: 11,
+        fontSize: 16,
         fontWeight: "bold",
         color,
         borderBottom: "1px solid #808080",
@@ -705,7 +740,7 @@ function CategoryHeader({
 
 function EmptyRow({ label }: { label: string }) {
   return (
-    <div className="px-6 py-0.5" style={{ fontSize: 11, color: "#808080", fontStyle: "italic" }}>
+    <div className="px-6 py-1" style={{ fontSize: 15, color: "#808080", fontStyle: "italic" }}>
       {label}
     </div>
   )
@@ -730,8 +765,8 @@ function BuddyRow({
 }) {
   return (
     <div
-      className="aim-row flex items-center justify-between px-3 py-0.5 cursor-default"
-      style={{ fontSize: 12 }}
+      className="aim-row flex items-center justify-between px-4 py-1 cursor-default"
+      style={{ fontSize: 18 }}
     >
       <div className="flex items-center gap-2">
         {icon}
@@ -747,7 +782,7 @@ function BuddyRow({
       </div>
       <div className="flex items-center gap-2">
         {meta}
-        <span style={{ fontSize: 10, color: "#808080", minWidth: 28, textAlign: "right" }}>
+        <span style={{ fontSize: 14, color: "#808080", minWidth: 40, textAlign: "right" }}>
           {wait}
         </span>
       </div>

@@ -16,15 +16,12 @@ export default function SiteLayout({
           </Link>
           <div className="hidden md:flex space-x-6">
             <Link href="/shop" className="nav-link">Shop</Link>
-            <Link href="/cafe" className="nav-link">Order Cafe</Link>
             <Link href="/about" className="nav-link">Our Story</Link>
-            <Link href="/#location" className="nav-link">Location</Link>
-            <Link href="/careers" className="nav-link">Careers</Link>
+            <Link href="/location" className="nav-link">Location</Link>
             <a href="mailto:info@brewhubphl.com" className="nav-link">Contact</a>
           </div>
           {/* Mobile Menu */}
           <div className="md:hidden flex items-center gap-3">
-            <Link href="/cafe" className="nav-link text-sm">Cafe</Link>
             <Link href="/shop" className="nav-link text-sm">Shop</Link>
           </div>
         </div>
