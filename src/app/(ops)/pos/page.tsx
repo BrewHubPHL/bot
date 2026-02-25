@@ -4,15 +4,16 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useOpsSession } from "@/components/OpsGate";
 import {
-  Coffee, CupSoda, Croissant, ShoppingCart, Plus, Minus, Trash2, X,
-  ChevronRight, Clock, CheckCircle2, Loader2, CreditCard, Monitor,
-  AlertTriangle, RotateCcw, ScanLine, UserCheck, Ticket, Video, VideoOff,
-  Gift, WifiOff, RefreshCw
+  Coffee, CupSoda, Croissant, ShoppingCart, Plus, X,
+  ChevronRight, CheckCircle2, Loader2, CreditCard, Monitor,
+  AlertTriangle, RotateCcw, ScanLine, UserCheck, Ticket,
+  Gift, WifiOff, RefreshCw, Package, Printer
 } from "lucide-react";
 import SwipeCartItem from "@/components/SwipeCartItem";
 import { useConnection } from "@/lib/useConnection";
 import OfflineBanner from "@/components/OfflineBanner";
 import OnscreenKeyboard from "@/components/OnscreenKeyboard";
+import { toUserSafeMessage, toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import {
   cacheMenu, getCachedMenu, queueOfflineOrder, getUnsyncedOrders,
   markOrderSynced, clearSyncedOrders, type OfflineOrder, type CachedMenuItem,
@@ -82,6 +83,12 @@ const CATEGORIES: { key: string; label: string; icon: React.ReactNode; match: (n
     icon: <Croissant size={18} />,
     match: (n) => /croissant|muffin|scone|bagel|sandwich|toast|cookie|cake|pastry|wrap/i.test(n),
   },
+  {
+    key: "merch",
+    label: "Merch",
+    icon: <Package size={18} />,
+    match: (n) => /tee|shirt|hat|cap|hoodie|beanie|mug|tumbler|sticker|tote|bag|merch|pin|patch|poster/i.test(n),
+  },
 ];
 
 const DRINK_MODIFIERS: Modifier[] = [
@@ -99,6 +106,9 @@ function categorize(name: string): string {
   }
   return "food"; // default
 }
+
+/** Categories that skip the drink modifier panel */
+const NO_MODIFIER_CATEGORIES = new Set(["food", "merch"]);
 
 function cents(c: number) {
   return `$${(c / 100).toFixed(2)}`;
@@ -172,6 +182,14 @@ export default function POSPage() {
   const [guestFirstName, setGuestFirstName] = useState<string>("");
   const guestInputRef = useRef<HTMLInputElement | null>(null);
   const [showOnscreenKeyboard, setShowOnscreenKeyboard] = useState(false);
+
+  // Comp modal
+  const [compModalOpen, setCompModalOpen] = useState(false);
+  const [compReason, setCompReason] = useState("");
+  const [compSubmitting, setCompSubmitting] = useState(false);
+
+  // Receipt reprint
+  const [reprintLoading, setReprintLoading] = useState(false);
 
   // POS-6: ref-stable handleLoyaltyScan so startLoyaltyDetection never holds a stale closure
   const handleLoyaltyScanRef = useRef<(rawValue: string) => Promise<void>>(null!);
@@ -317,7 +335,11 @@ export default function POSPage() {
                 "X-BrewHub-Action": "true",
               },
               body: JSON.stringify({
-                items: order.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+                items: order.items.map((i) => ({
+                  product_id: i.product_id,
+                  quantity: i.quantity,
+                  customizations: i.customizations,
+                })),
                 offline_id: order.id,
                 offline_created_at: order.created_at,
                 payment_method: order.payment_method,
@@ -448,6 +470,7 @@ export default function POSPage() {
         name: ci.name,
         quantity: ci.quantity,
         price_cents: ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0),
+        customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => m.name) : undefined,
       })),
       total_cents: total,
       payment_method: "cash",
@@ -511,6 +534,30 @@ export default function POSPage() {
     setVoucherRetryCode(null);
   }, []);
 
+  /* ── Cancel order: delete pending DB row then clear cart ──── */
+  const handleCancelOrder = useCallback(async () => {
+    if (!createdOrderId) {
+      clearCart();
+      return;
+    }
+    try {
+      const token = getAccessToken();
+      await fetch("/.netlify/functions/cancel-order", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({ orderId: createdOrderId }),
+      });
+    } catch (e: unknown) {
+      console.error("[POS] Failed to cancel order:", (e as Error)?.message);
+    } finally {
+      clearCart();
+    }
+  }, [createdOrderId, clearCart]);
+
   /* ─── Builder panel ──────────────────────────────────────────── */
   const openBuilder = (item: MenuItem) => {
     setSelectedItem(item);
@@ -530,8 +577,8 @@ export default function POSPage() {
   };
 
   const quickAdd = (item: MenuItem) => {
-    // For food items, skip builder and add directly
-    if (categorize(item.name) === "food") {
+    // For food & merch items, skip the drink modifier builder and add directly
+    if (NO_MODIFIER_CATEGORIES.has(categorize(item.name))) {
       addToCart(item, []);
     } else {
       openBuilder(item);
@@ -576,7 +623,7 @@ export default function POSPage() {
       setLoyaltyScanning(true);
       startLoyaltyDetection();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Camera access denied";
+      const msg = toUserSafeMessageFromUnknown(err, "Camera access denied.");
       setLoyaltyCamError(msg);
       haptic("error");
     }
@@ -643,7 +690,7 @@ export default function POSPage() {
 
       if (!resp.ok || !result.found) {
         haptic("error");
-        setLoyaltyCamError(result.error || `No account found for ${email}`);
+        setLoyaltyCamError(toUserSafeMessage(result.error, "No loyalty account found for this code."));
         loyaltyScanLock.current = false;
         return;
       }
@@ -658,7 +705,7 @@ export default function POSPage() {
       haptic("success");
       closeLoyaltyScanner();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Lookup failed";
+      const msg = toUserSafeMessageFromUnknown(err, "Unable to look up loyalty right now.");
       setLoyaltyCamError(msg);
       haptic("error");
       loyaltyScanLock.current = false;
@@ -688,9 +735,11 @@ export default function POSPage() {
 
       // Build cart payload — one entry per distinct item with quantity
       // Uses product_id (UUID) for secure server-side price lookup
-      const payload: { product_id: string; quantity: number }[] = cart.map((ci) => ({
+      // Include customizations (modifier names) for server-side pricing
+      const payload = cart.map((ci) => ({
         product_id: ci.productId,
         quantity: ci.quantity,
+        customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => m.name) : undefined,
       }));
 
       // Attach loyalty customer fields when scanned
@@ -784,9 +833,10 @@ export default function POSPage() {
     if (!name) return; // noop if blank
     setGuestModalOpen(false);
 
-    const payload: { product_id: string; quantity: number }[] = cart.map((ci) => ({
+    const payload = cart.map((ci) => ({
       product_id: ci.productId,
       quantity: ci.quantity,
+      customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => m.name) : undefined,
     }));
 
     const checkoutBody: Record<string, unknown> = { items: payload, terminal: true };
@@ -810,18 +860,50 @@ export default function POSPage() {
      This gives us <3 second order-to-KDS visibility. */
   const paymentPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paymentPollOrderRef = useRef<string | null>(null);
+  const paymentPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const POLL_DEADLINE_MS = 45_000; // 45s hard ceiling for reconciliation polling
 
   const stopPaymentPolling = useCallback(() => {
     if (paymentPollRef.current) {
       clearInterval(paymentPollRef.current);
       paymentPollRef.current = null;
     }
+    if (paymentPollTimeoutRef.current) {
+      clearTimeout(paymentPollTimeoutRef.current);
+      paymentPollTimeoutRef.current = null;
+    }
     paymentPollOrderRef.current = null;
   }, []);
 
-  const startPaymentPolling = useCallback((orderId: string) => {
+  const startPaymentPolling = useCallback((orderId: string, options?: { isReconciliation?: boolean }) => {
     stopPaymentPolling(); // Clear any existing poll
     paymentPollOrderRef.current = orderId;
+    const isReconciliation = options?.isReconciliation ?? false;
+
+    // H5: bounded timeout — if polling never confirms, surface a clear
+    // verification-pending message so the cashier doesn't hang forever.
+    paymentPollTimeoutRef.current = setTimeout(() => {
+      stopPaymentPolling();
+      if (isReconciliation) {
+        // 409 reconciliation path timed out — do NOT show success
+        setTerminalStatus("");
+        setErrorMsg(
+          "Verification pending — could not confirm payment within timeout. " +
+          "Please check the terminal or manager dashboard before retrying."
+        );
+        setTicketPhase("error");
+        haptic("error");
+      } else {
+        // Normal payment polling timed out
+        setTerminalStatus("");
+        setErrorMsg(
+          "Payment verification timed out. The customer may have tapped — " +
+          "check the terminal or manager dashboard."
+        );
+        setTicketPhase("error");
+        haptic("error");
+      }
+    }, POLL_DEADLINE_MS);
 
     const poll = async () => {
       // Stop if order changed or component unmounted
@@ -853,9 +935,11 @@ export default function POSPage() {
           stopPaymentPolling();
           setTicketPhase("paid");
           setTerminalStatus(
-            data.confirmedVia === "poll"
-              ? "Payment confirmed! Order is on the KDS."
-              : "Payment confirmed!"
+            isReconciliation
+              ? "Payment verified \u2014 order confirmed on KDS."
+              : data.confirmedVia === "poll"
+                ? "Payment confirmed! Order is on the KDS."
+                : "Payment confirmed!"
           );
           haptic("success");
           setTimeout(() => {
@@ -874,6 +958,8 @@ export default function POSPage() {
           // Still pending — update status message for staff visibility
           if (data.message) {
             setTerminalStatus(data.message);
+          } else if (isReconciliation) {
+            setTerminalStatus("Verifying payment status\u2026");
           }
         }
       } catch {
@@ -917,17 +1003,14 @@ export default function POSPage() {
       clearTimeout(timeout);
 
       if (resp.status === 409) {
-        // 409 = order already in a post-payment status. Treat as success.
-        setTicketPhase("paid");
-        setTerminalStatus("Payment already processed!");
-        haptic("success");
+        // H5 fix: 409 = order may already be in a post-payment status, but we
+        // must NOT assume success. Transition to awaiting_confirmation and use
+        // the existing polling flow to require explicit COMPLETED / ALREADY_CONFIRMED
+        // from the backend before showing the paid UI.
         paymentRetryRef.current = 0;
-        setTimeout(() => {
-          setCart([]);
-          setTicketPhase("building");
-          setCreatedOrderId(null);
-          setTerminalStatus("");
-        }, 3000);
+        setTicketPhase("paying");
+        setTerminalStatus("Order conflict detected \u2014 verifying payment status\u2026");
+        startPaymentPolling(createdOrderId, { isReconciliation: true });
         return;
       }
 
@@ -1005,19 +1088,32 @@ export default function POSPage() {
 
       if (!resp.ok) {
         // 409 = order already moved past pending (e.g., KDS tapped "Start"
-        // or the abandon-cron fired). Treat as recoverable — the payment_id
-        // may not have been recorded, but the order is alive on the KDS.
+        // or the abandon-cron fired). Parse the body to decide if it's safe.
         if (resp.status === 409) {
-          console.warn("[POS] Cash payment got 409 — order already transitioned, treating as success");
-          setTicketPhase("paid");
-          setTerminalStatus("Payment recorded (order already active)");
-          setTimeout(() => {
-            setCart([]);
-            setTicketPhase("building");
-            setCreatedOrderId(null);
-            setTerminalStatus("");
-          }, 3000);
-          return;
+          const conflict = await resp.json().catch(() => ({} as Record<string, unknown>));
+          const currentStatus = (conflict.currentStatus ?? conflict.status ?? "").toString().toLowerCase();
+          const safeStatuses = ["preparing", "paid", "ready", "picked_up"];
+
+          if (safeStatuses.includes(currentStatus)) {
+            console.warn(`[POS] Cash payment 409 — backend status "${currentStatus}", safe to proceed`);
+            setTicketPhase("paid");
+            setTerminalStatus("Payment recorded (order already active)");
+            setTimeout(() => {
+              setCart([]);
+              setTicketPhase("building");
+              setCreatedOrderId(null);
+              setTerminalStatus("");
+            }, 3000);
+            return;
+          }
+
+          // Unsafe / unknown status — surface error instead of false success
+          console.error(`[POS] Cash payment 409 — backend status "${currentStatus}", not safe`);
+          throw new Error(
+            currentStatus
+              ? `Order is ${currentStatus} — cannot record cash payment`
+              : "Order conflict: unable to confirm payment (status unknown)"
+          );
         }
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.error || "Failed to record payment");
@@ -1036,6 +1132,91 @@ export default function POSPage() {
       const msg = e instanceof Error ? e.message : "Failed to record payment";
       setErrorMsg(msg);
       setTicketPhase("error");
+    }
+  };
+
+  /* ─── Comp Order (requires reason) ────────────────────────────── */
+  const handleCompOrder = async () => {
+    if (!createdOrderId) return;
+    const reason = compReason.trim();
+    if (!reason || reason.length < 2) return;
+
+    setCompSubmitting(true);
+    setCompModalOpen(false);
+
+    try {
+      const token = getAccessToken();
+      const resp = await fetch("/.netlify/functions/update-order-status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({
+          orderId: createdOrderId,
+          status: "preparing",
+          paymentMethod: "comp",
+          reason,
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to comp order");
+      }
+
+      setTicketPhase("paid");
+      setTerminalStatus("Comped — order on KDS");
+      haptic("success");
+
+      setTimeout(() => {
+        setCart([]);
+        setTicketPhase("building");
+        setCreatedOrderId(null);
+        setTerminalStatus("");
+        setCompReason("");
+      }, 3000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to comp order";
+      setErrorMsg(msg);
+      setTicketPhase("error");
+    } finally {
+      setCompSubmitting(false);
+    }
+  };
+
+  /* ─── Reprint Receipt ─────────────────────────────────────────── */
+  const handleReprintReceipt = async () => {
+    if (!createdOrderId) return;
+    setReprintLoading(true);
+    try {
+      const token = getAccessToken();
+      const resp = await fetch("/.netlify/functions/get-receipts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({ orderId: createdOrderId }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.receipt_text) {
+          // Open receipt in a print-friendly window
+          const w = window.open("", "_blank", "width=400,height=600");
+          if (w) {
+            w.document.write(`<pre style="font-family:monospace;font-size:12px;white-space:pre;margin:20px;">${data.receipt_text}</pre>`);
+            w.document.close();
+            w.print();
+          }
+        }
+      }
+    } catch (e: unknown) {
+      console.error("[POS] Reprint failed:", (e as Error)?.message);
+    } finally {
+      setReprintLoading(false);
     }
   };
 
@@ -1140,7 +1321,7 @@ export default function POSPage() {
         haptic("error");
       } else {
         setVoucherPhase("error");
-        setVoucherError(err instanceof Error ? err.message : "Redemption failed");
+        setVoucherError(toUserSafeMessageFromUnknown(err, "Unable to redeem voucher right now."));
         haptic("error");
       }
     }
@@ -1679,11 +1860,18 @@ export default function POSPage() {
                 onClick={handleMarkPaid}
                 className="w-full min-h-[48px] py-3 bg-stone-800 hover:bg-stone-700 active:bg-stone-600 text-stone-300 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
               >
-                <CreditCard size={14} /> Cash / Comp / Already Paid
+                <CreditCard size={14} /> Cash / Already Paid
               </button>
 
               <button
-                onClick={clearCart}
+                onClick={() => { setCompReason(""); setCompModalOpen(true); }}
+                className="w-full min-h-[48px] py-3 bg-stone-800/60 hover:bg-stone-700 active:bg-stone-600 text-stone-400 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+              >
+                <Gift size={14} /> Comp (Free)
+              </button>
+
+              <button
+                onClick={handleCancelOrder}
                 className="w-full min-h-[48px] py-2 text-xs text-stone-600 hover:text-red-400 active:text-red-300 transition-colors text-center rounded-lg"
               >
                 Cancel Order
@@ -1708,6 +1896,16 @@ export default function POSPage() {
               <CheckCircle2 size={28} className="text-emerald-400" />
               <p className="text-sm text-emerald-300 font-semibold">{terminalStatus}</p>
               <p className="text-[10px] text-stone-600 uppercase tracking-widest">Starting next order…</p>
+              {createdOrderId && (
+                <button
+                  onClick={handleReprintReceipt}
+                  disabled={reprintLoading}
+                  className="mt-1 flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-300 transition-colors disabled:opacity-40"
+                >
+                  {reprintLoading ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}
+                  Reprint Receipt
+                </button>
+              )}
             </div>
           )}
 
@@ -1798,6 +1996,45 @@ export default function POSPage() {
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/* ═══════ Comp Reason Modal ═══════ */}
+      {compModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 animate-in fade-in duration-200">
+          <div className="bg-stone-900 border border-stone-700 rounded-2xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
+            <div className="px-5 py-4 border-b border-stone-800">
+              <h3 className="font-bold text-sm uppercase tracking-[0.15em] text-stone-300">Comp Reason</h3>
+              <p className="text-xs text-stone-500 mt-1">Required — logged for audit</p>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <input
+                type="text"
+                autoFocus
+                maxLength={200}
+                placeholder="e.g. Spilled drink remake, VIP guest…"
+                value={compReason}
+                onChange={(e) => setCompReason(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleCompOrder(); }}
+                className="w-full px-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-sm text-white placeholder-stone-500 focus:outline-none focus:border-amber-500/50"
+              />
+              <div className="flex items-center gap-2 justify-end">
+                <button
+                  onClick={() => setCompModalOpen(false)}
+                  className="px-4 py-2 bg-stone-700 rounded-lg text-sm text-stone-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCompOrder}
+                  disabled={compReason.trim().length < 2 || compSubmitting}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {compSubmitting ? "…" : "Confirm Comp"}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

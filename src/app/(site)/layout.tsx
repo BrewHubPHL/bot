@@ -1,4 +1,5 @@
 import ScrollToTop from "@/components/ScrollToTop";
+import Link from "next/link";
 
 export default function SiteLayout({
   children,
@@ -9,20 +10,22 @@ export default function SiteLayout({
       {/* Premium Glass Nav */}
       <nav className="fixed top-0 w-full z-40 nav-glass shadow-lg">
         <div className="max-w-6xl mx-auto px-6 h-20 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-3">
             <img src="/logo.png" alt="BrewHub Logo" width={48} height={48} className="rounded-full border-2 border-[var(--hub-tan)] shadow-md bg-white" style={{boxShadow:'0 2px 12px 0 rgba(44,24,16,0.10)'}} />
             <span className="nav-logo">BrewHub<span>PHL</span></span>
-          </a>
+          </Link>
           <div className="hidden md:flex space-x-6">
-            <a href="/shop" className="nav-link">Shop</a>
-            <a href="/about" className="nav-link">Our Story</a>
-            <a href="#location" className="nav-link">Location</a>
-            <a href="/careers" className="nav-link">Careers</a>
+            <Link href="/shop" className="nav-link">Shop</Link>
+            <Link href="/cafe" className="nav-link">Order Cafe</Link>
+            <Link href="/about" className="nav-link">Our Story</Link>
+            <Link href="/#location" className="nav-link">Location</Link>
+            <Link href="/careers" className="nav-link">Careers</Link>
             <a href="mailto:info@brewhubphl.com" className="nav-link">Contact</a>
           </div>
           {/* Mobile Menu */}
-          <div className="md:hidden flex items-center">
-            <a href="/shop" className="nav-link text-sm">Shop</a>
+          <div className="md:hidden flex items-center gap-3">
+            <Link href="/cafe" className="nav-link text-sm">Cafe</Link>
+            <Link href="/shop" className="nav-link text-sm">Shop</Link>
           </div>
         </div>
       </nav>
@@ -43,12 +46,12 @@ export default function SiteLayout({
               <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><path d="M17 2.5h-2.5A4.5 4.5 0 0 0 10 7v2H7v4h3v7h4v-7h3l1-4h-4V7a1.5 1.5 0 0 1 1.5-1.5H17V2.5Z" stroke="#3c2f2f" strokeWidth="2"/></svg>
               Facebook
             </a>
-            <a href="/staff" className="nav-link">Staff</a>
-            <a href="/privacy" className="nav-link">Privacy</a>
-            <a href="/terms" className="nav-link">Terms</a>
-            <a href="/about" className="nav-link">About</a>
-            <a href="/careers" className="nav-link">Careers</a>
-            <a href="/portal" className="nav-link">Resident Login</a>
+            <Link href="/staff" className="nav-link">Staff</Link>
+            <Link href="/privacy" className="nav-link">Privacy</Link>
+            <Link href="/terms" className="nav-link">Terms</Link>
+            <Link href="/about" className="nav-link">About</Link>
+            <Link href="/careers" className="nav-link">Careers</Link>
+            <Link href="/portal" className="nav-link">Resident Login</Link>
           </div>
         </div>
       </footer>

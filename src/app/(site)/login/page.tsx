@@ -3,11 +3,11 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { createSupabaseClient } from "@/lib/supabase";
 
-/* ─── Supabase client (browser-only, session persisted) ─── */
+/* ─── Supabase client (browser-only, sessionStorage-scoped) ─── */
 const sb = createSupabaseClient({
   auth: {
     persistSession: true,
-    storageKey: "brewhub-staff-auth",
+    storageKey: "brewhub-staff-session",
     autoRefreshToken: true,
     detectSessionInUrl: false,
   },
@@ -54,7 +54,16 @@ export default function LoginPage() {
     });
 
     if (authError) {
-      setError(authError.message);
+      const raw = (authError.message || "").toLowerCase();
+      let friendly = "Authentication failed. Please try again.";
+      if (raw.includes("invalid login") || raw.includes("invalid credentials")) {
+        friendly = "Incorrect email or password.";
+      } else if (raw.includes("email not confirmed")) {
+        friendly = "Please confirm your email before signing in.";
+      } else if (raw.includes("too many requests") || raw.includes("rate limit")) {
+        friendly = "Too many attempts. Please wait a moment and try again.";
+      }
+      setError(friendly);
       setLoading(false);
       return;
     }

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useOpsSession } from '@/components/OpsGate';
 import { BarChart3, Users, DollarSign, Package, RefreshCw } from 'lucide-react';
+import KdsSection from '@/app/(site)/components/manager/KdsSection';
 
 export default function ManagerDashboard() {
   const { token } = useOpsSession();
@@ -115,6 +116,9 @@ export default function ManagerDashboard() {
           </div>
         ))}
       </div>
+
+      {/* Live KDS — manager sees the same interactive order cards as the baristas */}
+      <KdsSection />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         {/* Inventory View */}

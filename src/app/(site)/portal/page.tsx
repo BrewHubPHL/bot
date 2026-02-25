@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { User as SupaUser } from "@supabase/supabase-js";
+import QRCode from "qrcode";
 import {
   LogOut, Package, Coffee, QrCode, Mail, Lock, User, Phone,
   ShoppingBag, Clock, ChevronRight, Truck,
@@ -44,26 +45,38 @@ function fmtCents(cents: number) {
 }
 
 const STATUS_STYLE: Record<string, string> = {
+  arrived:     "bg-amber-500/15 text-amber-400 border-amber-500/30",
   received:    "bg-amber-500/15 text-amber-400 border-amber-500/30",
   in_transit:  "bg-sky-500/15   text-sky-400   border-sky-500/30",
   picked_up:   "bg-green-500/15 text-green-400 border-green-500/30",
   completed:   "bg-green-500/15 text-green-400 border-green-500/30",
-  paid:        "bg-green-500/15 text-green-400 border-green-500/30",
+  paid:        "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
   pending:     "bg-stone-700/40 text-stone-400 border-stone-600",
+  unpaid:      "bg-orange-500/15 text-orange-400 border-orange-500/30",
+  preparing:   "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  ready:       "bg-sky-500/15   text-sky-400   border-sky-500/30",
   cancelled:   "bg-red-500/15   text-red-400   border-red-500/30",
+  refunded:    "bg-stone-700/40 text-stone-400 border-stone-600",
 };
 function badgeClass(status: string) {
   return STATUS_STYLE[status] ?? STATUS_STYLE.pending;
 }
 function friendlyStatus(s: string) {
   const map: Record<string, string> = {
+    arrived: "Waiting for Pickup",
     received: "Waiting for Pickup",
     in_transit: "In Transit",
     picked_up: "Picked Up",
     completed: "Completed",
-    paid: "Completed",
+    paid: "Order Received",
     pending: "Pending",
+    unpaid: "Pay at Counter",
+    preparing: "Preparing",
+    ready: "Ready for Pickup",
     cancelled: "Cancelled",
+    refunded: "Refunded",
+    abandoned: "Expired",
+    amount_mismatch: "Payment Issue",
   };
   return map[s] ?? s.replace(/_/g, " ");
 }
@@ -108,7 +121,86 @@ export default function ResidentPortal() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loyalty, setLoyalty] = useState({ points: 0 });
   const [qrError, setQrError] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+
+  /* ── Client-side QR generation (H6: UUID never leaves browser) ── */
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    QRCode.toDataURL(`brewhub-loyalty:${user.id}`, {
+      width: 180,
+      margin: 1,
+      color: { dark: "#FFFFFF", light: "#0C0A09" },
+    })
+      .then((url: string) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { if (!cancelled) setQrError(true); });
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  /* ── Client-side barcode for print keychain (H6) ───────── */
+  const drawBarcode128 = useCallback((canvas: HTMLCanvasElement, text: string) => {
+    // Minimal Code 128B renderer — encodes printable ASCII
+    const CODE128B_START = 104;
+    const CODE128_STOP = 106;
+    const PATTERNS: number[][] = [
+      [2,1,2,2,2,3],[2,2,2,1,2,3],[2,2,2,3,2,1],[1,2,1,2,2,4],[1,2,1,4,2,2],
+      [1,4,1,2,2,2],[1,2,2,2,1,4],[1,2,2,4,1,2],[1,4,2,2,1,2],[2,2,1,2,1,4],
+      [2,2,1,4,1,2],[2,4,1,2,1,2],[1,1,2,2,3,2],[1,2,2,1,3,2],[1,2,2,3,1,2],
+      [1,1,3,2,2,2],[1,2,3,1,2,2],[1,2,3,2,2,1],[2,2,3,2,1,1],[2,2,1,1,3,2],
+      [2,2,1,3,1,2],[2,1,3,2,1,2],[2,2,3,1,1,2],[3,1,2,1,3,1],[3,1,1,2,2,2],
+      [3,2,1,1,2,2],[3,2,1,2,2,1],[3,1,2,2,1,2],[3,2,2,1,1,2],[3,2,2,2,1,1],
+      [2,1,2,1,2,3],[2,1,2,3,2,1],[2,3,2,1,2,1],[1,1,1,3,2,3],[1,3,1,1,2,3],
+      [1,3,1,3,2,1],[1,1,2,3,1,3],[1,3,2,1,1,3],[1,3,2,3,1,1],[2,1,1,3,1,3],
+      [2,3,1,1,1,3],[2,3,1,3,1,1],[1,1,2,1,3,3],[1,1,2,3,3,1],[1,3,2,1,3,1],
+      [1,1,3,1,2,3],[1,1,3,3,2,1],[1,3,3,1,2,1],[3,1,3,1,2,1],[2,1,1,3,3,1],
+      [2,3,1,1,3,1],[2,1,3,1,1,3],[2,1,3,3,1,1],[2,1,3,1,3,1],[3,1,1,1,2,3],
+      [3,1,1,3,2,1],[3,3,1,1,2,1],[3,1,2,1,1,3],[3,1,2,3,1,1],[3,3,2,1,1,1],
+      [3,1,4,1,1,1],[2,2,1,4,1,1],[4,3,1,1,1,1],[1,1,1,2,2,4],[1,1,1,4,2,2],
+      [1,2,1,1,2,4],[1,2,1,4,2,1],[1,4,1,1,2,2],[1,4,1,2,2,1],[1,1,2,2,1,4],
+      [1,1,2,4,1,2],[1,2,2,1,1,4],[1,2,2,4,1,1],[1,4,2,1,1,2],[1,4,2,2,1,1],
+      [2,4,1,2,1,1],[2,2,1,1,1,4],[4,1,3,1,1,1],[2,4,1,1,1,2],[1,3,4,1,1,1],
+      [1,1,1,2,4,2],[1,2,1,1,4,2],[1,2,1,2,4,1],[1,1,4,2,1,2],[1,2,4,1,1,2],
+      [1,2,4,2,1,1],[4,1,1,2,1,2],[4,2,1,1,1,2],[4,2,1,2,1,1],[2,1,2,1,4,1],
+      [2,1,4,1,2,1],[4,1,2,1,2,1],[1,1,1,1,4,3],[1,1,1,3,4,1],[1,3,1,1,4,1],
+      [1,1,4,1,1,3],[1,1,4,3,1,1],[4,1,1,1,1,3],[4,1,1,3,1,1],[1,1,3,1,4,1],
+      [1,1,4,1,3,1],[3,1,1,1,4,1],[4,1,1,1,3,1],[2,1,1,4,1,2],[2,1,1,2,1,4],
+      [2,1,1,2,3,2],[2,3,3,1,1,1,2],
+    ];
+    const STOP_PATTERN = PATTERNS[CODE128_STOP];
+    const values: number[] = [CODE128B_START];
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i) - 32;
+      if (code < 0 || code > 94) continue;
+      values.push(code);
+    }
+    let checksum = values[0];
+    for (let i = 1; i < values.length; i++) checksum += values[i] * i;
+    values.push(checksum % 103);
+    const bars: number[] = [];
+    for (const v of values) {
+      const p = PATTERNS[v];
+      if (p) bars.push(...p);
+    }
+    bars.push(...STOP_PATTERN);
+    const barWidth = 1;
+    const totalWidth = bars.reduce((s, b) => s + b, 0) * barWidth + 20;
+    const height = 50;
+    canvas.width = totalWidth;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, totalWidth, height);
+    let x = 10;
+    for (let i = 0; i < bars.length; i++) {
+      if (i % 2 === 0) {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(x, 0, bars[i] * barWidth, height);
+      }
+      x += bars[i] * barWidth;
+    }
+  }, []);
 
   /* ── Auth bootstrap ────────────────────────────────────── */
   useEffect(() => {
@@ -134,6 +226,61 @@ export default function ResidentPortal() {
     return () => subscription.unsubscribe();
   }, []);
 
+  /* ── Realtime subscriptions for orders & parcels ───────── */
+  useEffect(() => {
+    if (!user?.id || !user?.email) return;
+
+    const userId = user.id;
+    const userEmail = String(user.email);
+
+    // Subscribe to order changes for this user
+    const ordersChannel = supabase
+      .channel(`portal-orders-${userId}`)
+      .on(
+        "postgres_changes" as never,
+        { event: "*", schema: "public", table: "orders", filter: `user_id=eq.${userId}` },
+        () => {
+          // Re-fetch the latest 5 orders on any change
+          supabase
+            .from("orders")
+            .select("id, status, total_amount_cents, created_at")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(5)
+            .then(({ data }) => {
+              if (data) setOrders(data);
+            });
+        },
+      )
+      .subscribe();
+
+    // Subscribe to parcel changes for this user's email
+    const parcelsChannel = supabase
+      .channel(`portal-parcels-${userId}`)
+      .on(
+        "postgres_changes" as never,
+        { event: "*", schema: "public", table: "parcels", filter: `recipient_email=eq.${userEmail}` },
+        () => {
+          // Re-fetch active parcels on any change — only show 'arrived' to residents
+          supabase
+            .from("parcels")
+            .select("id, tracking_number, carrier, status, received_at, unit_number")
+            .eq("recipient_email", userEmail)
+            .eq("status", "arrived")
+            .order("received_at", { ascending: false })
+            .then(({ data }) => {
+              if (data) setParcels(data);
+            });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ordersChannel);
+      supabase.removeChannel(parcelsChannel);
+    };
+  }, [user?.id, user?.email]);
+
   /* ── Data loader ───────────────────────────────────────── */
   async function loadData(userId: string, userEmail: string) {
     setDataLoading(true);
@@ -143,7 +290,7 @@ export default function ResidentPortal() {
           .from("parcels")
           .select("id, tracking_number, carrier, status, received_at, unit_number")
           .eq("recipient_email", userEmail)
-          .neq("status", "picked_up")
+          .eq("status", "arrived")
           .order("received_at", { ascending: false }),
         supabase
           .from("orders")
@@ -248,7 +395,6 @@ export default function ResidentPortal() {
   const printKeychain = () => {
     if (!user?.id) return;
     const uid = user.id;
-    const barcodeUrl = `https://barcodeapi.org/api/128/${encodeURIComponent(uid)}`;
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
     const doc = printWindow.document;
@@ -258,10 +404,11 @@ export default function ResidentPortal() {
     const heading = doc.createElement("h3");
     heading.textContent = "BrewHub Loyalty";
     container.appendChild(heading);
-    const img = doc.createElement("img");
-    img.src = barcodeUrl;
-    img.style.width = "100%";
-    container.appendChild(img);
+    // H6: Generate barcode client-side — UUID never leaves the browser
+    const barcodeCanvas = doc.createElement("canvas");
+    drawBarcode128(barcodeCanvas, uid);
+    barcodeCanvas.style.width = "100%";
+    container.appendChild(barcodeCanvas);
     const idP = doc.createElement("p");
     idP.textContent = uid;
     idP.style.fontSize = "8px";
@@ -396,7 +543,7 @@ export default function ResidentPortal() {
   if (isMaintenanceMode) {
     return (
       <div className="min-h-screen bg-stone-950 flex items-center justify-center pt-24 px-4">
-        <div className="flex flex-col items-center justify-center p-8 text-center bg-gray-900 border border-gray-800 rounded-lg shadow-xl max-w-md w-full">
+        <div className="flex flex-col items-center justify-center p-8 text-center bg-stone-900 border border-stone-800 rounded-lg shadow-xl max-w-md w-full">
           <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-5">
             <Coffee size={28} className="text-amber-400" />
           </div>
@@ -457,15 +604,16 @@ export default function ResidentPortal() {
                 {user?.id?.slice(0, 13)}…
               </span>
             </div>
-          ) : (
+          ) : qrDataUrl ? (
             <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(user?.id || "")}&bgcolor=0C0A09&color=FFFFFF`}
+              src={qrDataUrl}
               alt="Loyalty QR Code — show this at the cafe to earn rewards"
               className="mx-auto rounded-lg border border-stone-700"
               width={160}
               height={160}
-              onError={() => setQrError(true)}
             />
+          ) : (
+            <div className="mx-auto h-[160px] w-[160px] animate-pulse rounded-lg bg-stone-800" />
           )}
           <p className="text-stone-600 text-xs mt-3">Show this at the cafe to earn rewards</p>
         </div>

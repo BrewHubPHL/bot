@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   UtensilsCrossed,
   DollarSign,
   Users,
+  MonitorPlay,
+  Package,
+  Truck,
 } from "lucide-react";
 import {
   DesktopTabNav,
@@ -23,12 +26,25 @@ import ReceiptRoll from "@/app/(site)/components/manager/ReceiptRoll";
 /* ─── New hiring viewer (co-located) ────────────────────── */
 import HiringViewer from "./HiringViewer";
 
+/* ─── Queue monitor (manager-only) ──────────────────────── */
+import QueueMonitor from "./QueueMonitor";
+
+/* ─── Parcels departure board (manager-only) ─────────────── */
+import ParcelsMonitor from "./ParcelsMonitor";
+/* ─── Parcel operations panel (staff view) ─────────── */
+import ParcelOpsPanel from "./ParcelOpsPanel";
+/* ─── Outbound fulfillment (manager-only) ────────────────── */
+import FulfillmentDashboard from "./fulfillment/page";
+
 /* ─── Tab definitions ────────────────────────────────────── */
 const TABS: ManagerTab[] = [
   { key: "overview",  label: "Overview",        icon: LayoutDashboard },
   { key: "catalog",   label: "Menu & Catalog",  icon: UtensilsCrossed },
   { key: "payroll",   label: "Payroll",         icon: DollarSign },
   { key: "hiring",    label: "Hiring",          icon: Users },
+  { key: "queue",     label: "Queue Monitor",   icon: MonitorPlay },
+  { key: "parcels",   label: "Parcel Board",    icon: Package },
+  { key: "fulfillment", label: "Fulfillment",   icon: Truck },
 ];
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -38,6 +54,18 @@ type TabKey = (typeof TABS)[number]["key"];
    ═══════════════════════════════════════════════════════════ */
 export default function ManagerDashboard() {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [showDepartureBoard, setShowDepartureBoard] = useState(false);
+
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get("tab") as TabKey | null;
+      if (p && TABS.some((t) => t.key === p)) {
+        setActiveTab(p as TabKey);
+      }
+    } catch (e) {
+      /* noop */
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-stone-950 text-white">
@@ -48,11 +76,11 @@ export default function ManagerDashboard() {
             <h1 className="text-lg font-bold tracking-tight">
               Manager Dashboard
             </h1>
-            <p className="text-stone-500 text-xs tracking-wider uppercase">
+            <p className="text-stone-400 text-xs tracking-wider uppercase">
               BrewHub PHL &middot; Staff Operations
             </p>
           </div>
-          <span className="text-xs text-stone-600 hidden sm:block">
+          <span className="text-xs text-stone-400 hidden sm:block">
             {new Date().toLocaleDateString("en-US", {
               weekday: "long",
               month: "long",
@@ -78,7 +106,7 @@ export default function ManagerDashboard() {
       {/* ── Tab content ─────────────────────────────────── */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 pb-28 md:pb-8">
         {activeTab === "overview" && (
-          <div className="space-y-2">
+          <div className="space-y-6">
             <DashboardOverhaul />
             <ReceiptRoll />
           </div>
@@ -89,6 +117,16 @@ export default function ManagerDashboard() {
         {activeTab === "payroll" && <PayrollSection />}
 
         {activeTab === "hiring" && <HiringViewer />}
+
+        {activeTab === "queue" && <QueueMonitor onBack={() => setActiveTab("overview")} />}
+
+        {activeTab === "parcels" && (
+          showDepartureBoard
+            ? <ParcelsMonitor onBack={() => setShowDepartureBoard(false)} />
+            : <ParcelOpsPanel onLaunchBoard={() => setShowDepartureBoard(true)} />
+        )}
+
+        {activeTab === "fulfillment" && <FulfillmentDashboard />}
       </main>
 
       {/* ── Mobile bottom tab bar ───────────────────────── */}

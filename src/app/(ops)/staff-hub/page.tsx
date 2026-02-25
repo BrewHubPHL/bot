@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useOpsSession } from "@/components/OpsGate";
 import Link from "next/link";
+import AuthzErrorStateCard from "@/components/AuthzErrorState";
+import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
+import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 
 /* ─── API base ─── */
 const API_BASE =
@@ -19,6 +22,7 @@ export default function StaffHubPage() {
   const [shiftDuration, setShiftDuration] = useState("0:00:00");
   const [clockLoading, setClockLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
 
   // Clock display
   useEffect(() => {
@@ -68,8 +72,16 @@ export default function StaffHubPage() {
         body: JSON.stringify({ action }),
       });
 
+      if (!res.ok) {
+        const info = await getErrorInfoFromResponse(res, `Failed to clock ${action}`);
+        if (info.authz) {
+          setAuthzState(info.authz);
+        }
+        throw new Error(info.message);
+      }
+
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Failed to clock ${action}`);
+      setAuthzState(null);
 
       setIsWorking(action === "in");
       if (action === "in") {
@@ -80,7 +92,7 @@ export default function StaffHubPage() {
       }
       showMessage(`Successfully clocked ${action}!`, "success");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to update status";
+      const msg = toUserSafeMessageFromUnknown(err, "Unable to update clock status right now.");
       showMessage(msg, "error");
     } finally {
       setClockLoading(false);
@@ -88,6 +100,16 @@ export default function StaffHubPage() {
   }, [isWorking, token, showMessage]);
 
   const isManager = staff.role === "manager" || staff.role === "admin";
+
+  const handleAuthzAction = useCallback(() => {
+    if (!authzState) return;
+    if (authzState.status === 401) {
+      sessionStorage.removeItem("ops_session");
+      window.location.reload();
+      return;
+    }
+    window.location.href = "/staff-hub";
+  }, [authzState]);
 
   return (
     <div
@@ -101,7 +123,7 @@ export default function StaffHubPage() {
           Brew<span className="text-amber-400">Hub</span> Staff
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-400">{staff.name || staff.email}</span>
+          <span className="text-sm text-stone-400">{staff.name || staff.email}</span>
         </div>
       </header>
 
@@ -112,7 +134,7 @@ export default function StaffHubPage() {
           <div className="text-6xl font-bold text-white tabular-nums" style={{ textShadow: "0 4px 20px rgba(0,0,0,0.3)" }}>
             {currentTime?.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true }) ?? "--:--:--"}
           </div>
-          <div className="text-lg text-gray-500 mt-2">
+          <div className="text-lg text-stone-500 mt-2">
             {currentTime?.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }) ?? ""}
           </div>
         </div>
@@ -120,7 +142,7 @@ export default function StaffHubPage() {
         {/* Status Card */}
         <div className="w-full max-w-md rounded-3xl p-10 text-center border border-white/10"
           style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(10px)" }}>
-          <div className="text-sm text-gray-500 uppercase tracking-widest mb-2">Your Status</div>
+          <div className="text-sm text-stone-500 uppercase tracking-widest mb-2">Your Status</div>
           <div className={`text-3xl font-bold mb-6 ${isWorking ? "text-emerald-400" : "text-red-400"}`}>
             {isWorking ? "Clocked In" : "Clocked Out"}
           </div>
@@ -149,9 +171,15 @@ export default function StaffHubPage() {
             </div>
           )}
 
+          {authzState && (
+            <div className="mt-4">
+              <AuthzErrorStateCard state={authzState} onAction={handleAuthzAction} />
+            </div>
+          )}
+
           {/* Shift Duration */}
           {isWorking && (
-            <div className="mt-6 pt-6 border-t border-white/10 text-gray-500 text-sm">
+            <div className="mt-6 pt-6 border-t border-white/10 text-stone-500 text-sm">
               <div>Current shift started</div>
               <div className="text-2xl font-semibold text-amber-400 mt-2 tabular-nums">{shiftDuration}</div>
             </div>
@@ -172,11 +200,11 @@ export default function StaffHubPage() {
             <div className="text-3xl mb-2">💳</div>
             <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">Cafe POS</div>
           </Link>
-          <Link href="/parcels" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
+          <Link href="/parcels-pickup" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
                                             transition-all hover:-translate-y-1 hover:border-amber-400"
             style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(10px)" }}>
             <div className="text-3xl mb-2">📦</div>
-            <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">Parcels</div>
+            <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">Parcel Pickup</div>
           </Link>
           <Link href="/scanner" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
                                             transition-all hover:-translate-y-1 hover:border-amber-400"

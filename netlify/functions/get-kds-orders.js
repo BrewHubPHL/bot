@@ -5,40 +5,90 @@
 // Uses service_role to bypass RLS on orders / coffee_orders tables.
 
 const { createClient } = require('@supabase/supabase-js');
-const { authorize, json, sanitizedError } = require('./_auth');
+const { authorize, sanitizedError } = require('./_auth');
 const { sanitizeInput } = require('./_sanitize');
 const { orderBucket } = require('./_token-bucket');
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+// ── Fail-closed env guard ─────────────────────────────────────────────────────
+const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// ── CORS allowlist ────────────────────────────────────────────────────────────
+// Allow additional origins via KDS_ALLOWED_ORIGINS (comma-separated)
+const extraOrigins = (process.env.KDS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const ALLOWED_ORIGINS = new Set([
+  ...extraOrigins,
+  process.env.SITE_URL,
+  'https://brewhubphl.com',
+  'https://www.brewhubphl.com',
+].filter(Boolean));
+
+function validateOrigin(headers) {
+  const origin = headers['origin'] || headers['Origin'] || '';
+  return ALLOWED_ORIGINS.has(origin) ? origin : null;
+}
+
+function makeHeaders(origin) {
+  const h = {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache',
+    'Vary': 'Origin',
+  };
+  if (origin) h['Access-Control-Allow-Origin'] = origin;
+  return h;
+}
+
+function jsonResp(status, body, origin) {
+  return { statusCode: status, headers: makeHeaders(origin), body: JSON.stringify(body) };
+}
 
 exports.handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') return json(204, {});
-  if (event.httpMethod !== 'GET') return json(405, { error: 'Method not allowed' });
+  const origin = validateOrigin(event.headers || {});
+
+  // CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: Object.assign({}, makeHeaders(origin), {
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      }),
+      body: '',
+    };
+  }
+
+  if (MISSING_ENV) return jsonResp(500, { error: 'Server misconfiguration' }, origin);
+  if (event.httpMethod !== 'GET') return jsonResp(405, { error: 'Method not allowed' }, origin);
 
   const auth = await authorize(event);
-  if (!auth.ok) return auth.response;
+  if (!auth.ok) return Object.assign({}, auth.response, { headers: Object.assign({}, makeHeaders(origin), auth.response.headers || {}) });
 
   // Light rate-limit for KDS retrievals to mitigate UI floods
   try {
     const rlKey = `kds:${auth.user?.id || event.headers['x-nf-client-connection-ip'] || 'anon'}`;
     const rl = orderBucket.consume(rlKey);
     if (!rl.allowed) {
-      const resp = json(429, { error: 'Too many requests' });
-      resp.headers = Object.assign({}, resp.headers, { 'Retry-After': String(Math.ceil((rl.retryAfterMs || 1000) / 1000)) });
-      return resp;
+      return jsonResp(429, { error: 'Too many requests' }, origin);
     }
   } catch (e) {
     console.warn('[KDS RATE] rate limiter failed:', e?.message || e);
   }
 
+  // Per-request Supabase client (service_role) — not at module scope
+  const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+  );
+
   try {
     const { data, error } = await supabase
       .from('orders')
-      .select('id, customer_name, status, created_at, coffee_orders(id, drink_name, customizations, price)')
+      .select('id, customer_name, status, created_at, is_guest_order, total_amount_cents, coffee_orders(id, drink_name, customizations, price)')
       .in('status', ['unpaid', 'pending', 'paid', 'preparing', 'ready'])
+      .neq('type', 'merch')
       .order('created_at', { ascending: true })
       .limit(200);
 
@@ -61,8 +111,12 @@ exports.handler = async (event) => {
       return { ...rest, first_name: firstName, coffee_orders: coffee };
     });
 
-    return json(200, { orders });
+    return jsonResp(200, { orders }, origin);
   } catch (err) {
-    return sanitizedError(err, 'get-kds-orders');
+    const errResp = sanitizedError(err, 'get-kds-orders');
+    // Ensure CORS headers are present on error responses so browsers
+    // don't block them when the origin is allowed.
+    errResp.headers = Object.assign({}, makeHeaders(origin), errResp.headers || {});
+    return errResp;
   }
 };

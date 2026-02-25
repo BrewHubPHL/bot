@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useOpsSession } from '@/components/OpsGate';
+import { toUserSafeMessage } from '@/lib/errorCatalog';
 import { Barcode, Package, Save, Trash2, Search, RefreshCw, Loader2 } from 'lucide-react';
 
 /* ─── Types ────────────────────────────────────────────── */
@@ -75,7 +76,7 @@ export default function InventoryScanner() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Save failed' }));
-        setStatus(`Error: ${err.error || 'Save failed'}`);
+        setStatus(`Error: ${toUserSafeMessage(err.error, 'Save failed')}`);
         return;
       }
 

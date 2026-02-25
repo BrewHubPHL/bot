@@ -9,18 +9,20 @@
 
 /* ===== iOS SAFE AREA SUPPORT ===== */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
-  .safe-area-bottom {
+  .safe-area-bottom,
+  .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
 
 /* ===== BREWHUB BRAND PALETTE (Warm-Sharp) ===== */
 :root {
-  --hub-brown: #0a0a0a;
-  --hub-tan: #b8860b;
   --hub-espresso: #0a0a0a;
+  --hub-brown: var(--hub-espresso); /* deprecated alias — use --hub-espresso */
+  --hub-tan: #b8860b;
   --bg-main: #ffffff;
   --bg-alt: #f3f4f6;
+  --text-main: #1c1917;
 }
 
 /* ===== GLOBAL RESET & BASE ===== */
@@ -33,7 +35,7 @@ html, body {
   min-height: 100vh;
   background: linear-gradient(135deg, var(--bg-main) 0%, var(--bg-alt) 100%);
   color: var(--hub-espresso);
-  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   overflow-x: hidden;
 }
 
@@ -45,7 +47,7 @@ html, body {
   box-shadow: 0 4px 24px 0 rgba(0,0,0,0.10);
 }
 .nav-logo {
-  font-family: 'Playfair Display', serif;
+  font-family: var(--font-playfair), serif;
   font-size: 2rem;
   font-weight: 800;
   color: var(--hub-espresso);
@@ -135,7 +137,7 @@ html, body {
   margin-bottom: 0.5rem;
 }
 .hero-title {
-  font-family: 'Playfair Display', serif;
+  font-family: var(--font-playfair), serif;
   font-size: 3.5rem;
   font-weight: 800;
   letter-spacing: -0.04em;
@@ -334,7 +336,7 @@ html, body {
   border-color: var(--hub-brown);
 }
 .concierge-title {
-  font-family: 'Playfair Display', serif;
+  font-family: var(--font-playfair), serif;
   font-size: 2.2rem;
   font-weight: 700;
   color: var(--hub-espresso);

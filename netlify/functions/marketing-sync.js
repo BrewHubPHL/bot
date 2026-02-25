@@ -84,8 +84,6 @@ exports.handler = async (event) => {
         id: sanitizeInput(record.id || '')
       };
 
-      console.log('[MARKETING] Received safeRecord preview:', JSON.stringify({ day_of_week: safeRecord.day_of_week, topic: safeRecord.topic, caption_preview: safeRecord.caption.slice(0,120) }));
-
       // DETECT: Marketing Bot Post vs Instagram Lead
       if (record.day_of_week && record.topic) {
         // Marketing Bot Post -> SocialPosts tab
@@ -98,16 +96,13 @@ exports.handler = async (event) => {
           added: new Date().toISOString()
         };
 
-        console.log('[MARKETING] Sending Social Post preview:', JSON.stringify({ day: sheetPayload.day, topic: sheetPayload.topic, caption_preview: sheetPayload.caption.slice(0,120) }));
-
         const response = await fetchWithTimeout(process.env.MARKETING_SHEET_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(sheetPayload)
         }, 15000, 'marketing-sheets-push');
 
-        const responseText = await (response ? response.text().catch(() => '') : '');
-        console.log('[MARKETING] Sheets response:', response?.status || 'no-response', String(responseText).slice(0, 200));
+        await (response ? response.text().catch(() => '') : '');
 
         return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'Social post pushed to Sheets' }) };
       }
@@ -127,16 +122,13 @@ exports.handler = async (event) => {
         added: new Date().toISOString()
       };
 
-      console.log('[MARKETING] Sending to Sheets preview:', JSON.stringify({ username: sheetPayload.username, caption_preview: sheetPayload.caption.slice(0,120) }));
-
       const response = await fetchWithTimeout(process.env.MARKETING_SHEET_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sheetPayload)
       }, 15000, 'marketing-sheets-push');
 
-      const responseText = await (response ? response.text().catch(() => '') : '');
-      console.log('[MARKETING] Sheets response:', response?.status || 'no-response', String(responseText).slice(0,200));
+      await (response ? response.text().catch(() => '') : '');
 
       return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'Pushed to Sheets' }) };
     }

@@ -29,7 +29,9 @@ interface ManagerNavProps {
 export function DesktopTabNav({ tabs, activeTab, onTabChange }: ManagerNavProps) {
   return (
     <nav
-      className="flex gap-1 overflow-x-auto pb-px scrollbar-hide -mb-px"
+      className="relative flex gap-1 overflow-x-auto pb-px scrollbar-hide -mb-px
+                 [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]
+                 sm:[mask-image:none]"
       aria-label="Manager sections"
     >
       {tabs.map(({ key, label, icon: Icon }) => {
@@ -88,7 +90,7 @@ export function MobileBottomTabBar({ tabs, activeTab, onTabChange }: ManagerNavP
                 strokeWidth={active ? 2.2 : 1.6}
                 aria-hidden="true"
               />
-              <span>{label}</span>
+              <span className="truncate max-w-full px-0.5">{label}</span>
             </button>
           );
         })}
@@ -105,13 +107,14 @@ export default function ManagerNav() {
 /* ─── Quick links (shared) ── */
 export function ManagerQuickLinks() {
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-3 py-1.5 text-[11px] text-stone-500">
-      <Link href="/pos"       className="hover:text-amber-400 transition-colors">POS</Link>
-      <Link href="/kds"       className="hover:text-amber-400 transition-colors">KDS</Link>
-      <Link href="/scanner"   className="hover:text-amber-400 transition-colors">Scanner</Link>
-      <Link href="/staff-hub" className="hover:text-amber-400 transition-colors">Staff Hub</Link>
-      <span className="text-stone-700" aria-hidden="true">|</span>
-      <Link href="/"          className="hover:text-amber-400 transition-colors">Main Site</Link>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center gap-3 min-h-[44px] text-xs text-stone-500">
+      <Link href="/pos"       className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">POS</Link>
+      <Link href="/kds"       className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">KDS</Link>
+      <Link href="/scanner"   className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Scanner</Link>
+      <Link href="/staff-hub" className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Staff Hub</Link>
+      <Link href="/manager/fulfillment" className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Fulfillment</Link>
+      <span className="text-stone-600" aria-hidden="true">|</span>
+      <Link href="/"          className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Main Site</Link>
     </div>
   );
 }

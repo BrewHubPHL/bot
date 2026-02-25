@@ -71,6 +71,7 @@ exports.handler = async (event) => {
       .from('orders')
       .select('id, customer_name, status, created_at, completed_at, coffee_orders(drink_name, customizations)')
       .in('status', ['pending', 'unpaid', 'paid', 'preparing', 'ready', 'completed'])
+      .neq('type', 'merch')
       .gte('created_at', today.toISOString())
       .order('created_at', { ascending: true })
       .limit(200);

@@ -1,6 +1,8 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
+import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
+import { RefreshCw } from "lucide-react";
 
 /**
  * Sanitise an image URL: only allows https:// (and http://localhost for dev).
@@ -116,7 +118,7 @@ function ProductCard({
 }) {
   return (
     <div
-      className={`bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden
+      className={`bg-stone-900 border border-stone-800 rounded-xl overflow-hidden
                  transition-all duration-200 ${
                    product.is_active ? "" : "opacity-50"
                  }`}
@@ -128,7 +130,7 @@ function ProductCard({
         className="w-full text-left focus:outline-none focus:ring-2 focus:ring-blue-500
                    hover:brightness-110 transition-all"
       >
-        <div className="relative w-full aspect-square bg-[#222] flex items-center justify-center overflow-hidden">
+        <div className="relative w-full aspect-square bg-stone-800 flex items-center justify-center overflow-hidden">
           {product.image_url ? (
             <img
               src={safeImageUrl(product.image_url)}
@@ -155,7 +157,7 @@ function ProductCard({
 
         <div className="p-4 pb-2">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-[#f5f5f5] truncate">{product.name}</h3>
+            <h3 className="font-semibold text-stone-100 truncate">{product.name}</h3>
             <span
               className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
                 product.category === "merch"
@@ -173,20 +175,20 @@ function ProductCard({
       </button>
 
       {/* Action buttons */}
-      <div className="flex border-t border-[#333]">
+      <div className="flex border-t border-stone-800">
         <button
           type="button"
           onClick={onEdit}
-          className="flex-1 py-2 text-xs font-medium text-gray-400 hover:text-white
-                     hover:bg-[#222] transition-colors"
+          className="flex-1 py-2 text-xs font-medium text-stone-400 hover:text-white
+                     hover:bg-stone-800 transition-colors"
         >
           ✏️ Edit
         </button>
         <button
           type="button"
           onClick={onToggleActive}
-          className="flex-1 py-2 text-xs font-medium text-gray-400 hover:text-white
-                     hover:bg-[#222] transition-colors border-x border-[#333]"
+          className="flex-1 py-2 text-xs font-medium text-stone-400 hover:text-white
+                     hover:bg-stone-800 transition-colors border-x border-stone-800"
         >
           {product.is_active ? "👁 Hide" : "👁 Show"}
         </button>
@@ -265,7 +267,7 @@ function ImageDropZone({
         const data = await res.json();
         onUploaded(data.url);
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Upload failed";
+        const msg = toUserSafeMessageFromUnknown(err, "Unable to upload image right now.");
         setError(msg);
       } finally {
         setUploading(false);
@@ -286,13 +288,13 @@ function ImageDropZone({
 
   return (
     <div className="space-y-2">
-      <label className="block text-sm text-gray-400">Image</label>
+      <label className="block text-sm text-stone-400">Image</label>
 
       {safeImageUrl(currentUrl) && (
         <img
           src={safeImageUrl(currentUrl)}
           alt="Preview"
-          className="w-full h-40 object-cover rounded-lg border border-[#333]"
+          className="w-full h-40 object-cover rounded-lg border border-stone-800"
         />
       )}
 
@@ -308,15 +310,15 @@ function ImageDropZone({
           transition-colors ${
             dragOver
               ? "border-blue-500 bg-blue-500/10"
-              : "border-[#444] hover:border-[#666]"
+              : "border-stone-700 hover:border-stone-600"
           }`}
       >
         {uploading ? (
-          <span className="text-sm text-gray-400 animate-pulse">Uploading…</span>
+          <span className="text-sm text-stone-400 animate-pulse">Uploading…</span>
         ) : (
           <>
             <span className="text-2xl">📁</span>
-            <span className="text-sm text-gray-400">
+            <span className="text-sm text-stone-400">
               Drag &amp; drop an image or <span className="text-blue-400 underline">browse</span>
             </span>
           </>
@@ -389,7 +391,7 @@ export default function CatalogManager() {
       const data = await res.json();
       setProducts(sanitizeProducts(data.products ?? []));
     } catch (err: unknown) {
-      console.error("Catalog fetch failed:", err instanceof Error ? err.message : err);
+      console.error("Catalog fetch failed");
     }
     setLoading(false);
   }, [token]);
@@ -417,8 +419,7 @@ export default function CatalogManager() {
       }
       setProducts((prev) => prev.filter((p) => p.id !== productId));
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Archive failed";
-      alert("Failed to archive: " + msg);
+      alert(toUserSafeMessageFromUnknown(err, "Unable to archive this product right now."));
     }
   };
 
@@ -440,8 +441,7 @@ export default function CatalogManager() {
       }
       await fetchProducts();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Restore failed";
-      alert("Failed to restore: " + msg);
+      alert(toUserSafeMessageFromUnknown(err, "Unable to restore this product right now."));
     }
   };
 
@@ -468,8 +468,7 @@ export default function CatalogManager() {
         )
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Update failed";
-      alert("Failed to update: " + msg);
+      alert(toUserSafeMessageFromUnknown(err, "Unable to update this product right now."));
     }
   };
 
@@ -558,8 +557,7 @@ export default function CatalogManager() {
       await fetchProducts();
       closeDrawer();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Save failed";
-      setSaveError(msg);
+      setSaveError(toUserSafeMessageFromUnknown(err, "Unable to save catalog changes right now."));
     } finally {
       setSaving(false);
     }
@@ -571,22 +569,25 @@ export default function CatalogManager() {
 
   /* --- Render ---------------------------------------------------- */
   return (
-    <section className="mt-10">
+    <section>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold">🛍️ Catalog Manager</h2>
+        <h2 className="text-lg font-semibold">🛍️ Catalog Manager</h2>
         <div className="flex gap-3">
           <button
             type="button"
             onClick={fetchProducts}
-            className="text-sm text-gray-400 hover:text-white transition-colors"
+            className="flex items-center gap-2 px-4 py-2 min-h-[44px] rounded-xl
+                       bg-stone-900 border border-stone-800 text-stone-400 text-sm
+                       hover:border-stone-600 hover:text-white transition-colors"
           >
-            ↻ Refresh
+            <RefreshCw size={14} />
+            Refresh
           </button>
           <button
             type="button"
             onClick={openNew}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium
+            className="bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium
                        px-4 py-2 rounded-lg transition-colors"
           >
             + Add New
@@ -595,12 +596,12 @@ export default function CatalogManager() {
       </div>
 
       {/* Active / Archived tabs */}
-      <div className="flex gap-1 mb-6 bg-[#1a1a1a] rounded-lg p-1 w-fit">
+      <div className="flex gap-1 mb-6 bg-stone-900 rounded-lg p-1 w-fit">
         <button
           type="button"
           onClick={() => setViewArchived(false)}
           className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            !viewArchived ? "bg-[#333] text-white" : "text-gray-400 hover:text-white"
+            !viewArchived ? "bg-stone-700 text-white" : "text-stone-400 hover:text-white"
           }`}
         >
           Active ({products.filter((p) => !p.archived_at).length})
@@ -609,7 +610,7 @@ export default function CatalogManager() {
           type="button"
           onClick={() => setViewArchived(true)}
           className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-            viewArchived ? "bg-[#333] text-white" : "text-gray-400 hover:text-white"
+            viewArchived ? "bg-stone-700 text-white" : "text-stone-400 hover:text-white"
           }`}
         >
           Archived ({products.filter((p) => !!p.archived_at).length})
@@ -627,7 +628,7 @@ export default function CatalogManager() {
               {Array.from({ length: 8 }).map((_, i) => (
                 <div
                   key={i}
-                  className="bg-[#1a1a1a] border border-[#333] rounded-xl animate-pulse aspect-square"
+                  className="bg-stone-900 border border-stone-800 rounded-xl animate-pulse aspect-square"
                 />
               ))}
             </div>
@@ -635,7 +636,7 @@ export default function CatalogManager() {
         }
         if (filtered.length === 0) {
           return (
-            <p className="text-gray-500 text-center py-12">
+            <p className="text-stone-500 text-center py-12">
               {viewArchived
                 ? "No archived products."
                 : <>No products yet. Click <strong>+ Add New</strong> to create one.</>}
@@ -659,9 +660,9 @@ export default function CatalogManager() {
               return viewArchived ? (
                 <div
                   key={p.id}
-                  className="bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden opacity-60"
+                  className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden opacity-60"
                 >
-                  <div className="relative w-full aspect-square bg-[#222] flex items-center justify-center overflow-hidden">
+                  <div className="relative w-full aspect-square bg-stone-800 flex items-center justify-center overflow-hidden">
                     {imgSrc ? (
                       <ProductImage src={imgSrc} alt={p.name} />
                     ) : (
@@ -672,10 +673,10 @@ export default function CatalogManager() {
                     </span>
                   </div>
                   <div className="p-4 pb-2">
-                    <h3 className="font-semibold text-[#f5f5f5] truncate">{p.name}</h3>
+                    <h3 className="font-semibold text-stone-100 truncate">{p.name}</h3>
                     <p className="text-green-400 text-sm mt-1">${centsToDollars(p.price_cents)}</p>
                   </div>
-                  <div className="border-t border-[#333]">
+                  <div className="border-t border-stone-800">
                     <button
                       type="button"
                       onClick={() => handleRestore(p.id)}
@@ -711,7 +712,7 @@ export default function CatalogManager() {
 
       {/* Slide-out drawer */}
       <div
-        className={`fixed top-0 right-0 h-full w-full max-w-md bg-[#111] border-l border-[#333]
+        className={`fixed top-0 right-0 h-full w-full max-w-md bg-stone-950 border-l border-stone-800
                      z-50 transform transition-transform duration-300 ease-in-out
                      ${drawerOpen ? "translate-x-0" : "translate-x-full"}
                      overflow-y-auto`}
@@ -725,7 +726,7 @@ export default function CatalogManager() {
             <button
               type="button"
               onClick={closeDrawer}
-              className="text-gray-400 hover:text-white text-xl leading-none"
+              className="text-stone-400 hover:text-white text-xl leading-none"
               aria-label="Close drawer"
             >
               ✕
@@ -743,7 +744,7 @@ export default function CatalogManager() {
 
           {/* Name */}
           <div>
-            <label htmlFor="catalog-name" className="block text-sm text-gray-400 mb-1">
+            <label htmlFor="catalog-name" className="block text-sm text-stone-400 mb-1">
               Name
             </label>
             <input
@@ -752,15 +753,15 @@ export default function CatalogManager() {
               maxLength={100}
               value={form.name}
               onChange={(e) => setField("name", e.target.value)}
-              className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-2 text-sm
-                         text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-sm
+                         text-stone-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Oat Milk Latte"
             />
           </div>
 
           {/* Description */}
           <div>
-            <label htmlFor="catalog-desc" className="block text-sm text-gray-400 mb-1">
+            <label htmlFor="catalog-desc" className="block text-sm text-stone-400 mb-1">
               Description
             </label>
             <textarea
@@ -769,15 +770,15 @@ export default function CatalogManager() {
               maxLength={500}
               value={form.description}
               onChange={(e) => setField("description", e.target.value)}
-              className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-2 text-sm
-                         text-[#f5f5f5] resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-sm
+                         text-stone-100 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="A smooth espresso with oat milk…"
             />
           </div>
 
           {/* Price */}
           <div>
-            <label htmlFor="catalog-price" className="block text-sm text-gray-400 mb-1">
+            <label htmlFor="catalog-price" className="block text-sm text-stone-400 mb-1">
               Price ($)
             </label>
             <input
@@ -792,23 +793,23 @@ export default function CatalogManager() {
                   setField("price", v);
                 }
               }}
-              className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-2 text-sm
-                         text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-sm
+                         text-stone-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="4.50"
             />
           </div>
 
           {/* Category */}
           <div>
-            <label htmlFor="catalog-category" className="block text-sm text-gray-400 mb-1">
+            <label htmlFor="catalog-category" className="block text-sm text-stone-400 mb-1">
               Category
             </label>
             <select
               id="catalog-category"
               value={form.category}
               onChange={(e) => setField("category", e.target.value as "menu" | "merch")}
-              className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-2 text-sm
-                         text-[#f5f5f5] focus:outline-none focus:ring-2 focus:ring-blue-500
+              className="w-full bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-sm
+                         text-stone-100 focus:outline-none focus:ring-2 focus:ring-blue-500
                          appearance-none cursor-pointer"
             >
               <option value="menu">☕ Cafe Menu</option>
@@ -820,7 +821,7 @@ export default function CatalogManager() {
           <label className="flex items-center gap-3 cursor-pointer select-none">
             <div
               className={`relative w-11 h-6 rounded-full transition-colors ${
-                form.is_active ? "bg-green-500" : "bg-[#444]"
+                form.is_active ? "bg-green-500" : "bg-stone-600"
               }`}
               onClick={() => setField("is_active", !form.is_active)}
             >
@@ -830,7 +831,7 @@ export default function CatalogManager() {
                 }`}
               />
             </div>
-            <span className="text-sm text-gray-300">
+            <span className="text-sm text-stone-300">
               {form.is_active ? "Active (visible to customers)" : "Inactive (86'd)"}
             </span>
           </label>
@@ -847,7 +848,7 @@ export default function CatalogManager() {
             type="button"
             onClick={handleSave}
             disabled={saving || uploading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50
+            className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50
                        disabled:cursor-not-allowed text-white font-medium py-2.5
                        rounded-lg transition-colors text-sm"
           >

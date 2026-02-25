@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
+import AuthzErrorStateCard from "@/components/AuthzErrorState";
+import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import {
   RefreshCw,
   CheckCircle,
@@ -55,6 +57,7 @@ export default function DashboardOverhaul() {
     lastSync: null,
     message: "Connecting…",
   });
+  const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
 
   const pollBackoffRef = useRef<number>(POLL_MS);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,7 +109,16 @@ export default function DashboardOverhaul() {
         setSync((prev) => ({ ...prev, ok: false, message: "Rate limited — backing off" }));
         return;
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const info = await getErrorInfoFromResponse(res, "Unable to load dashboard stats");
+        setAuthzState(info.authz);
+        setSync((prev) => ({
+          ok: false,
+          lastSync: prev.lastSync,
+          message: info.message,
+        }));
+        return;
+      }
       const d = await res.json();
       setStats({
         revenue: d.revenue ?? 0,
@@ -115,6 +127,7 @@ export default function DashboardOverhaul() {
         labor: d.labor ?? 0,
         activeShifts: d.activeShifts ?? [],
       });
+      setAuthzState(null);
       setStatsLoading(false);
       pollBackoffRef.current = POLL_MS; // reset on success
       setSync({ ok: true, lastSync: new Date(), message: "Live" });
@@ -127,6 +140,16 @@ export default function DashboardOverhaul() {
       setStatsLoading(false);
     }
   }, [token]);
+
+  const handleAuthzAction = useCallback(() => {
+    if (!authzState) return;
+    if (authzState.status === 401) {
+      sessionStorage.removeItem("ops_session");
+      window.location.reload();
+      return;
+    }
+    window.location.href = "/staff-hub";
+  }, [authzState]);
 
   // ──────────────────────────────────────────────────────
   //  AUTO-REFRESH — adaptive setTimeout (backs off on 429)
@@ -158,7 +181,11 @@ export default function DashboardOverhaul() {
       {/* ═══════════════════════════════════════════════════
           TRAFFIC-LIGHT CONNECTION BANNER
           ═══════════════════════════════════════════════════ */}
-      {!sync.ok && (
+      {authzState && (
+        <AuthzErrorStateCard state={authzState} onAction={handleAuthzAction} />
+      )}
+
+      {!sync.ok && !authzState && (
         <button
           type="button"
           onClick={() => fetchStats()}
@@ -185,7 +212,7 @@ export default function DashboardOverhaul() {
               hour12: true,
             })}
           </span>
-          <span className="ml-auto text-gray-600">Auto-refreshes every 60s</span>
+          <span className="ml-auto text-stone-600">Auto-refreshes every 60s</span>
         </div>
       )}
 
@@ -239,7 +266,7 @@ export default function DashboardOverhaul() {
             label: "Staff On Shift",
             value: statsLoading ? "…" : String(stats.staffCount),
             color:
-              stats.staffCount > 0 ? "text-green-400" : "text-gray-400",
+              stats.staffCount > 0 ? "text-green-400" : "text-stone-400",
             icon: "👥",
           },
           {
@@ -251,10 +278,10 @@ export default function DashboardOverhaul() {
         ].map((card) => (
           <div
             key={card.label}
-            className="bg-[#1a1a1a] border border-[#333] rounded-xl
+            className="bg-stone-900 border border-stone-800 rounded-xl
                        px-4 py-4 min-h-[80px] flex flex-col justify-center"
           >
-            <div className="text-xs text-gray-500 mb-1 flex items-center gap-1.5">
+            <div className="text-xs text-stone-500 mb-1 flex items-center gap-1.5">
               <span>{card.icon}</span> {card.label}
             </div>
             <div className={`text-2xl font-bold ${card.color}`}>
@@ -267,15 +294,15 @@ export default function DashboardOverhaul() {
       {/* ═══════════════════════════════════════════════════
           ON THE CLOCK — active staff roster
           ═══════════════════════════════════════════════════ */}
-      <div className="bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 min-h-[56px] border-b border-[#333]">
+      <div className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 min-h-[56px] border-b border-stone-800">
           <span className="font-semibold text-base">👥 On the Clock</span>
           {!statsLoading && (
             <span
               className={`text-sm font-bold rounded-full px-3 py-1 ${
                 stats.activeShifts.length > 0
                   ? "bg-green-500/10 text-green-400"
-                  : "bg-[#333] text-gray-500"
+                  : "bg-stone-700 text-stone-500"
               }`}
             >
               {stats.activeShifts.length} active
@@ -284,14 +311,18 @@ export default function DashboardOverhaul() {
         </div>
 
         {statsLoading ? (
-          <div className="px-5 py-4 text-gray-500 text-sm">Loading…</div>
+          <div className="space-y-2 px-5 py-4">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-12 bg-stone-800 rounded-lg animate-pulse" />
+            ))}
+          </div>
         ) : stats.activeShifts.length === 0 ? (
           <div className="flex items-center gap-3 px-5 py-4 text-green-400 text-sm">
             <CheckCircle size={18} />
             All shifts closed — nobody clocked in.
           </div>
         ) : (
-          <div className="divide-y divide-[#222]">
+          <div className="divide-y divide-stone-800">
             {stats.activeShifts.map((s) => {
               const elapsedMs = Date.now() - new Date(s.clock_in).getTime();
               const hrs = Math.floor(elapsedMs / 3_600_000);
@@ -311,7 +342,7 @@ export default function DashboardOverhaul() {
                   />
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold text-sm text-white truncate">{s.name}</div>
-                    <div className="text-xs text-gray-500 truncate">{s.email}</div>
+                    <div className="text-xs text-stone-500 truncate">{s.email}</div>
                   </div>
                   <div
                     className={`text-sm font-bold flex-shrink-0 ${
@@ -322,7 +353,7 @@ export default function DashboardOverhaul() {
                     {isAlert && (
                       <span className="ml-2 text-[10px] font-bold uppercase tracking-wide
                                        bg-red-500/20 text-red-400 border border-red-500/30
-                                       rounded px-1.5 py-0.5">
+                                       rounded-full px-2 py-0.5">
                         Check in?
                       </span>
                     )}
@@ -337,8 +368,8 @@ export default function DashboardOverhaul() {
       {/* ═══════════════════════════════════════════════════
           LAUNCH DISPLAY SCREENS
           ═══════════════════════════════════════════════════ */}
-      <div className="bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden">
-        <div className="flex items-center gap-2 px-5 min-h-[48px] border-b border-[#333]">
+      <div className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-5 min-h-[48px] border-b border-stone-800">
           <Monitor size={15} className="text-stone-500" aria-hidden="true" />
           <span className="text-xs font-bold uppercase tracking-widest text-stone-500">
             Launch Display Screens
@@ -346,7 +377,7 @@ export default function DashboardOverhaul() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
           <a
-            href="/queue"
+            href="/manager?tab=queue"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3 min-h-[56px] rounded-xl px-5
@@ -358,11 +389,11 @@ export default function DashboardOverhaul() {
             <Monitor size={20} aria-hidden="true" />
             <div>
               <div>Cafe Order Queue</div>
-              <div className="text-[11px] font-normal text-amber-400/60">Customer-facing drink status board</div>
+              <div className="text-xs font-normal text-amber-400/60">Customer-facing drink status board</div>
             </div>
           </a>
           <a
-            href="/parcels/monitor"
+            href="/parcels-pickup"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3 min-h-[56px] rounded-xl px-5
@@ -373,8 +404,8 @@ export default function DashboardOverhaul() {
           >
             <Package size={20} aria-hidden="true" />
             <div>
-              <div>Parcel Monitor</div>
-              <div className="text-[11px] font-normal text-purple-400/60">Lobby TV · package pickup board</div>
+              <div>Parcel Pickup</div>
+              <div className="text-xs font-normal text-purple-400/60">Canonical confirmation flow</div>
             </div>
           </a>
         </div>
@@ -392,8 +423,8 @@ export default function DashboardOverhaul() {
             showToast("info", "Refreshing dashboard…");
           }}
           className="flex items-center justify-center gap-3 min-h-[56px]
-                     bg-[#1a1a1a] border border-[#444]
-                     hover:bg-[#222] hover:border-amber-500/40
+                     bg-stone-900 border border-stone-700
+                     hover:bg-stone-800 hover:border-amber-500/40
                      text-white text-base font-semibold rounded-xl px-6
                      active:scale-[0.98] transition-all"
         >

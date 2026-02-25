@@ -67,8 +67,6 @@ exports.handler = async (event) => {
             // Add a flag we can use later or just rely on 'type'
         }
 
-        console.log(`Incoming Webhook: Table=${table}, Type=${type}`);
-
         // SSoT Fix: Allow DELETE events to propagate (Audit Log)
         const isAllowedType = (type === 'INSERT' || type === 'DELETE' || (type === 'UPDATE' && table === 'employee_profiles'));
         if (!record || !isAllowedType) {
@@ -91,7 +89,6 @@ exports.handler = async (event) => {
                  const emailRaw = sanitizeInput((record.email || record.username || '')).toLowerCase();
                  const email = emailRaw.slice(0, 254);
                  if (email) {
-                     console.log('[GDPR] Propagating deletion to Sheet (preview):', email.slice(0, 64));
                      try {
                          await fetchWithTimeout(process.env.MARKETING_SHEET_URL, {
                              method: 'POST',
@@ -111,7 +108,6 @@ exports.handler = async (event) => {
                  return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'GDPR deletion propagated' }) };
             }
 
-            console.log('➡️ Routing to Marketing Sync (preview)');
             const baseUrl = process.env.URL || 'https://brewhubphl.com';
             try {
                 const res = await fetchWithTimeout(`${baseUrl}/.netlify/functions/marketing-sync?mode=push`, {
@@ -129,8 +125,7 @@ exports.handler = async (event) => {
                     }
                 }, 15000, 'marketing-sync-forward');
 
-                const respText = await (res ? res.text().catch(() => '') : '');
-                console.log('[SUPABASE-TO-SHEETS] marketing-sync forwarded, status:', res ? res.status : 'no-response', String(respText).slice(0,200));
+                await (res ? res.text().catch(() => '') : '');
                 if (!res || !res.ok) {
                     console.warn('[SUPABASE-TO-SHEETS] marketing-sync returned non-OK', res ? res.status : 'no-response');
                 }
@@ -167,7 +162,6 @@ exports.handler = async (event) => {
 
                 if (!existingCustomer) {
                     // Only send welcome email to new users not already in customers table
-                    console.log('Triggering Welcome Email (preview) for:', sheetData.email.slice(0,64));
                     try {
                         const { error: emailError } = await supabase.functions.invoke('welcome-email', {
                             body: { record: { email: sheetData.email } } 
@@ -176,8 +170,6 @@ exports.handler = async (event) => {
                     } catch (e) {
                         console.error('welcome-email invoke failed (truncated):', String(e).slice(0,200));
                     }
-                } else {
-                    console.log('Skipping welcome email - already a customer (preview):', sheetData.email.slice(0,64));
                 }
             } else {
                 console.warn('Supabase client not available; skipping welcome email check');
@@ -191,8 +183,7 @@ exports.handler = async (event) => {
             headers: { 'Content-Type': 'application/json' }
         }, 15000, 'google-sheets-post');
 
-        const result = await (response ? response.text().catch(() => '') : '');
-        console.log('[SUPABASE-TO-SHEETS] Google post result (truncated):', String(result).slice(0,1000));
+        await (response ? response.text().catch(() => '') : '');
         return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
 
     } catch (error) {

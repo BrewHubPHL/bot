@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useOpsSession } from "@/components/OpsGate";
+import AuthzErrorStateCard from "@/components/AuthzErrorState";
+import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
+import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import { sanitizeUrl } from "@braintree/sanitize-url";
 import {
   FileText,
@@ -77,6 +80,7 @@ export default function HiringViewer() {
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchApplicants = useCallback(async () => {
@@ -85,9 +89,16 @@ export default function HiringViewer() {
       const res = await fetch(`${API_BASE}/get-applications`, {
         headers: { Authorization: `Bearer ${token}`, 'X-BrewHub-Action': 'true' },
       });
-      if (!res.ok) throw new Error("Failed to fetch applications");
+      if (!res.ok) {
+        const info = await getErrorInfoFromResponse(res, "Failed to fetch applications");
+        setAuthzState(info.authz);
+        if (info.authz) setApplicants([]);
+        if (!info.authz) throw new Error(info.message);
+        return;
+      }
       const json = await res.json();
       setApplicants(json.applications ?? []);
+      setAuthzState(null);
     } catch (err) {
       console.error("Hiring fetch failed:", (err as Error)?.message);
     }
@@ -106,6 +117,7 @@ export default function HiringViewer() {
   /* ── Status update ─────────────────────────────────────── */
   async function updateStatus(id: string, newStatus: string) {
     const prevApplicants = [...applicants];
+    let hadAuthzError = false;
 
     /* Optimistic update — instantly reflect in UI */
     setApplicants((prev) =>
@@ -122,12 +134,33 @@ export default function HiringViewer() {
         },
         body: JSON.stringify({ id, status: newStatus }),
       });
-      if (!res.ok) throw new Error("Status update failed");
-    } catch {
-      alert("Failed to update status");
+      if (!res.ok) {
+        const info = await getErrorInfoFromResponse(res, "Status update failed");
+        if (info.authz) {
+          setAuthzState(info.authz);
+          hadAuthzError = true;
+          throw new Error(info.message);
+        }
+        throw new Error(info.message);
+      }
+      setAuthzState(null);
+    } catch (err) {
+      if (!hadAuthzError) {
+        alert(toUserSafeMessageFromUnknown(err, "Unable to update application status right now."));
+      }
       setApplicants(prevApplicants);
     }
   }
+
+  const handleAuthzAction = useCallback(() => {
+    if (!authzState) return;
+    if (authzState.status === 401) {
+      sessionStorage.removeItem("ops_session");
+      window.location.reload();
+      return;
+    }
+    window.location.href = "/staff-hub";
+  }, [authzState]);
 
   /* ── Filtered list ─────────────────────────────────────── */
   const filtered =
@@ -146,7 +179,7 @@ export default function HiringViewer() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white">Applicants</h2>
+          <h2 className="text-lg font-semibold text-white">Applicants</h2>
           <p className="text-stone-500 text-sm">
             {applicants.length} total application{applicants.length !== 1 ? "s" : ""}
           </p>
@@ -167,7 +200,7 @@ export default function HiringViewer() {
           <button
             key={s}
             onClick={() => setFilterStatus(s)}
-            className={`px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider border transition ${
+            className={`min-h-[36px] px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider border transition ${
               filterStatus === s
                 ? "bg-amber-600/20 text-amber-400 border-amber-500/40"
                 : "bg-stone-900 text-stone-500 border-stone-800 hover:border-stone-600"
@@ -179,7 +212,9 @@ export default function HiringViewer() {
       </div>
 
       {/* List */}
-      {loading ? (
+      {authzState ? (
+        <AuthzErrorStateCard state={authzState} onAction={handleAuthzAction} />
+      ) : loading ? (
         <div className="space-y-3">
           {[...Array(3)].map((_, i) => (
             <div
@@ -202,7 +237,7 @@ export default function HiringViewer() {
             return (
               <div
                 key={a.id}
-                className="bg-stone-900/60 border border-stone-800 rounded-xl overflow-hidden transition hover:border-stone-700"
+                className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden transition hover:border-stone-700"
               >
                 {/* Row header */}
                 <button
@@ -294,7 +329,7 @@ export default function HiringViewer() {
                         <button
                           key={s}
                           onClick={() => updateStatus(a.id, s)}
-                          className={`px-3 py-1 rounded-md text-xs font-medium border transition hover:opacity-80 ${
+                          className={`px-3 py-1 rounded-full text-xs font-medium border transition hover:opacity-80 ${
                             STATUS_STYLE[s]
                           }`}
                         >

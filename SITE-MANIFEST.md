@@ -310,7 +310,7 @@
 | `/portal` | Supabase JWT | Resident portal (loyalty + parcels) ✅ *Audit #21: opaque QR/barcode (no email leak), auth rate limiting, input caps, safe logging* |
 | `/resident` | Supabase JWT | Resident registration ✅ *Audit #21: input caps, generic errors, bot timing guard* |
 | `/parcels` | Supabase JWT + RLS | Parcel lookup ✅ *Audit #6: auth gate + scoped query + RLS defense-in-depth* |
-| `/parcels/monitor` | None | Smart TV kiosk (PII-masked VIEW) |
+| `/manager/parcels/monitor` | Middleware PIN | Smart TV kiosk (PII-masked VIEW) — moved under ops-gate (C3 fix) |
 | `/manager` | Middleware PIN | Manager dashboard |
 | `/admin/dashboard` | Middleware + OpsGate (manager) | Revenue, payroll, staff data ✅ *Audit #8: FE-C1/FE-C2 verified resolved* |
 | `/admin/inventory` | Middleware + OpsGate (manager) | Inventory management ✅ *Audit #8: rewritten to use PIN auth + Netlify functions* |

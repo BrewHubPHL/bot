@@ -25,6 +25,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Maximum items per cart to prevent abuse
 const MAX_CART_SIZE = 50;
 const MAX_QUANTITY = 20;
+const MAX_MODS_PER_ITEM = 10;
+
+// ── Known modifiers with server-authoritative prices (cents) ──
+// Client sends modifier names only; server looks up costs here.
+const KNOWN_MODIFIERS = {
+  'Oat Milk': 75,
+  'Almond Milk': 75,
+  'Extra Shot': 100,
+  'Vanilla Syrup': 50,
+  'Caramel Syrup': 50,
+  'Make it Iced': 0,
+};
 
 // ── CORS strict allowlist ─────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -89,7 +101,14 @@ exports.handler = async (event) => {
       return json(400, { error: 'Client-supplied totals/prices are not accepted. Send items only.' });
     }
 
-    const { terminal, user_id, customer_email: ce, customer_name: cn } = body;
+    const { terminal, user_id, customer_email: ce, customer_name: cn, offline_id } = body;
+
+    // ── Require customer_name for non-terminal (site/guest) orders ───
+    // POS terminal flow supplies the name via staff input; site orders must
+    // include it so baristas have a callout name on the KDS.
+    if (!terminal && (!cn || typeof cn !== 'string' || cn.trim().length === 0)) {
+      return json(400, { error: 'customer_name is required for cafe orders.' });
+    }
 
     // Accept both 'items' and 'cart' keys (backwards compat with legacy UIs)
     const rawItems = body.items || body.cart;
@@ -119,10 +138,23 @@ exports.handler = async (event) => {
         return json(400, { error: `Invalid quantity. Must be 1–${MAX_QUANTITY}.` });
       }
 
+      // Validate customizations (modifier names only — server looks up prices)
+      const rawMods = Array.isArray(entry?.customizations) ? entry.customizations : [];
+      if (rawMods.length > MAX_MODS_PER_ITEM) {
+        return json(400, { error: `Maximum ${MAX_MODS_PER_ITEM} modifiers per item.` });
+      }
+      const validMods = [];
+      for (const mod of rawMods) {
+        if (typeof mod !== 'string' || !Object.prototype.hasOwnProperty.call(KNOWN_MODIFIERS, mod)) {
+          return json(400, { error: `Unknown modifier: ${String(mod).slice(0, 50)}` });
+        }
+        validMods.push(mod);
+      }
+
       if (pid && typeof pid === 'string' && UUID_RE.test(pid)) {
-        normalized.push({ product_id: pid, quantity: qty });
+        normalized.push({ product_id: pid, quantity: qty, customizations: validMods });
       } else if (name && typeof name === 'string' && name.length > 0 && name.length <= 200) {
-        normalized.push({ name, quantity: qty });
+        normalized.push({ name, quantity: qty, customizations: validMods });
       } else {
         return json(400, { error: 'Each item must have a valid product_id (UUID) or name (string).' });
       }
@@ -170,31 +202,40 @@ exports.handler = async (event) => {
     const foundByName = {};
     for (const p of productsByName) foundByName[p.name] = p;
 
-    // ── Server-side price calculation ────────────────────────
-    // Merge quantities per resolved product
-    const qtyMap = {};  // product DB id → { product, totalQty }
+    // ── Server-side price calculation (with modifier costs) ──
+    // Use composite key (product + sorted mods) so items with
+    // different customizations stay as separate line items.
+    const qtyMap = {};
 
     for (const item of normalized) {
       const product = item.product_id ? foundById[item.product_id] : foundByName[item.name];
       if (!product) {
         return json(400, { error: `Unknown or inactive product: ${item.product_id || item.name}` });
       }
-      if (!qtyMap[product.id]) {
-        qtyMap[product.id] = { product, totalQty: 0 };
+      const mods = item.customizations || [];
+      const modKey = mods.slice().sort().join(',');
+      const compositeKey = `${product.id}::${modKey}`;
+      if (!qtyMap[compositeKey]) {
+        const modCostCents = mods.reduce(
+          (sum, m) => sum + (KNOWN_MODIFIERS[m] || 0), 0
+        );
+        qtyMap[compositeKey] = { product, totalQty: 0, customizations: mods, modCostCents };
       }
-      qtyMap[product.id].totalQty += item.quantity;
+      qtyMap[compositeKey].totalQty += item.quantity;
     }
 
     let totalCents = 0;
     const validatedItems = [];
 
-    for (const { product, totalQty } of Object.values(qtyMap)) {
-      const lineCents = product.price_cents * totalQty;
+    for (const { product, totalQty, customizations, modCostCents } of Object.values(qtyMap)) {
+      const unitCents = product.price_cents + modCostCents;
+      const lineCents = unitCents * totalQty;
       totalCents += lineCents;
       validatedItems.push({
         drink_name: product.name,
-        price: product.price_cents / 100,
+        price: unitCents / 100,
         quantity: totalQty,
+        customizations: customizations.length > 0 ? customizations : null,
       });
     }
 
@@ -213,6 +254,7 @@ exports.handler = async (event) => {
 
     const orderRow = {
       status: orderStatus,
+      type: 'cafe',
       total_amount_cents: totalCents,
     };
     // Only attach user_id / customer fields if provided (prevents null FK issues)
@@ -224,16 +266,34 @@ exports.handler = async (event) => {
     if (effectiveEmail && typeof effectiveEmail === 'string') orderRow.customer_email = effectiveEmail;
     if (cn && typeof cn === 'string') orderRow.customer_name = cn;
 
-    const { data: order, error: orderErr } = await supabase
+    // Attach offline_id for idempotent offline sync (dedup)
+    if (offline_id && typeof offline_id === 'string' && offline_id.length > 0 && offline_id.length <= 200) {
+      orderRow.offline_id = offline_id;
+    }
+
+    const { data: insertedOrder, error: orderErr } = await supabase
       .from('orders')
       .insert(orderRow)
       .select()
       .single();
 
     if (orderErr) {
+      // Offline dedup: unique constraint violation on offline_id → return existing order
+      if (orderErr.code === '23505' && orderRow.offline_id) {
+        const { data: existing } = await supabase
+          .from('orders')
+          .select()
+          .eq('offline_id', orderRow.offline_id)
+          .single();
+        if (existing) {
+          console.log(`[CAFE] Dedup: offline_id ${orderRow.offline_id} already exists, returning existing order ${existing.id}`);
+          return json(200, { success: true, order: existing, total_cents: existing.total_amount_cents, deduplicated: true });
+        }
+      }
       console.error('Cafe order create error:', orderErr?.message);
       return json(500, { error: 'Failed to create order' });
     }
+    const order = insertedOrder;
 
     // Insert coffee line items (one row per unit for KDS compatibility)
     const coffeeItems = [];
@@ -243,6 +303,7 @@ exports.handler = async (event) => {
           order_id: order.id,
           drink_name: item.drink_name,
           price: item.price,
+          customizations: item.customizations || null,
         });
       }
     }
@@ -252,8 +313,9 @@ exports.handler = async (event) => {
       .insert(coffeeItems);
 
     if (itemErr) {
-      console.error('Coffee orders insert error:', itemErr?.message);
-      // Order was created, items failed - log but don't fail completely
+      // Coffee items failed — rollback the parent order to prevent a ghost KDS card
+      await supabase.from('orders').delete().eq('id', order.id);
+      return json(500, { error: 'Failed to save order items. Please try again.' });
     }
 
     // Send order confirmation email if customer email provided

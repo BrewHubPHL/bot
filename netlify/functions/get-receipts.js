@@ -5,7 +5,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, sanitizedError } = require('./_auth');
 const { formBucket } = require('./_token-bucket');
-const { sanitizeInput } = require('./_sanitize');
 
 const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -78,7 +77,13 @@ exports.handler = async (event) => {
 
     const receipts = (data || []).map(r => {
       let txt = String(r.receipt_text || '').slice(0, 2000);
-      txt = sanitizeInput(txt);
+      // NOTE: Do NOT apply sanitizeInput() here — it collapses \s{2,}
+      // (newlines + alignment spaces) into single spaces, destroying the
+      // 32-column fixed-width receipt layout.  Receipt text is generated
+      // server-side by _receipt.js and rendered in a React <pre> tag
+      // (auto-escaped), so XSS risk is negligible.  redactPII is safe
+      // because it only targets email/phone patterns without touching
+      // whitespace structure.
       txt = redactPII(txt);
       return { id: r.id, receipt_text: txt, created_at: r.created_at };
     });

@@ -1,8 +1,9 @@
-﻿"use client";
+"use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { Download, RefreshCw, X, Clock, AlertTriangle } from "lucide-react";
 import ManagerChallengeModal from "@/components/ManagerChallengeModal";
+import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 
 const API_BASE =
   typeof window !== "undefined" && window.location.hostname === "localhost"
@@ -327,7 +328,7 @@ export default function PayrollSection() {
       // Refresh payroll summary
       fetchSummary();
     } catch (err: unknown) {
-      setFixError(err instanceof Error ? err.message : "Failed to fix clock-out");
+      setFixError(toUserSafeMessageFromUnknown(err, "Unable to fix clock-out right now."));
     } finally {
       setFixBusy(false);
     }
@@ -367,7 +368,7 @@ export default function PayrollSection() {
 
       fetchSummary();
     } catch (err: unknown) {
-      setFixError(err instanceof Error ? err.message : "Failed to fix clock-out");
+      setFixError(toUserSafeMessageFromUnknown(err, "Unable to fix clock-out right now."));
     } finally {
       setFixBusy(false);
     }
@@ -375,7 +376,7 @@ export default function PayrollSection() {
 
   // ---- Render ---------------------------------------------------
   return (
-    <section className="space-y-4 mb-8">
+    <section className="space-y-4">
 
       {/* ── Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -387,25 +388,25 @@ export default function PayrollSection() {
             value={startDate}
             max={endDate}
             onChange={(e) => { setStartDate(e.target.value); setActivePreset(""); }}
-            className="bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-2 text-[#f5f5f5]
+            className="bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-stone-100
                        focus:outline-none focus:ring-1 focus:ring-amber-500 min-h-[44px]"
           />
-          <span className="text-gray-500">→</span>
+          <span className="text-stone-500">→</span>
           <input
             type="date"
             value={endDate}
             min={startDate}
             onChange={(e) => { setEndDate(e.target.value); setActivePreset(""); }}
-            className="bg-[#1a1a1a] border border-[#333] rounded-lg px-3 py-2 text-[#f5f5f5]
+            className="bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-stone-100
                        focus:outline-none focus:ring-1 focus:ring-amber-500 min-h-[44px]"
           />
           <button
             type="button"
             onClick={() => fetchSummary()}
             aria-label="Refresh"
-            className="flex items-center justify-center w-11 min-h-[44px] rounded-lg
-                       bg-[#1a1a1a] border border-[#333] hover:border-amber-500/50
-                       text-gray-400 hover:text-white transition-colors"
+            className="flex items-center justify-center w-11 min-h-[44px] rounded-xl
+                       bg-stone-900 border border-stone-800 hover:border-stone-600
+                       text-stone-400 hover:text-white transition-colors"
           >
             <RefreshCw size={16} />
           </button>
@@ -443,7 +444,7 @@ export default function PayrollSection() {
                         ${
                           activePreset === label
                             ? "bg-amber-500/20 border-amber-500/60 text-amber-300"
-                            : "bg-[#1a1a1a] border-[#333] text-gray-400 hover:border-amber-500/40 hover:text-white"
+                            : "bg-stone-900 border-stone-800 text-stone-400 hover:border-amber-500/40 hover:text-white"
                         }`}
           >
             {label}
@@ -454,23 +455,23 @@ export default function PayrollSection() {
       {/* -- Stat tiles -- */}
       {!summaryLoading && summaryRows.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-4 flex flex-col justify-center">
-            <div className="text-xs text-gray-500 mb-1">Total Hours</div>
-            <div className="text-2xl font-bold text-[#f5f5f5]">{totalHours.toFixed(1)} h</div>
+          <div className="bg-stone-900 border border-stone-800 rounded-xl px-4 py-4 flex flex-col justify-center">
+            <div className="text-xs text-stone-500 mb-1">Total Hours</div>
+            <div className="text-2xl font-bold text-stone-100">{totalHours.toFixed(1)} h</div>
           </div>
-          <div className="bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-4 flex flex-col justify-center">
-            <div className="text-xs text-gray-500 mb-1">Adjustments</div>
-            <div className={`text-2xl font-bold ${totalAdjMins !== 0 ? "text-amber-400" : "text-gray-500"}`}>
+          <div className="bg-stone-900 border border-stone-800 rounded-xl px-4 py-4 flex flex-col justify-center">
+            <div className="text-xs text-stone-500 mb-1">Adjustments</div>
+            <div className={`text-2xl font-bold ${totalAdjMins !== 0 ? "text-amber-400" : "text-stone-500"}`}>
               {totalAdjMins > 0 ? "+" : ""}{(totalAdjMins / 60).toFixed(1)} h
             </div>
           </div>
-          <div className="bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-4 flex flex-col justify-center">
-            <div className="text-xs text-gray-500 mb-1">Est. Gross Pay</div>
+          <div className="bg-stone-900 border border-stone-800 rounded-xl px-4 py-4 flex flex-col justify-center">
+            <div className="text-xs text-stone-500 mb-1">Est. Gross Pay</div>
             <div className="text-2xl font-bold text-green-400">${totalGross.toFixed(2)}</div>
           </div>
-          <div className="bg-[#1a1a1a] border border-[#333] rounded-xl px-4 py-4 flex flex-col justify-center">
-            <div className="text-xs text-gray-500 mb-1">Open Shifts</div>
-            <div className={`text-2xl font-bold ${hasOpenShifts ? "text-amber-400" : "text-gray-500"}`}>
+          <div className="bg-stone-900 border border-stone-800 rounded-xl px-4 py-4 flex flex-col justify-center">
+            <div className="text-xs text-stone-500 mb-1">Open Shifts</div>
+            <div className={`text-2xl font-bold ${hasOpenShifts ? "text-amber-400" : "text-stone-500"}`}>
               {openShifts.length}
             </div>
           </div>
@@ -491,12 +492,12 @@ export default function PayrollSection() {
 
       {/* -- Open Shifts Card -- */}
       {openShifts.length > 0 && !summaryLoading && (
-        <div className="bg-[#1a1a1a] border border-amber-500/30 rounded-xl p-4">
+        <div className="bg-stone-900 border border-amber-500/30 rounded-xl p-4">
           <h3 className="text-sm font-bold text-amber-400 mb-3 flex items-center gap-2">
             <span>⏱</span>
             Open Shifts — {openShifts.length} Unfinalised
           </h3>
-          <p className="text-xs text-gray-400 mb-3">
+          <p className="text-xs text-stone-400 mb-3">
             These employees are still clocked in. Their hours will{" "}
             <strong className="text-white">not</strong> count toward payroll
             totals until the shift is closed.
@@ -511,14 +512,14 @@ export default function PayrollSection() {
               return (
                 <div
                   key={os.id}
-                  className="flex items-center justify-between gap-3 bg-[#111]
-                             rounded-xl px-4 py-3 border border-[#333]"
+                  className="flex items-center justify-between gap-3 bg-stone-950
+                             rounded-xl px-4 py-3 border border-stone-800"
                 >
                   <div className="min-w-0">
                     <span className="font-semibold text-sm truncate block">
                       {os.employee_email}
                     </span>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-stone-500">
                       Clocked in{" "}
                       <span
                         className={
@@ -572,12 +573,12 @@ export default function PayrollSection() {
       )}
 
       {/* -- Pay Period Summary Table (single source of truth) -- */}
-      <div className="bg-[#1a1a1a] border border-[#333] rounded-xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-[#333] flex items-center justify-between min-h-[56px]">
-          <h3 className="text-sm font-bold text-[#f5f5f5] flex items-center gap-2">
+      <div className="bg-stone-900 border border-stone-800 rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-stone-800 flex items-center justify-between min-h-[56px]">
+          <h3 className="text-sm font-bold text-stone-100 flex items-center gap-2">
             <span>ðŸ“Š</span> Pay Period Summary
           </h3>
-          <span className="text-[10px] text-gray-600">
+          <span className="text-[10px] text-stone-600">
             Source: v_payroll_summary Â· excludes active shifts
           </span>
         </div>
@@ -585,7 +586,7 @@ export default function PayrollSection() {
         <div
           className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr]
                      gap-2 px-5 py-2 text-xs font-bold uppercase tracking-wider
-                     text-gray-500 bg-[#222]"
+                     text-stone-500 bg-stone-800"
         >
           <span>Staff</span>
           <span>Period</span>
@@ -596,9 +597,13 @@ export default function PayrollSection() {
         </div>
 
         {summaryLoading ? (
-          <div className="px-5 py-6 text-gray-500 text-sm">Loadingâ€¦</div>
+          <div className="space-y-2 px-5 py-6">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-10 bg-stone-800 rounded-lg animate-pulse" />
+            ))}
+          </div>
         ) : summaryRows.length === 0 ? (
-          <div className="px-5 py-6 text-gray-500 text-sm">
+          <div className="px-5 py-6 text-stone-500 text-sm">
             No payroll data for this period.
           </div>
         ) : (
@@ -606,13 +611,13 @@ export default function PayrollSection() {
             <div
               key={`${row.employee_email}-${row.pay_period_start}-${idx}`}
               className="flex flex-col md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr]
-                         gap-2 px-5 py-4 border-t border-[#222] text-sm"
+                         gap-2 px-5 py-4 border-t border-stone-800 text-sm"
             >
               <div className="min-w-0">
                 <div className="font-semibold truncate">
                   {row.employee_name || row.employee_email}
                 </div>
-                <div className="text-xs text-gray-500 truncate">
+                <div className="text-xs text-stone-500 truncate">
                   {row.employee_email}
                 </div>
                 {row.active_shifts > 0 && (
@@ -626,33 +631,33 @@ export default function PayrollSection() {
                   </span>
                 )}
               </div>
-              <div className="text-xs text-gray-400">
-                <span className="md:hidden font-semibold text-gray-500">Period: </span>
+              <div className="text-xs text-stone-400">
+                <span className="md:hidden font-semibold text-stone-500">Period: </span>
                 {row.pay_period_start}
                 <br />
-                <span className="text-gray-600">â†’</span> {row.pay_period_end}
+                <span className="text-stone-600">→</span> {row.pay_period_end}
               </div>
               <div>
-                <span className="md:hidden text-xs font-semibold text-gray-500">Clocked: </span>
+                <span className="md:hidden text-xs font-semibold text-stone-500">Clocked: </span>
                 {(row.clocked_minutes / 60).toFixed(1)} h
               </div>
               <div
                 className={
                   row.adjustment_minutes !== 0
                     ? "text-amber-400 font-semibold"
-                    : "text-gray-500"
+                    : "text-stone-500"
                 }
               >
-                <span className="md:hidden text-xs font-semibold text-gray-500">Adj: </span>
+                <span className="md:hidden text-xs font-semibold text-stone-500">Adj: </span>
                 {row.adjustment_minutes > 0 ? "+" : ""}
                 {(row.adjustment_minutes / 60).toFixed(1)} h
               </div>
               <div className="font-semibold">
-                <span className="md:hidden text-xs font-semibold text-gray-500">Total: </span>
+                <span className="md:hidden text-xs font-semibold text-stone-500">Total: </span>
                 {row.total_hours.toFixed(1)} h
               </div>
               <div className="text-green-400 font-semibold">
-                <span className="md:hidden text-xs font-semibold text-gray-500">Gross: </span>
+                <span className="md:hidden text-xs font-semibold text-stone-500">Gross: </span>
                 ${row.gross_pay.toFixed(2)}
               </div>
             </div>
@@ -691,24 +696,24 @@ export default function PayrollSection() {
             aria-modal="true"
             aria-labelledby="fix-sheet-title"
             className={`fixed inset-x-0 bottom-0 z-50 flex flex-col
-                        bg-[#1a1a1a] border-t border-[#444] rounded-t-2xl
+                        bg-stone-900 border-t border-stone-800 rounded-t-xl
                         shadow-2xl transition-transform duration-300 ease-out
                         max-h-[90dvh] overflow-y-auto
                         ${sheetVisible ? "translate-y-0" : "translate-y-full"}`}
           >
             {/* Drag handle */}
             <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-              <div className="w-10 h-1 rounded-full bg-[#555]" />
+              <div className="w-10 h-1 rounded-full bg-stone-600" />
             </div>
 
             {/* Header row */}
-            <div className="flex items-start justify-between px-5 pt-3 pb-4 border-b border-[#333] flex-shrink-0">
+            <div className="flex items-start justify-between px-5 pt-3 pb-4 border-b border-stone-800 flex-shrink-0">
               <div className="min-w-0 flex-1 pr-3">
                 <h2 id="fix-sheet-title" className="text-base font-bold text-white flex items-center gap-2">
                   <Clock size={16} className="text-amber-400 flex-shrink-0" />
                   Fix Clock-Out
                 </h2>
-                <div className="mt-1 text-sm text-gray-300 font-semibold truncate">
+                <div className="mt-1 text-sm text-stone-300 font-semibold truncate">
                   {sheetTarget.displayName}
                 </div>
                 {(() => {
@@ -719,7 +724,7 @@ export default function PayrollSection() {
                   const isAlerted =
                     hoursAgo >= MISSED_PUNCH_THRESHOLD_MS / 3_600_000;
                   return (
-                    <div className="mt-1 text-xs text-gray-400 flex flex-wrap items-center gap-1.5">
+                    <div className="mt-1 text-xs text-stone-400 flex flex-wrap items-center gap-1.5">
                       <span>Clocked in</span>
                       <span
                         className={
@@ -757,7 +762,7 @@ export default function PayrollSection() {
                 onClick={closeSheet}
                 aria-label="Close"
                 className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full
-                           bg-[#333] hover:bg-[#444] text-gray-400 hover:text-white
+                           bg-stone-700 hover:bg-stone-600 text-stone-400 hover:text-white
                            transition-colors active:scale-[0.95]"
               >
                 <X size={18} />
@@ -782,7 +787,7 @@ export default function PayrollSection() {
               <div className="space-y-2">
                 <label
                   htmlFor="fix-sheet-time"
-                  className="block text-xs font-semibold text-gray-400 uppercase tracking-wider"
+                  className="block text-xs font-semibold text-stone-400 uppercase tracking-wider"
                 >
                   Clock-Out Time
                 </label>
@@ -792,18 +797,18 @@ export default function PayrollSection() {
                   value={fixTime}
                   onChange={(e) => setFixTime(e.target.value)}
                   min={utcToEasternDatetimeLocal(sheetTarget.clockInISO)}
-                  className="w-full bg-[#111] border border-[#444] rounded-xl px-4
+                  className="w-full bg-stone-950 border border-stone-700 rounded-xl px-4
                              text-sm text-white focus:outline-none focus:ring-2
                              focus:ring-amber-500/60 min-h-[52px]"
                 />
-                <p className="text-[10px] text-gray-600">All times Eastern (ET)</p>
+                <p className="text-[10px] text-stone-600">All times Eastern (ET)</p>
               </div>
 
               {/* Reason */}
               <div className="space-y-2">
                 <label
                   htmlFor="fix-sheet-reason"
-                  className="block text-xs font-semibold text-gray-400 uppercase tracking-wider"
+                  className="block text-xs font-semibold text-stone-400 uppercase tracking-wider"
                 >
                   Reason <span className="text-red-400">*</span>
                 </label>
@@ -814,12 +819,12 @@ export default function PayrollSection() {
                   onChange={(e) => setFixReason(e.target.value)}
                   placeholder="e.g. Staff forgot to clock out"
                   maxLength={200}
-                  className="w-full bg-[#111] border border-[#444] rounded-xl px-4
-                             text-sm text-white placeholder:text-gray-600
+                  className="w-full bg-stone-950 border border-stone-700 rounded-xl px-4
+                             text-sm text-white placeholder:text-stone-600
                              focus:outline-none focus:ring-2 focus:ring-amber-500/60 min-h-[52px]"
                 />
                 {fixReason.length > 0 && (
-                  <p className="text-[10px] text-gray-600 text-right">
+                  <p className="text-[10px] text-stone-600 text-right">
                     {fixReason.length}/200
                   </p>
                 )}
@@ -830,8 +835,8 @@ export default function PayrollSection() {
                 <button
                   type="button"
                   onClick={closeSheet}
-                  className="flex-1 min-h-[52px] rounded-xl border border-[#444]
-                             text-gray-400 hover:text-white hover:border-gray-400
+                  className="flex-1 min-h-[52px] rounded-xl border border-stone-700
+                             text-stone-400 hover:text-white hover:border-stone-400
                              text-sm font-semibold transition-all active:scale-[0.98]"
                 >
                   Cancel

@@ -66,7 +66,7 @@ brewhubbot/
 | `/login` | Staff PIN login |
 | `/menu` | Public menu display |
 | `/parcels` | Parcel history (**⚠ unauthenticated — audit issue FE-C3**) |
-| `/parcels/monitor` | Real-time parcel monitor (Supabase Realtime) |
+| `/manager/parcels/monitor` | Real-time parcel monitor (ops-gated, C3 fix) |
 | `/queue` | Public lobby order board (first names only) |
 | `/resident` | Resident lookup / parcel log |
 | `/staff-hub` | Staff portal (clock, orders, inventory) |

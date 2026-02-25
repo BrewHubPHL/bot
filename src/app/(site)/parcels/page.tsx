@@ -40,11 +40,11 @@ export default function ParcelsPage() {
     const { data, error: fetchError } = await supabase
       .from("parcels")
       .select("id, tracking_number, carrier, recipient_name, unit_number, status, received_at, picked_up_at")
-      .ilike("recipient_email", userEmail)
+      .eq("recipient_email", userEmail)
       .order("received_at", { ascending: false })
       .limit(20);
     if (fetchError) {
-      setError(fetchError.message);
+      setError("Unable to load your parcels right now.");
     } else {
       setResults(data || []);
     }

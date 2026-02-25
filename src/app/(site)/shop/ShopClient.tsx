@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ShoppingCart, X, Plus, Minus, Trash2, Coffee, ShoppingBag } from 'lucide-react';
 import Link from 'next/link';
 
 type ShopTab = 'menu' | 'merch';
 
 interface Product {
+  id: string;
   name: string;
   price_cents: number;
   description: string;
@@ -17,6 +18,7 @@ interface Product {
 }
 
 interface CartItem {
+  id: string;
   name: string;
   price_cents: number;
   quantity: number;
@@ -59,6 +61,17 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
     localStorage.setItem('brewhub_cart', JSON.stringify(cart));
   }, [cart]);
 
+  // Close cart drawer on Escape key
+  const closeCart = useCallback(() => setCartOpen(false), []);
+  useEffect(() => {
+    if (!cartOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeCart();
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [cartOpen, closeCart]);
+
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
   const totalCents = cart.reduce((sum, item) => sum + (item.price_cents * item.quantity), 0);
 
@@ -76,17 +89,20 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
   const menuCount = products.filter(p => classifyProduct(p) === 'menu').length;
   const merchCount = products.filter(p => classifyProduct(p) === 'merch').length;
 
+  const MAX_QTY_PER_PRODUCT = 20;
+
   function addToCart(product: Product) {
     setCart(prev => {
       const existing = prev.find(item => item.name === product.name);
       if (existing) {
+        if (existing.quantity >= MAX_QTY_PER_PRODUCT) return prev;
         return prev.map(item =>
           item.name === product.name
-            ? { ...item, quantity: item.quantity + 1 }
+            ? { ...item, quantity: Math.min(item.quantity + 1, MAX_QTY_PER_PRODUCT) }
             : item
         );
       }
-      return [...prev, { name: product.name, price_cents: product.price_cents, quantity: 1 }];
+      return [...prev, { id: product.id, name: product.name, price_cents: product.price_cents, quantity: 1 }];
     });
     setAddedProduct(product.name);
     setTimeout(() => setAddedProduct(null), 1000);
@@ -95,9 +111,11 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
   function updateQty(index: number, delta: number) {
     setCart(prev => {
       const updated = [...prev];
-      updated[index].quantity += delta;
+      updated[index] = { ...updated[index], quantity: updated[index].quantity + delta };
       if (updated[index].quantity <= 0) {
         updated.splice(index, 1);
+      } else if (updated[index].quantity > MAX_QTY_PER_PRODUCT) {
+        updated[index] = { ...updated[index], quantity: MAX_QTY_PER_PRODUCT };
       }
       return updated;
     });
@@ -288,6 +306,9 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
 
       {/* Cart Drawer */}
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Shopping cart"
         className={`fixed top-0 right-0 h-full w-full max-w-md bg-white shadow-2xl z-50 transform transition-transform duration-300 ${
           cartOpen ? 'translate-x-0' : 'translate-x-full'
         }`}

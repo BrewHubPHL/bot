@@ -29,7 +29,7 @@ export interface CachedMenuItem {
 
 export interface OfflineOrder {
   id: string; // client-generated UUID
-  items: { product_id: string; name: string; quantity: number; price_cents: number }[];
+  items: { product_id: string; name: string; quantity: number; price_cents: number; customizations?: string[] }[];
   total_cents: number;
   customer_name?: string;
   payment_method: "cash" | "pending"; // only cash works offline

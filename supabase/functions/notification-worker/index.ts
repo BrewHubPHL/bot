@@ -131,7 +131,7 @@ serve(async (req) => {
  * Send parcel arrival notification via email (and SMS if phone provided)
  */
 async function sendParcelNotification(payload: any) {
-  const { recipient_name, recipient_email, recipient_phone, tracking_number, carrier } = payload
+  const { recipient_name, recipient_email, recipient_phone, tracking_number, carrier, pickup_code, value_tier } = payload
 
   if (!recipient_email && !recipient_phone) {
     throw new Error('No contact info: need email or phone')
@@ -149,7 +149,7 @@ async function sendParcelNotification(payload: any) {
         from: 'BrewHub PHL <info@brewhubphl.com>',
         to: [recipient_email],
         subject: 'Your Parcel is Ready at the Hub! 📦☕',
-        html: buildEmailHtml(recipient_name, carrier, tracking_number),
+        html: buildEmailHtml(recipient_name, carrier, tracking_number, pickup_code, value_tier),
       }),
     })
 
@@ -187,7 +187,9 @@ async function sendParcelNotification(payload: any) {
       // ── Opt-out check passed — send the SMS ──
       const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`
       const authHeader = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)
-      const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking_number || 'Parcel'}) is at the Hub. 📦 Grab a coffee when you swing by!\n\nReply STOP to opt out.`
+      const codeSnippet = pickup_code ? ` Your pickup code: ${pickup_code}.` : ''
+      const idWarning = (value_tier === 'high_value' || value_tier === 'premium') ? ' Photo ID required for pickup.' : ''
+      const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking_number || 'Parcel'}) is at the Hub.${codeSnippet}${idWarning} 📦 Grab a coffee when you swing by!\n\nReply STOP to opt out.`
 
       const smsRes = await fetch(twilioUrl, {
         method: 'POST',
@@ -228,23 +230,41 @@ function maskPhone(p?: string) {
   return p.replace(/\d(?=\d{4})/g, '*')
 }
 
-function buildEmailHtml(name: string, carrier: string, tracking: string): string {
+// HTML-escape user-supplied strings to prevent injection in emails
+function escapeHtml(s: string): string {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function buildEmailHtml(name: string, carrier: string, tracking: string, pickupCode?: string, valueTier?: string): string {
+  const pickupCodeBlock = pickupCode
+    ? `<div style="margin: 20px 0; padding: 15px; background: #f8f4e8; border: 2px solid #d4a843; border-radius: 8px; text-align: center;">
+        <p style="margin: 0 0 5px 0; font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 2px;">Your Pickup Code</p>
+        <p style="margin: 0; font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #333; font-family: monospace;">${escapeHtml(pickupCode)}</p>
+        <p style="margin: 8px 0 0 0; font-size: 11px; color: #888;">Show this code to the barista when you pick up your package.</p>
+        ${(valueTier === 'high_value' || valueTier === 'premium') ? '<p style="margin: 8px 0 0 0; font-size: 11px; color: #c0392b; font-weight: bold;">⚠️ Government-issued photo ID required for high-value pickup.</p>' : ''}
+      </div>`
+    : ''
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
       <h1 style="color: #333;">Package Arrived!</h1>
-      <p>Hi ${name || 'Neighbor'},</p>
-      <p>Your package from <strong>${carrier || 'a carrier'}</strong> is officially here and secured at <strong>BrewHub PHL</strong>.</p>
+      <p>Hi ${escapeHtml(name) || 'Neighbor'},</p>
+      <p>Your package from <strong>${escapeHtml(carrier) || 'a carrier'}</strong> is officially here and secured at <strong>BrewHub PHL</strong>.</p>
       
       <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 5px solid #000;">
-        <p style="margin: 0;"><strong>Tracking #:</strong> ${tracking || 'Available for pickup'}</p>
-        <p style="margin: 5px 0 0 0;"><strong>Pickup Location:</strong> BrewHub PHL Cafe & Hub</p>
+        <p style="margin: 0;"><strong>Tracking #:</strong> ${escapeHtml(tracking) || 'Available for pickup'}</p>
+        <p style="margin: 5px 0 0 0;"><strong>Pickup Location:</strong> BrewHub PHL Cafe &amp; Hub</p>
       </div>
+
+      ${pickupCodeBlock}
 
       <p>Feel free to stop by during our normal cafe hours to pick it up. We have fresh coffee waiting if you need a boost!</p>
       
-      <p>See you soon,<br><strong>Thomas & The BrewHub PHL Team</strong></p>
+      <p>See you soon,<br><strong>Thomas &amp; The BrewHub PHL Team</strong></p>
       <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-      <p style="font-size: 12px; color: #999; text-align: center;">BrewHub PHL | ☕ Cafe & 📦 Parcel Services</p>
+      <p style="font-size: 12px; color: #999; text-align: center;">BrewHub PHL | ☕ Cafe &amp; 📦 Parcel Services</p>
     </div>
   `
 }

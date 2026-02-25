@@ -81,7 +81,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { cart, sourceId, customerEmail, customerName, shippingAddress } = JSON.parse(event.body || '{}');
+    const { cart, sourceId, customerEmail, customerName, shippingAddress, fulfillmentType } = JSON.parse(event.body || '{}');
 
     // Validate required fields
     if (!cart || !Array.isArray(cart) || cart.length === 0) {
@@ -90,6 +90,32 @@ exports.handler = async (event) => {
 
     if (!sourceId) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Payment source required' }) };
+    }
+
+    // Email validation (Fix #6)
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    if (customerEmail && !EMAIL_RE.test(String(customerEmail).trim())) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid email address' }) };
+    }
+
+    // Shipping address validation (Fix #18)
+    if (fulfillmentType === 'shipping') {
+      if (!shippingAddress || typeof shippingAddress !== 'object') {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Shipping address is required for shipping orders' }) };
+      }
+      const { line1, city, state, zip } = shippingAddress;
+      if (!line1 || !String(line1).trim()) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Shipping address line 1 is required' }) };
+      }
+      if (!city || !String(city).trim()) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Shipping city is required' }) };
+      }
+      if (!state || !String(state).trim()) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Shipping state is required' }) };
+      }
+      if (!zip || !/^\d{5}(-\d{4})?$/.test(String(zip).trim())) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'A valid ZIP code is required for shipping' }) };
+      }
     }
 
     // Server-side price lookup — NEVER trust client prices
@@ -144,7 +170,7 @@ exports.handler = async (event) => {
         };
       }
 
-      const qty = Math.min(50, Math.max(1, parseInt(item.quantity) || 1));
+      const qty = Math.min(20, Math.max(1, parseInt(item.quantity) || 1));
       totalCents += serverPrice * qty;
 
       lineItems.push({
@@ -156,6 +182,51 @@ exports.handler = async (event) => {
 
     if (totalCents <= 0) {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid order total' }) };
+    }
+
+    // ── Pre-charge stock check — prevent overselling ─────────────
+    // Only enforced when merch_products.stock_quantity is NOT NULL.
+    // NULL stock_quantity = unlimited (print-on-demand / digital).
+    const stockCheckedIds = productIds.length > 0 ? productIds : [];
+    if (stockCheckedIds.length > 0 || sanitizedNames.length > 0) {
+      // Re-use dbProducts we already fetched — just need stock_quantity
+      const { data: stockRows, error: stockErr } = await supabase
+        .from('merch_products')
+        .select('id, name, stock_quantity')
+        .eq('is_active', true)
+        .is('archived_at', null)
+        .or(filterParts.join(','));
+
+      if (stockErr) {
+        console.error('[MERCH-PAY] Stock check failed:', stockErr.message);
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to check stock availability' }) };
+      }
+
+      const stockById = {};
+      const stockByName = {};
+      for (const s of (stockRows || [])) {
+        if (s.id) stockById[s.id] = s.stock_quantity;
+        if (s.name) stockByName[s.name] = s.stock_quantity;
+      }
+
+      for (const item of cart) {
+        const available = stockById[item.id] ?? stockByName[item.name];
+        // NULL = unlimited — skip check
+        if (available === null || available === undefined) continue;
+        const requestedQty = Math.min(20, Math.max(1, parseInt(item.quantity) || 1));
+        if (requestedQty > available) {
+          const displayName = item.name || item.id;
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify({
+              error: available <= 0
+                ? `${displayName} is out of stock.`
+                : `Only ${available} of ${displayName} available (you requested ${requestedQty}).`,
+            }),
+          };
+        }
+      }
     }
 
     // Deterministic idempotency key: same cart + same customer = same key
@@ -214,47 +285,67 @@ exports.handler = async (event) => {
       };
     }
 
-    // Store order in Supabase
+    // Store order in Supabase — let Postgres auto-generate the UUID primary key.
+    // The MERCH-* reference string goes into square_order_id for traceability.
+    const orderStatus = payment.status === 'COMPLETED' ? 'paid' : 'pending';
     const orderData = {
-      id: referenceId,
       type: 'merch',
-      status: payment.status === 'COMPLETED' ? 'paid' : 'pending',
+      status: orderStatus,
       total_amount_cents: totalCents,
       payment_id: payment.id,
+      square_order_id: referenceId,
       customer_email: customerEmail || null,
       customer_name: customerName || null,
       shipping_address: shippingAddress || null,
+      fulfillment_type: (fulfillmentType === 'shipping' || fulfillmentType === 'pickup') ? fulfillmentType : 'pickup',
       items: lineItems.map(i => ({ name: i.name, quantity: parseInt(i.quantity), price_cents: Number(i.basePriceMoney.amount) })),
       created_at: new Date().toISOString(),
     };
 
-    const { error: insertErr } = await supabase
+    const { data: insertedOrder, error: insertErr } = await supabase
       .from('orders')
-      .insert(orderData);
+      .insert(orderData)
+      .select('id')
+      .single();
 
-    if (insertErr) {
+    if (insertErr || !insertedOrder) {
       // CRITICAL: Log the Square Payment ID with the error so we can find it later
-      console.error(`[CRITICAL] Payment ${payment.id} succeeded but DB failed:`, insertErr.message);
+      console.error(`[CRITICAL] Payment ${payment.id} succeeded but DB failed:`, insertErr?.message);
       
       // Do NOT return 200. Return 500 so the frontend doesn't show a success message.
       return {
         statusCode: 500,
         headers,
         body: JSON.stringify({ 
-          error: "Payment processed but order recording failed. Please contact info@brewhubphl.com with your receipt.",
-          paymentId: payment.id 
+          error: "Payment processed but order recording failed. Please contact info@brewhubphl.com with your receipt."
         })
       };
     }
+
+    // Decrement stock for items that have a finite stock_quantity
+    for (const item of cart) {
+      const productId = productIds.length > 0
+        ? (dbProducts || []).find(p => p.id === item.id || p.name === item.name)?.id
+        : (dbProducts || []).find(p => p.name === item.name)?.id;
+      if (!productId) continue;
+      const qty = Math.min(20, Math.max(1, parseInt(item.quantity) || 1));
+      // Only decrement if stock_quantity is tracked (NOT NULL)
+      await supabase.rpc('decrement_merch_stock', { p_product_id: productId, p_quantity: qty }).catch(() => {});
+    }
+
+    const newOrderId = insertedOrder.id;
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        orderId: referenceId,
+        orderId: newOrderId,
         paymentId: payment.id,
         status: payment.status,
+        orderStatus,
+        confirmed: payment.status === 'COMPLETED',
+        finality: payment.status === 'COMPLETED' ? 'confirmed' : 'pending_confirmation',
         receiptUrl: payment.receiptUrl,
       }),
     };

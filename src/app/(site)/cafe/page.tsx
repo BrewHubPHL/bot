@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import type { User } from "@supabase/supabase-js";
 
 interface MenuItem {
@@ -17,7 +18,7 @@ interface CartEntry {
   quantity: number;
 }
 
-const MAX_ITEM_QTY = 50;
+const MAX_ITEM_QTY = 20;
 const MAX_CART_ITEMS = 25;
 
 export default function CafePage() {
@@ -28,6 +29,8 @@ export default function CafePage() {
   const [orderSuccess, setOrderSuccess] = useState("");
   const [orderError, setOrderError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [lastOrderTag, setLastOrderTag] = useState("");
 
   // Auth state
   const [user, setUser] = useState<User | null>(null);
@@ -76,10 +79,10 @@ export default function CafePage() {
         .select("loyalty_points")
         .eq("id", userId)
         .maybeSingle();
-      if (error) { console.error("Loyalty load error:", error.message); return; }
+      if (error) return;
       if (data) setLoyaltyPoints(data.loyalty_points ?? 0);
-    } catch (err: unknown) {
-      console.error("Loyalty load failed:", (err as Error)?.message);
+    } catch {
+      /* loyalty fetch failed — non-critical */
     }
   }, []);
 
@@ -94,7 +97,6 @@ export default function CafePage() {
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true });
       if (error) {
-        console.error("Menu fetch error:", error.message);
         setMenuError(true);
       } else if (data) {
         setMenu(data);
@@ -128,6 +130,10 @@ export default function CafePage() {
       setOrderError("Please add at least one item.");
       return;
     }
+    if (!customerName.trim()) {
+      setOrderError("Please enter your name for order pickup.");
+      return;
+    }
     setSubmitting(true);
     try {
       // Build headers — attach Supabase JWT when logged in for loyalty tracking
@@ -147,24 +153,27 @@ export default function CafePage() {
         headers,
         body: JSON.stringify({
           items: cart.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
+          customer_name: customerName.trim(),
         }),
       });
       const result = await resp.json();
       if (!resp.ok) throw new Error(result.error || "Order failed");
+      const orderId = result.order?.id || "";
+      const orderTag = orderId ? `BRW-${orderId.slice(-4).toUpperCase()}` : "";
+      setLastOrderTag(orderTag);
       setCart([]);
-      setCart([]);
+      setCustomerName("");
       localStorage.removeItem("brewhub_cafe_cart");
       setOrderSuccess(
         user
-          ? "Order placed! You earned loyalty points toward a free drink. ☕"
-          : "Order placed! Thank you."
+          ? `Order ${orderTag} placed! You earned loyalty points toward a free drink. ☕`
+          : `Order ${orderTag} placed! Thank you.`
       );
       setOrderError("");
       // Refresh loyalty points after successful order
       if (user) loadLoyalty(user.id);
     } catch (err: unknown) {
-      const msg = (err as Error)?.message;
-      setOrderError(msg && !msg.includes("supabase") ? msg : "Order failed. Please try again.");
+      setOrderError(toUserSafeMessageFromUnknown(err, "Order failed. Please try again."));
       setOrderSuccess("");
     } finally {
       setSubmitting(false);
@@ -273,13 +282,34 @@ export default function CafePage() {
             ))}
           </ul>
         )}
+        {cart.length > 0 && (
+          <div className="text-right font-bold text-sm mt-1 mb-2">
+            Total: ${(cart.reduce((sum, i) => sum + i.price_cents * i.quantity, 0) / 100).toFixed(2)}
+          </div>
+        )}
         <form onSubmit={handleOrder}>
-          <button type="submit" className="w-full bg-stone-900 text-white py-2 rounded font-bold mt-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled={cart.length === 0 || submitting}>
+          <input
+            type="text"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Your name (for pickup callout)"
+            className="w-full border border-stone-300 rounded px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-stone-400"
+            maxLength={60}
+            required
+          />
+          <button type="submit" className="w-full bg-stone-900 text-white py-2 rounded font-bold mt-1 disabled:opacity-50 disabled:cursor-not-allowed" disabled={cart.length === 0 || submitting || !customerName.trim()}>
             {submitting ? "Placing Order…" : "Place Order"}
           </button>
         </form>
         {orderSuccess && (
-          <div className="mt-2 text-xs text-center text-green-700 font-semibold">{orderSuccess}</div>
+          <div className="mt-2 text-xs text-center text-green-700 font-semibold">
+            {orderSuccess}
+            {lastOrderTag && (
+              <Link href="/queue" className="block mt-1 underline text-stone-600 hover:text-stone-900">
+                Track your order ({lastOrderTag}) on the live queue →
+              </Link>
+            )}
+          </div>
         )}
         {orderError && (
           <div className="mt-2 text-xs text-center text-red-600">{orderError}</div>

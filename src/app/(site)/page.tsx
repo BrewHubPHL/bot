@@ -143,17 +143,30 @@ export default function BrewHubLanding() {
       chatHeaders['Authorization'] = `Bearer ${session.access_token}`;
     }
 
-    const response = await fetch('/.netlify/functions/claude-chat', {
-      method: 'POST',
-      headers: chatHeaders,
-      body: JSON.stringify({
-        text: userText,
-        email: localStorage.getItem('brewhub_email') || "",
-        history: messagesRef.current.slice(-10).map(m => ({ role: m.role, content: m.content }))
-      })
-    });
-    const data = await response.json();
-    return data.reply || "Sorry, I didn't catch that.";
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+
+    try {
+      const response = await fetch('/.netlify/functions/claude-chat', {
+        method: 'POST',
+        headers: chatHeaders,
+        signal: controller.signal,
+        body: JSON.stringify({
+          text: userText,
+          email: localStorage.getItem('brewhub_email') || "",
+          history: messagesRef.current.slice(-10).map(m => ({ role: m.role, content: m.content }))
+        })
+      });
+      const data = await response.json();
+      return data.reply || "Sorry, I didn't catch that.";
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') {
+        return "Sorry, that took too long! Give me a second and try again.";
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
   }, []);
 
   // ── Play Elise's reply through ElevenLabs TTS ──
@@ -172,7 +185,6 @@ export default function BrewHubLanding() {
       });
 
       if (!res.ok) {
-        console.warn('TTS returned', res.status);
         return;
       }
 
@@ -216,7 +228,8 @@ export default function BrewHubLanding() {
           source.start(0);
           return; // success via Web Audio
         } catch (decodeErr) {
-          console.warn('Web Audio decode failed, falling back to Audio element:', (decodeErr as Error)?.message);
+          // Web Audio decode failed, falling back to Audio element
+          void decodeErr;
         }
       }
 
@@ -238,10 +251,9 @@ export default function BrewHubLanding() {
 
       setVoiceStatus("Elise is speaking...");
       await audio.play();
-    } catch (err) {
+    } catch {
       isSpeakingRef.current = false;
       setIsSpeaking(false);
-      console.error('TTS playback error:', (err as Error)?.message);
       // Resume listening so the user isn't stuck
       if (recognitionRef.current && isVoiceActiveRef.current) {
         setVoiceStatus("Listening...");
@@ -262,8 +274,7 @@ export default function BrewHubLanding() {
       const reply = await sendToClaude(transcript);
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       await speakReply(reply);
-    } catch (err) {
-      console.error('Voice turn error:', (err as Error)?.message);
+    } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: "I'm having trouble connecting to my coffee sensors. Try again in a second!" }]);
       // Resume listening even on error
       if (recognitionRef.current) {
@@ -320,7 +331,6 @@ export default function BrewHubLanding() {
           }
           return;
         }
-        console.error('Speech recognition error:', event.error);
         setVoiceStatus(`Mic error: ${event.error}`);
         setTimeout(() => setVoiceStatus(""), 3000);
       };
@@ -338,8 +348,7 @@ export default function BrewHubLanding() {
       setIsVoiceActive(true);
       setVoiceStatus("Listening... speak now!");
 
-    } catch (err) {
-      console.error('Voice error:', (err as Error)?.message);
+    } catch {
       setVoiceStatus("Failed to start — check mic permissions");
       setIsVoiceActive(false);
       setTimeout(() => setVoiceStatus(""), 3000);
@@ -490,7 +499,7 @@ export default function BrewHubLanding() {
               placeholder="Ask Elise anything..."
               className="concierge-input"
             />
-            <button type="submit" className="concierge-send-btn">Send</button>
+            <button type="submit" className="concierge-send-btn" disabled={chatTyping || !chatInput.trim()}>Send</button>
           </form>
           <button 
             className={isVoiceActive ? 'voice-btn voice-btn-active' : 'voice-btn'}
@@ -499,6 +508,64 @@ export default function BrewHubLanding() {
             {isVoiceActive ? '🛑 Stop Voice Chat' : '🎤 Start Voice Chat'}
           </button>
           {voiceStatus && <div className="voice-status">{voiceStatus}</div>}
+        </div>
+      </section>
+
+      {/* LOCATION SECTION */}
+      <section id="location" className="location-section" style={{ maxWidth: 680, margin: '0 auto', padding: '3rem 1.5rem' }}>
+        <div style={{
+          background: 'linear-gradient(135deg, #fdfcfb 0%, #f8f4f0 100%)',
+          border: '1.5px solid var(--hub-tan)',
+          borderRadius: 16,
+          padding: '2.5rem 2rem',
+          textAlign: 'center',
+          boxShadow: '0 4px 24px rgba(44,24,16,0.06)',
+        }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📍</div>
+          <h3 className="font-playfair" style={{ fontSize: '1.5rem', color: 'var(--hub-espresso)', marginBottom: '0.5rem', fontWeight: 700 }}>
+            Our Location
+          </h3>
+          <p style={{ color: 'var(--hub-brown)', fontSize: '1.05rem', fontWeight: 500, marginBottom: '1.25rem' }}>
+            Point Breeze &bull; Philadelphia, PA 19146
+          </p>
+          <div style={{
+            background: 'var(--hub-espresso)',
+            color: '#fff',
+            borderRadius: 12,
+            padding: '1.5rem',
+            marginBottom: '1.25rem',
+          }}>
+            <p style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+              🚧 Coming Soon
+            </p>
+            <p style={{ fontSize: '0.95rem', opacity: 0.85, lineHeight: 1.6 }}>
+              We&apos;ve secured a property and are currently building out BrewHub&apos;s permanent home.
+              Stay tuned for our grand opening!
+            </p>
+          </div>
+          <p style={{ fontSize: '0.85rem', color: 'var(--hub-brown)', lineHeight: 1.7 }}>
+            Follow us for construction updates, sneak peeks, and opening day announcements.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginTop: '1rem' }}>
+            <a
+              href="https://instagram.com/brewhubphl"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hero-btn"
+              style={{ fontSize: '0.85rem', padding: '0.6rem 1.25rem' }}
+            >
+              Instagram
+            </a>
+            <a
+              href="https://facebook.com/thebrewhubphl"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hero-btn"
+              style={{ fontSize: '0.85rem', padding: '0.6rem 1.25rem', background: 'var(--hub-brown)' }}
+            >
+              Facebook
+            </a>
+          </div>
         </div>
       </section>
     </div>

@@ -128,8 +128,6 @@ exports.handler = async (event) => {
     return twimlResponse(null);
   }
 
-  console.log(`[Twilio Webhook] Inbound from ${phoneE164}: "${body}" → keyword "${keyword}"`);
-
   // ── Handle STOP ──────────────────────────────────────────
   if (STOP_WORDS.has(keyword)) {
     console.log(`[Twilio Webhook] OPT-OUT: ${phoneE164}`);

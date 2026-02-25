@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import AuthzErrorStateCard from "@/components/AuthzErrorState";
+import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 
 /* ─── Types ─── */
 interface OrderItem {
@@ -56,7 +58,7 @@ const SECTION_CFG = [
   { filter: "completed", label: "✅ Order Complete — Pick Up!", color: "text-emerald-400", heading: "text-emerald-400" },
   { filter: "ready",     label: "🔔 Ready for Pickup",          color: "text-blue-300",   heading: "text-blue-300" },
   { filter: "preparing", label: "🔥 Now Making",                color: "text-amber-400",  heading: "text-amber-400" },
-  { filter: "waiting",   label: "⏳ In Queue",                  color: "text-gray-500",   heading: "text-gray-500" },
+  { filter: "waiting",   label: "⏳ In Queue",                  color: "text-stone-500",   heading: "text-stone-500" },
 ] as const;
 
 /* ─────────────────────────────────────────────
@@ -78,24 +80,24 @@ function OrderCard({ order, prominent }: { order: QueueOrder; prominent?: boolea
 
   const bgOverride =
     cardType === "completed-unpaid" ? "bg-[#1f0d0d]" :
-    status === "completed" && order.isPaid ? "bg-[#0d1f12]" : "bg-[#1a1a1a]";
+    status === "completed" && order.isPaid ? "bg-[#0d1f12]" : "bg-stone-900";
 
   return (
     <article
       aria-label={`Order for ${order.name}, status: ${badgeLabel}`}
-      className={`${bgOverride} rounded-2xl border-2 border-[#333] border-t-[6px] overflow-hidden
+      className={`${bgOverride} rounded-2xl border-2 border-stone-800 border-t-[6px] overflow-hidden
                   animate-[slideIn_0.4s_ease-out] ${BORDER_COLORS[cardType]} ${pulseClass}`}
     >
       {/* Header */}
-      <div className="flex justify-between items-start p-4 border-b border-[#2a2a2a]">
+      <div className="flex justify-between items-start p-4 border-b border-stone-800">
         <div>
-          <div className="text-xs font-bold text-gray-600 uppercase tracking-wide">
+          <div className="text-xs font-bold text-stone-600 uppercase tracking-wide">
             {isComplete ? "✅ Ready — grab it!" : `#${order.position} in queue`}
           </div>
           <div className={`font-black text-white leading-tight ${prominent ? "text-3xl" : "text-2xl"}`}>
             {order.name}
           </div>
-          <div className="text-xs font-mono text-gray-500 mt-0.5">{order.tag}</div>
+          <div className="text-xs font-mono text-stone-500 mt-0.5">{order.tag}</div>
           {!order.isPaid && (
             <div className="text-xs font-bold text-red-500 animate-[blink_1.5s_infinite] mt-1">
               ⚠️ COLLECT PAYMENT
@@ -113,21 +115,21 @@ function OrderCard({ order, prominent }: { order: QueueOrder; prominent?: boolea
       {/* Items */}
       <div className="px-4 py-3">
         {order.items.length === 0 ? (
-          <span className="text-gray-600 text-sm">No items</span>
+          <span className="text-stone-600 text-sm">No items</span>
         ) : (
           order.items.map((item, i) => (
             <div key={i} className="flex items-baseline gap-2 py-0.5">
-              <span className={`font-semibold text-gray-200 ${prominent ? "text-xl" : "text-[1.1rem]"}`}>
+              <span className={`font-semibold text-stone-200 ${prominent ? "text-xl" : "text-[1.1rem]"}`}>
                 {item.name}
               </span>
-              {item.mods && <span className="text-sm text-gray-500 italic">{item.mods}</span>}
+              {item.mods && <span className="text-sm text-stone-500 italic">{item.mods}</span>}
             </div>
           ))
         )}
       </div>
 
       {/* Footer */}
-      <div className="flex justify-between px-4 py-2 bg-[#111] text-xs text-gray-600">
+      <div className="flex justify-between px-4 py-2 bg-stone-950 text-xs text-stone-600">
         <span>{order.minutesAgo}m ago</span>
         <span>{order.items.length} item{order.items.length !== 1 ? "s" : ""}</span>
       </div>
@@ -143,12 +145,21 @@ export default function QueuePage() {
   const [count, setCount]           = useState(0);
   const [loading, setLoading]       = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
   const [lastSync, setLastSync]     = useState<Date | null>(null);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  /* ── Auto-fullscreen on mount ────────────────── */
+  /* ── Auto-fullscreen on mount (display mode only) ──── */
   useEffect(() => {
+    // Only auto-fullscreen if ?display=true is in the URL (lobby/counter screens).
+    // Prevents unexpected fullscreen on customer phones navigating to /queue.
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("display") !== "true") {
+      const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+      document.addEventListener("fullscreenchange", onFsChange);
+      return () => document.removeEventListener("fullscreenchange", onFsChange);
+    }
     const el = document.documentElement;
     if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
     const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -167,14 +178,21 @@ export default function QueuePage() {
   const refreshQueue = useCallback(async () => {
     try {
       const res = await fetch("/.netlify/functions/get-queue");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const info = await getErrorInfoFromResponse(res, "Failed to load queue");
+        setAuthzState(info.authz);
+        setFetchError(info.authz ? null : info.message);
+        return;
+      }
       const data = await res.json();
       const items: QueueOrder[] = Array.isArray(data.queue) ? data.queue : [];
       setQueue(items);
       setCount(typeof data.count === "number" ? data.count : items.length);
+      setAuthzState(null);
       setFetchError(null);
       setLastSync(new Date());
     } catch (err) {
+      setAuthzState(null);
       setFetchError((err as Error)?.message ?? "Connection error");
     } finally {
       setLoading(false);
@@ -213,22 +231,37 @@ export default function QueuePage() {
         @keyframes blink        { 0%,100%{ opacity:1; } 50%{ opacity:.3; } }
       `}</style>
 
-      <div className="h-screen flex flex-col bg-[#0a0a0a] text-white font-sans overflow-hidden">
+      <div className="h-screen flex flex-col bg-stone-950 text-white font-sans overflow-hidden">
+
+        {authzState && (
+          <div className="shrink-0 px-6 pt-4">
+            <AuthzErrorStateCard
+              state={authzState}
+              onAction={() => {
+                if (authzState.status === 401) {
+                  window.location.reload();
+                  return;
+                }
+                window.location.href = "/";
+              }}
+            />
+          </div>
+        )}
 
         {/* ── Error banner ────────────────────────── */}
-        {fetchError && (
+        {fetchError && !authzState && (
           <div role="alert" className="shrink-0 bg-red-900/80 text-red-200 text-center py-2 text-sm font-semibold tracking-wide">
             ⚠ Connection issue — retrying… ({fetchError})
           </div>
         )}
 
         {/* ── Header ──────────────────────────────── */}
-        <header className="shrink-0 flex justify-between items-center px-8 py-4 bg-[#111] border-b-2 border-[#222]">
+        <header className="shrink-0 flex justify-between items-center px-8 py-4 bg-stone-950 border-b-2 border-stone-800">
           <div className="text-3xl font-black">
             Brew<span className="text-amber-400">Hub</span>{" "}
-            <span className="text-sm font-normal text-gray-500">Order Queue</span>
+            <span className="text-sm font-normal text-stone-500">Order Queue</span>
           </div>
-          <div className="flex items-center gap-5 text-sm text-gray-500">
+          <div className="flex items-center gap-5 text-sm text-stone-500">
             {/* Live dot */}
             <span className="flex items-center gap-1.5">
               <span className="relative flex h-2 w-2">
@@ -246,7 +279,7 @@ export default function QueuePage() {
               </span>
             </span>
 
-            <span className="font-semibold tabular-nums text-gray-400">
+            <span className="font-semibold tabular-nums text-stone-400">
               {currentTime?.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true }) ?? ""}
             </span>
             <span className="bg-amber-400 text-black font-bold px-3 py-1 rounded-lg">
@@ -263,16 +296,16 @@ export default function QueuePage() {
         >
           {loading ? (
             /* Loading state */
-            <div className="flex flex-col items-center justify-center h-full gap-4 text-gray-600">
-              <div className="h-10 w-10 border-2 border-[#333] border-t-amber-400 rounded-full animate-spin" />
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-stone-600">
+              <div className="h-10 w-10 border-2 border-stone-800 border-t-amber-400 rounded-full animate-spin" />
               <span className="text-lg">Loading queue…</span>
             </div>
           ) : !hasAny ? (
             /* Empty state */
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-600">
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-stone-600">
               <div className="text-6xl">☕</div>
               <p className="text-xl font-semibold">Queue is clear!</p>
-              <p className="text-sm text-gray-700">New orders will appear here automatically.</p>
+              <p className="text-sm text-stone-700">New orders will appear here automatically.</p>
             </div>
           ) : (
             /* Sections */
@@ -286,7 +319,7 @@ export default function QueuePage() {
                     <div
                       role="heading"
                       aria-level={2}
-                      className={`col-span-full flex items-center gap-3 pb-2 border-b-2 border-[#2a2a2a] mb-1
+                      className={`col-span-full flex items-center gap-3 pb-2 border-b-2 border-stone-800 mb-1
                                   ${isReady ? "text-2xl" : "text-lg"} font-black uppercase tracking-widest ${section.color}`}
                     >
                       {section.label}
@@ -311,7 +344,7 @@ export default function QueuePage() {
         </main>
 
         {/* ── Footer ──────────────────────────────── */}
-        <footer className="shrink-0 border-t border-[#1a1a1a] bg-[#0d0d0d] px-8 py-2 flex items-center justify-between text-xs text-gray-700">
+        <footer className="shrink-0 border-t border-stone-900 bg-stone-950 px-8 py-2 flex items-center justify-between text-xs text-stone-700">
           <span>Ask a barista for help</span>
           <span className="tabular-nums">
             {lastSync
@@ -326,7 +359,7 @@ export default function QueuePage() {
         <button
           onClick={() => document.exitFullscreen?.()}
           title="Exit fullscreen"
-          className="fixed bottom-3 right-3 z-[99999] w-5 h-5 flex items-center justify-center rounded text-[10px] text-gray-700 hover:text-gray-400 hover:bg-white/5 transition-colors duration-200 opacity-30 hover:opacity-100"
+          className="fixed bottom-3 right-3 z-[99999] w-5 h-5 flex items-center justify-center rounded text-[10px] text-stone-700 hover:text-stone-400 hover:bg-white/5 transition-colors duration-200 opacity-30 hover:opacity-100"
           aria-label="Exit fullscreen"
         >
           ✕

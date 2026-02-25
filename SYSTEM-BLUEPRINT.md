@@ -116,7 +116,7 @@
 - **Fix**: All status comparisons run through `ns(status)` (`.toLowerCase()`), eliminating silent case-sensitive key mismatches from mixed-case DB data.
 
 ### Kiosk Fullscreen Mode
-- **Queue** (`src/app/(site)/queue/page.tsx`) and **Monitor** (`src/app/(site)/parcels/monitor/page.tsx`) auto-request fullscreen on mount via `document.documentElement.requestFullscreen()`.
+- **Queue** (`src/app/(site)/queue/page.tsx`) and **Monitor** (`src/app/(ops)/manager/parcels/monitor/page.tsx`) auto-request fullscreen on mount via `document.documentElement.requestFullscreen()`.
 - `fullscreenchange` event tracked to set `isFullscreen` state.
 - A tiny `×` escape button is fixed bottom-right (`opacity-30`, fades to full on hover) — rendered only while in fullscreen, invisible during normal kiosk display.
 - Burn-in prevention on monitor: `antiburn` CSS keyframe shifts layout ±1px every 240s; 4K scaling breakpoints at 2560px and 3840px.

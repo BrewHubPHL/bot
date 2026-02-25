@@ -3,6 +3,9 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { supabase } from "@/lib/supabase";
+import AuthzErrorStateCard from "@/components/AuthzErrorState";
+import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
+import { RefreshCw } from "lucide-react";
 
 const API_BASE =
   typeof window !== "undefined" && window.location.hostname === "localhost"
@@ -41,7 +44,7 @@ function ReceiptCard({ receipt, animate }: { receipt: Receipt; animate: boolean 
       <pre className="whitespace-pre text-xs leading-snug m-0">
         {receipt.receipt_text || "(empty receipt)"}
       </pre>
-      <span className="block text-right text-[10px] text-gray-400 mt-2">{ts}</span>
+      <span className="block text-right text-[10px] text-stone-400 mt-2">{ts}</span>
     </div>
   );
 }
@@ -52,6 +55,7 @@ export default function ReceiptRoll() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const [rateLimited, setRateLimited] = useState(false);
+  const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
   const initialLoadDone = useRef(false);
   const backoffRef = useRef<number>(POLL_INTERVAL_MS);
   const backoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,8 +72,17 @@ export default function ReceiptRoll() {
         setRateLimited(true);
         return;
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const info = await getErrorInfoFromResponse(res, "Failed to load receipts");
+        setAuthzState(info.authz);
+        if (info.authz) setReceipts([]);
+        if (!info.authz) {
+          console.error("Receipt fetch failed:", info.message);
+        }
+        return;
+      }
       setRateLimited(false);
+      setAuthzState(null);
       backoffRef.current = POLL_INTERVAL_MS;
       const json = await res.json();
       const incoming = (json.receipts ?? []) as Receipt[];
@@ -111,6 +124,16 @@ export default function ReceiptRoll() {
     };
   }, [token, loadReceipts]);
 
+  const handleAuthzAction = useCallback(() => {
+    if (!authzState) return;
+    if (authzState.status === 401) {
+      sessionStorage.removeItem("ops_session");
+      window.location.reload();
+      return;
+    }
+    window.location.href = "/staff-hub";
+  }, [authzState]);
+
   // Supabase Realtime — instant update when a new receipt is inserted
   useEffect(() => {
     if (!token) return;
@@ -127,15 +150,15 @@ export default function ReceiptRoll() {
 
   if (!token) {
     return (
-      <section className="mb-8">
+      <section>
         <h2 className="text-lg font-semibold mb-2">🖨️ Live Receipt Roll</h2>
-        <div className="text-gray-500 text-sm p-4">Sign in to view receipts</div>
+        <div className="text-stone-500 text-sm p-4">Sign in to view receipts</div>
       </section>
     );
   }
 
   return (
-    <section className="mb-8">
+    <section>
       {/* Thermal printer styles */}
       <style>{`
         .receipt-roll {
@@ -146,16 +169,16 @@ export default function ReceiptRoll() {
           overflow-y: auto;
           padding: 1rem;
           scrollbar-width: thin;
-          scrollbar-color: #444 #1a1a1a;
+          scrollbar-color: rgb(68 64 60) rgb(28 25 23);
         }
         .receipt-roll::-webkit-scrollbar { width: 6px; }
-        .receipt-roll::-webkit-scrollbar-track { background: #1a1a1a; }
-        .receipt-roll::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+        .receipt-roll::-webkit-scrollbar-track { background: rgb(28 25 23); }
+        .receipt-roll::-webkit-scrollbar-thumb { background: rgb(68 64 60); border-radius: 3px; }
 
         .thermal-receipt {
           background: #fffdfa;
           color: #111;
-          font-family: 'Courier New', Consolas, monospace;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;
           font-size: 12px;
           line-height: 1.35;
           padding: 1.25rem 1rem;
@@ -206,19 +229,27 @@ export default function ReceiptRoll() {
         </div>
       )}
 
+      {authzState && (
+        <AuthzErrorStateCard state={authzState} onAction={handleAuthzAction} className="mb-3" />
+      )}
+
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-lg font-semibold">🖨️ Live Receipt Roll</h2>
         <button
-          className="text-gray-400 border border-[#333] px-3 py-1 rounded hover:bg-[#222]"
+          type="button"
           onClick={loadReceipts}
+          className="flex items-center gap-2 px-4 py-2 min-h-[44px] rounded-xl
+                     bg-stone-900 border border-stone-800 text-stone-400 text-sm
+                     hover:border-stone-600 hover:text-white transition-colors"
         >
-          ↻ Refresh
+          <RefreshCw size={14} />
+          Refresh
         </button>
       </div>
 
       <div className="receipt-roll">
         {receipts.length === 0 ? (
-          <div className="p-8 text-center text-gray-600 text-sm">
+          <div className="p-8 text-center text-stone-600 text-sm">
             No receipts yet — they&apos;ll appear here in real time.
           </div>
         ) : (

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSession } from "@/components/OpsGate";
+import { toUserSafeMessage, toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import {
   Camera, CameraOff, Package, Heart, ScanLine, Plus, Minus,
   Save, X, Loader2, CheckCircle2, AlertTriangle, RotateCcw,
@@ -142,7 +143,7 @@ export default function ScannerPage() {
       setStatusMsg("Point at barcode or QR code");
       startBarcodeDetection();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Camera access denied";
+      const msg = toUserSafeMessageFromUnknown(err, "Camera access denied.");
       setCameraError(msg);
       haptic("error");
     }
@@ -253,7 +254,7 @@ export default function ScannerPage() {
       setStatusMsg("Adjust stock and save");
       haptic("success");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Lookup failed";
+      const msg = toUserSafeMessageFromUnknown(err, "Unable to look up this barcode right now.");
       setStatusMsg(msg);
       setViewState("error");
       haptic("error");
@@ -282,7 +283,7 @@ export default function ScannerPage() {
       const result = await resp.json();
 
       if (!resp.ok || !result.found) {
-        setStatusMsg(result.error || `No loyalty account for ${email}`);
+        setStatusMsg(toUserSafeMessage(result.error, "No loyalty account found."));
         setViewState("idle");
         haptic("warning");
         setTimeout(() => { scanLockRef.current = false; }, 2000);
@@ -299,7 +300,7 @@ export default function ScannerPage() {
       setStatusMsg("Loyalty card found");
       haptic("success");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Loyalty lookup failed";
+      const msg = toUserSafeMessageFromUnknown(err, "Unable to look up loyalty right now.");
       setStatusMsg(msg);
       setViewState("error");
       haptic("error");
@@ -359,7 +360,7 @@ export default function ScannerPage() {
 
       setTimeout(() => clearResult(), 2000);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Save failed";
+      const msg = toUserSafeMessageFromUnknown(err, "Unable to save inventory changes right now.");
       setStatusMsg(msg);
       setViewState("error");
       haptic("error");

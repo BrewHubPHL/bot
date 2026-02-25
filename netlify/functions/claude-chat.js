@@ -460,6 +460,7 @@ async function executeTool(toolName, toolInput, supabase) {
                     .from('orders')
                     .insert({
                         status: 'unpaid',
+                        type: 'cafe',
                         total_amount_cents: totalCents,
                         customer_name: customer_name || 'Voice Order',
                         notes: notes || null,
@@ -476,7 +477,7 @@ async function executeTool(toolName, toolInput, supabase) {
                     return { success: false, result: 'Failed to create order. Please try again.' };
                 }
 
-                const orderNumber = order.id.slice(0, 4).toUpperCase();
+                const orderNumber = order.id.slice(-4).toUpperCase();
 
                 // Insert coffee order line items
                 const coffeeItems = [];
@@ -489,7 +490,13 @@ async function executeTool(toolName, toolInput, supabase) {
                         });
                     }
                 }
-                await supabase.from('coffee_orders').insert(coffeeItems);
+                const { error: coffeeErr } = await supabase.from('coffee_orders').insert(coffeeItems);
+
+                if (coffeeErr) {
+                    // Rollback the parent order to prevent ghost KDS cards
+                    await supabase.from('orders').delete().eq('id', order.id);
+                    return { success: false, result: 'Failed to save order items. Please try again.' };
+                }
 
                 const itemSummary = validatedItems.map(i => `${i.quantity}x ${i.name}`).join(', ');
                 return {
@@ -498,7 +505,7 @@ async function executeTool(toolName, toolInput, supabase) {
                     order_number: orderNumber,
                     items: validatedItems,
                     total: `$${(totalCents / 100).toFixed(2)}`,
-                    result: `Order #${orderNumber} placed! ${itemSummary} - Total: $${(totalCents / 100).toFixed(2)}${usingFallbackPrices ? ' (prices from cached menu — confirm at counter if needed)' : ''}`
+                    result: `Order #${orderNumber} placed! ${itemSummary} - Total: $${(totalCents / 100).toFixed(2)}${usingFallbackPrices ? ' (prices from cached menu — confirm at counter if needed)' : ''}. I've sent that to the KDS! You can track your order live here: /queue`
                 };
             }
 

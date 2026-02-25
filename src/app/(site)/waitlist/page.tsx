@@ -1,23 +1,56 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+
+const MIN_SUBMIT_MS = 2000; // reject submissions faster than 2 s after mount
+const COOLDOWN_MS   = 10000; // 10 s cooldown between submissions
 
 export default function WaitlistPage() {
   const [email, setEmail] = useState("");
+  const [honeypot, setHoneypot] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+
+  const mountTimeRef = useRef(Date.now());
+  const lastSubmitRef = useRef(0);
+
+  /* Capture mount timestamp for timing-based bot defense */
+  useEffect(() => {
+    mountTimeRef.current = Date.now();
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setSuccess(false);
+
+    // Bot defense: honeypot filled = silent reject
+    if (honeypot) {
+      setSuccess(true); // fake success so bots don't retry
+      setEmail("");
+      return;
+    }
+
+    // Bot defense: timing guard — reject if submitted too fast
+    if (Date.now() - mountTimeRef.current < MIN_SUBMIT_MS) {
+      setError("Please wait a moment before submitting.");
+      return;
+    }
+
+    // Rate-limit: cooldown between submissions
+    if (Date.now() - lastSubmitRef.current < COOLDOWN_MS) {
+      setError("Please wait a few seconds before trying again.");
+      return;
+    }
+
     if (!email) {
       setError("Please enter your email.");
       return;
     }
     setLoading(true);
+    lastSubmitRef.current = Date.now();
     const { error: insertError } = await supabase.from("waitlist").insert({ email });
     if (insertError) {
       const code = (insertError as { code?: string }).code;
@@ -46,6 +79,22 @@ export default function WaitlistPage() {
           <div role="alert" className="bg-red-100 text-red-800 p-4 rounded mb-4">{error}</div>
         ) : null}
         <form onSubmit={handleSubmit}>
+          {/* ── Honeypot (invisible to humans) ────────────── */}
+          <div
+            aria-hidden="true"
+            style={{ position: "absolute", left: "-5000px" }}
+          >
+            <label htmlFor="wl_company_name">Leave empty</label>
+            <input
+              id="wl_company_name"
+              name="wl_company_name"
+              type="text"
+              tabIndex={-1}
+              autoComplete="off"
+              value={honeypot}
+              onChange={(e) => setHoneypot(e.target.value)}
+            />
+          </div>
           <input
             type="email"
             placeholder="Your Email *"

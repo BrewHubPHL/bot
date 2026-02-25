@@ -152,8 +152,8 @@ export default function CareersPage() {
           }),
           signal: controller.signal,
         });
-      } catch (fetchErr: any) {
-        if (fetchErr.name === "AbortError") {
+      } catch (fetchErr: unknown) {
+        if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
           throw new Error("Request timed out. Please check your connection and try again.");
         }
         throw new Error("Network disconnected. Please check your connection and try again.");
@@ -162,13 +162,17 @@ export default function CareersPage() {
       }
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Submission failed");
+      if (!res.ok) throw new Error(
+        /^(network|fetch|timeout|connection|invalid|required|rate limit)/i.test(data.error || "")
+          ? data.error
+          : "Submission failed"
+      );
 
       setSuccess(true);
       setForm(EMPTY_FORM);
       setResumeFile(null);
-    } catch (err: any) {
-      setError(err.message || "Something went wrong. Please try again.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     }
     setLoading(false);
   }

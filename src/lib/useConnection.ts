@@ -30,6 +30,7 @@ export function useConnection(): ConnectionState {
   const [wasOffline, setWasOffline] = useState(false);
   const [offlineSince, setOfflineSince] = useState<Date | null>(null);
   const prevOnline = useRef(true);
+  const wasOfflineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const checkConnection = useCallback(async () => {
     try {
@@ -49,7 +50,12 @@ export function useConnection(): ConnectionState {
           // Just came back online — signal recovery
           setWasOffline(true);
           setOfflineSince(null);
-          setTimeout(() => setWasOffline(false), 100); // reset after one tick
+          // Clear any pending reset timer before setting a new one
+          if (wasOfflineTimerRef.current) clearTimeout(wasOfflineTimerRef.current);
+          wasOfflineTimerRef.current = setTimeout(() => {
+            setWasOffline(false);
+            wasOfflineTimerRef.current = null;
+          }, 100);
         }
         prevOnline.current = true;
       } else {
@@ -84,6 +90,11 @@ export function useConnection(): ConnectionState {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
       clearInterval(interval);
+      // Clean up the wasOffline reset timer on unmount to prevent state updates on unmounted component
+      if (wasOfflineTimerRef.current) {
+        clearTimeout(wasOfflineTimerRef.current);
+        wasOfflineTimerRef.current = null;
+      }
     };
   }, [checkConnection, goOffline]);
 

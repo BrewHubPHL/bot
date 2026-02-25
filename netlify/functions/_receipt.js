@@ -153,6 +153,7 @@ function generateReceiptString(order, items) {
   for (const [name, { qty, unitPrice }] of grouped) {
     const truncName = name.length > MAX_NAME ? name.substring(0, MAX_NAME) : name;
     const qtyStr = `x${qty}`;
+    // unitPrice is already in dollars (e.g. 5.50) — convert line total to cents for formatMoney
     const priceStr = formatMoney(Math.round(unitPrice * qty * 100));
     // Fill remaining space between name, qty, and price
     const fixedLeft = truncName.padEnd(MAX_NAME) + ' ' + qtyStr;

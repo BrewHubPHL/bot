@@ -35,6 +35,7 @@ export default async function ShopPage() {
 
   // ── Fetch products server-side (cached via ISR) ───────────────
   let products: {
+    id: string;
     name: string;
     price_cents: number;
     description: string;
@@ -48,7 +49,7 @@ export default async function ShopPage() {
     try {
       const { data, error } = await supabase
         .from('merch_products')
-        .select('name, price_cents, description, image_url, checkout_url, sort_order, category')
+        .select('id, name, price_cents, description, image_url, checkout_url, sort_order, category')
         .eq('is_active', true)
         .is('archived_at', null)
         .order('sort_order', { ascending: true })

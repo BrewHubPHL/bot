@@ -149,7 +149,7 @@ exports.handler = async (event) => {
     }
 
     // Validate status is one of allowed values
-    const allowedStatuses = ['paid', 'preparing', 'ready', 'completed', 'cancelled'];
+    const allowedStatuses = ['paid', 'preparing', 'ready', 'completed', 'cancelled', 'shipped'];
     if (!status || !allowedStatuses.includes(status)) {
       return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }) };
     }
@@ -344,6 +344,25 @@ exports.handler = async (event) => {
 
     // Normalize to array for downstream compatibility
     const data = Array.isArray(updatedOrder) ? updatedOrder : [updatedOrder];
+
+    // ── Stamp paid_at & paid_amount_cents for cash/comp payments ──
+    // The RPC only handles status/completed_at/payment_id. We supplement
+    // with paid_at and paid_amount_cents so receipt and audit queries work.
+    if (paymentMethod && ['cash', 'comp'].includes(paymentMethod) && data[0]) {
+      try {
+        const paidAt = new Date().toISOString();
+        const paidAmountCents = currentOrder.total_amount_cents || 0;
+        await supabase
+          .from('orders')
+          .update({ paid_at: paidAt, paid_amount_cents: paidAmountCents })
+          .eq('id', orderId);
+        // Update local copy for receipt generation
+        data[0].paid_at = paidAt;
+        data[0].paid_amount_cents = paidAmountCents;
+      } catch (paidErr) {
+        console.error('[UPDATE-ORDER] Non-fatal paid_at stamp error:', paidErr.message);
+      }
+    }
 
     // Generate receipt for cash/comp payments (Square receipts handled by webhook)
     if (paymentMethod && ['cash', 'comp'].includes(paymentMethod) && data[0]) {
