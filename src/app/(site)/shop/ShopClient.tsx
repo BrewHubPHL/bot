@@ -22,6 +22,8 @@ interface CartItem {
   name: string;
   price_cents: number;
   quantity: number;
+  category?: 'menu' | 'merch';
+  customizations?: string[];
 }
 
 interface ShopClientProps {
@@ -43,6 +45,10 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
   const [addedProduct, setAddedProduct] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ShopTab>('menu');
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
+  const [customizeProduct, setCustomizeProduct] = useState<Product | null>(null);
+  const [selectedMilk, setSelectedMilk] = useState<string>('regular');
+  const [selectedExtras, setSelectedExtras] = useState<Set<string>>(new Set());
+  const [wantsSugar, setWantsSugar] = useState(false);
 
   // Load cart from localStorage
   useEffect(() => {
@@ -91,18 +97,84 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
 
   const MAX_QTY_PER_PRODUCT = 20;
 
+  /* ── Modifier pricing (must match KNOWN_MODIFIERS in cafe-checkout.js) ── */
+  const MOD_PRICES: Record<string, number> = {
+    'Oat Milk': 75,
+    'Almond Milk': 75,
+    'Extra Shot': 100,
+    'Vanilla Syrup': 50,
+    'Caramel Syrup': 50,
+    'Make it Iced': 0,
+  };
+
+  /** Build a unique cart key from name + sorted mods so different customizations get separate rows */
+  function cartKey(name: string, mods: string[]): string {
+    return `${name}::${[...mods].sort().join(',')}`;
+  }
+
+  function handleProductClick(product: Product) {
+    if (classifyProduct(product) === 'menu') {
+      // Open customization modal for cafe items
+      setCustomizeProduct(product);
+      setSelectedMilk('regular');
+      setSelectedExtras(new Set());
+      setWantsSugar(false);
+    } else {
+      // Merch — add directly, no customizations
+      addToCart(product);
+    }
+  }
+
+  function confirmCustomization() {
+    if (!customizeProduct) return;
+    const mods: string[] = [];
+    if (selectedMilk === 'oat') mods.push('Oat Milk');
+    if (selectedMilk === 'almond') mods.push('Almond Milk');
+    if (wantsSugar) mods.push('Sugar');
+    selectedExtras.forEach(e => mods.push(e));
+    addToCartWithMods(customizeProduct, mods);
+    setCustomizeProduct(null);
+  }
+
+  function addAsIs() {
+    if (!customizeProduct) return;
+    addToCartWithMods(customizeProduct, []);
+    setCustomizeProduct(null);
+  }
+
+  function toggleExtra(extra: string) {
+    setSelectedExtras(prev => {
+      const next = new Set(prev);
+      if (next.has(extra)) next.delete(extra); else next.add(extra);
+      return next;
+    });
+  }
+
   function addToCart(product: Product) {
+    addToCartWithMods(product, []);
+  }
+
+  function addToCartWithMods(product: Product, mods: string[]) {
+    const key = cartKey(product.name, mods);
+    const modCents = mods.reduce((sum, m) => sum + (MOD_PRICES[m] || 0), 0);
     setCart(prev => {
-      const existing = prev.find(item => item.name === product.name);
+      const existing = prev.find(item => cartKey(item.name, item.customizations || []) === key);
       if (existing) {
         if (existing.quantity >= MAX_QTY_PER_PRODUCT) return prev;
         return prev.map(item =>
-          item.name === product.name
+          cartKey(item.name, item.customizations || []) === key
             ? { ...item, quantity: Math.min(item.quantity + 1, MAX_QTY_PER_PRODUCT) }
             : item
         );
       }
-      return [...prev, { id: product.id, name: product.name, price_cents: product.price_cents, quantity: 1 }];
+      return [...prev, {
+        id: product.id,
+        name: product.name,
+        price_cents: product.price_cents + modCents,
+        quantity: 1,
+        category: classifyProduct(product),
+        customizations: mods.length > 0 ? mods : undefined,
+      }];
     });
     setAddedProduct(product.name);
     setTimeout(() => setAddedProduct(null), 1000);
@@ -270,7 +342,7 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
                   </p>
                 )}
                 <button
-                  onClick={() => addToCart(product)}
+                  onClick={() => handleProductClick(product)}
                   className={`w-full py-3 rounded-lg font-semibold transition-all ${
                     addedProduct === product.name
                       ? 'bg-green-500 text-white'
@@ -338,6 +410,9 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
                 <div key={item.name} className="flex items-center gap-4 p-3 bg-stone-50 rounded-lg">
                   <div className="flex-1">
                     <p className="font-semibold text-[var(--hub-espresso)] truncate">{item.name}</p>
+                    {item.customizations && item.customizations.length > 0 && (
+                      <p className="text-xs text-stone-400 mt-0.5 truncate">{item.customizations.join(', ')}</p>
+                    )}
                     <p className="text-sm text-stone-500">
                       ${(item.price_cents / 100).toFixed(2)} each
                     </p>
@@ -391,6 +466,136 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
           </div>
         )}
       </div>
+
+      {/* ═══ Customization Modal (menu items only) ═══ */}
+      {customizeProduct && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setCustomizeProduct(null)} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Customize ${customizeProduct.name}`}
+            className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[60] mx-auto max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up"
+          >
+            {/* Header */}
+            <div className="bg-gradient-to-r from-[var(--hub-tan)] to-[var(--hub-cream)] px-6 py-5 flex items-center justify-between">
+              <div>
+                <h3 className="font-playfair text-xl text-[var(--hub-espresso)]">{customizeProduct.name}</h3>
+                <p className="text-sm text-[var(--hub-brown)] mt-0.5">${(customizeProduct.price_cents / 100).toFixed(2)}</p>
+              </div>
+              <button
+                onClick={() => setCustomizeProduct(null)}
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-black/10 transition-colors"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto">
+              {/* Milk */}
+              <div>
+                <p className="text-sm font-semibold text-stone-700 mb-2">Milk</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { key: 'regular', label: 'Regular', extra: 0 },
+                    { key: 'oat', label: 'Oat Milk', extra: 75 },
+                    { key: 'almond', label: 'Almond Milk', extra: 75 },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setSelectedMilk(opt.key)}
+                      className={`py-3 px-2 rounded-lg border text-sm font-medium transition-colors ${
+                        selectedMilk === opt.key
+                          ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/10 text-[var(--hub-brown)]'
+                          : 'border-stone-200 text-stone-600 hover:border-stone-300'
+                      }`}
+                    >
+                      {opt.label}
+                      {opt.extra > 0 && <span className="block text-xs text-stone-400 mt-0.5">+${(opt.extra / 100).toFixed(2)}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Sugar */}
+              <div>
+                <p className="text-sm font-semibold text-stone-700 mb-2">Sugar</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWantsSugar(false)}
+                    className={`py-3 rounded-lg border text-sm font-medium transition-colors ${
+                      !wantsSugar
+                        ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/10 text-[var(--hub-brown)]'
+                        : 'border-stone-200 text-stone-600 hover:border-stone-300'
+                    }`}
+                  >
+                    No Sugar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWantsSugar(true)}
+                    className={`py-3 rounded-lg border text-sm font-medium transition-colors ${
+                      wantsSugar
+                        ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/10 text-[var(--hub-brown)]'
+                        : 'border-stone-200 text-stone-600 hover:border-stone-300'
+                    }`}
+                  >
+                    Add Sugar
+                  </button>
+                </div>
+              </div>
+
+              {/* Extras */}
+              <div>
+                <p className="text-sm font-semibold text-stone-700 mb-2">Extras</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { key: 'Extra Shot', extra: 100 },
+                    { key: 'Vanilla Syrup', extra: 50 },
+                    { key: 'Caramel Syrup', extra: 50 },
+                    { key: 'Make it Iced', extra: 0 },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => toggleExtra(opt.key)}
+                      className={`py-3 px-2 rounded-lg border text-sm font-medium transition-colors ${
+                        selectedExtras.has(opt.key)
+                          ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/10 text-[var(--hub-brown)]'
+                          : 'border-stone-200 text-stone-600 hover:border-stone-300'
+                      }`}
+                    >
+                      {opt.key}
+                      {opt.extra > 0 && <span className="block text-xs text-stone-400 mt-0.5">+${(opt.extra / 100).toFixed(2)}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 py-4 border-t border-stone-200 flex gap-3">
+              <button
+                type="button"
+                onClick={addAsIs}
+                className="flex-1 py-3 rounded-lg border border-stone-300 text-stone-600 font-semibold hover:bg-stone-50 transition-colors text-sm"
+              >
+                Add As-Is
+              </button>
+              <button
+                type="button"
+                onClick={confirmCustomization}
+                className="flex-1 py-3 rounded-lg bg-[var(--hub-brown)] text-white font-semibold hover:bg-[var(--hub-espresso)] transition-colors text-sm"
+              >
+                Add with Options
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

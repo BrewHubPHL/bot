@@ -11,6 +11,8 @@ interface CartItem {
   name: string;
   price_cents: number;
   quantity: number;
+  category?: 'menu' | 'merch';
+  customizations?: string[];
 }
 
 /* ── Square Web SDK — minimal ambient types ──────────────────────── */
@@ -86,6 +88,14 @@ export default function CheckoutPage() {
   const [squareLoadError, setSquareLoadError] = useState(false);
 
   const totalCents = cart.reduce((sum, item) => sum + (item.price_cents * item.quantity), 0);
+  const hasMerch = cart.some((item) => item.category === 'merch');
+
+  // Force pickup when cart has no merch (no shipping hot coffee!)
+  useEffect(() => {
+    if (!hasMerch && fulfillmentType === 'shipping') {
+      setFulfillmentType('pickup');
+    }
+  }, [hasMerch, fulfillmentType]);
 
   // Load cart from localStorage
   useEffect(() => {
@@ -467,10 +477,13 @@ export default function CheckoutPage() {
               <h2 className="font-playfair text-2xl text-[var(--hub-espresso)] mb-6">Order Summary</h2>
               <div className="bg-white rounded-xl border border-stone-200 p-6">
                 <div className="space-y-4 mb-6">
-                  {cart.map((item) => (
-                    <div key={item.name} className="flex justify-between items-center">
+                  {cart.map((item, idx) => (
+                    <div key={`${item.name}-${idx}`} className="flex justify-between items-center">
                       <div>
                         <p className="font-medium text-[var(--hub-espresso)]">{item.name}</p>
+                        {item.customizations && item.customizations.length > 0 && (
+                          <p className="text-xs text-stone-400">{item.customizations.join(', ')}</p>
+                        )}
                         <p className="text-sm text-stone-500">Qty: {item.quantity}</p>
                       </div>
                       <p className="font-semibold">${((item.price_cents * item.quantity) / 100).toFixed(2)}</p>
@@ -490,34 +503,40 @@ export default function CheckoutPage() {
             <div>
               <h2 className="font-playfair text-2xl text-[var(--hub-espresso)] mb-6 mt-8 md:mt-0">Payment Details</h2>
               <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-stone-200 p-6 space-y-5">
-                {/* Fulfillment Toggle */}
-                <fieldset>
-                  <legend className="block text-sm font-medium text-stone-600 mb-2">Fulfillment Method</legend>
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setFulfillmentType('pickup')}
-                      className={`flex-1 py-3 rounded-lg border text-sm font-semibold transition-colors ${
-                        fulfillmentType === 'pickup'
-                          ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/10 text-[var(--hub-brown)]'
-                          : 'border-stone-300 text-stone-500 hover:border-stone-400'
-                      }`}
-                    >
-                      In-Store Pickup
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFulfillmentType('shipping')}
-                      className={`flex-1 py-3 rounded-lg border text-sm font-semibold transition-colors ${
-                        fulfillmentType === 'shipping'
-                          ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/10 text-[var(--hub-brown)]'
-                          : 'border-stone-300 text-stone-500 hover:border-stone-400'
-                      }`}
-                    >
-                      Ship to Address
-                    </button>
+                {/* Fulfillment Toggle — only show shipping option for merch orders */}
+                {hasMerch ? (
+                  <fieldset>
+                    <legend className="block text-sm font-medium text-stone-600 mb-2">Fulfillment Method</legend>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setFulfillmentType('pickup')}
+                        className={`flex-1 py-3 rounded-lg border text-sm font-semibold transition-colors ${
+                          fulfillmentType === 'pickup'
+                            ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/10 text-[var(--hub-brown)]'
+                            : 'border-stone-300 text-stone-500 hover:border-stone-400'
+                        }`}
+                      >
+                        In-Store Pickup
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFulfillmentType('shipping')}
+                        className={`flex-1 py-3 rounded-lg border text-sm font-semibold transition-colors ${
+                          fulfillmentType === 'shipping'
+                            ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/10 text-[var(--hub-brown)]'
+                            : 'border-stone-300 text-stone-500 hover:border-stone-400'
+                        }`}
+                      >
+                        Ship to Address
+                      </button>
+                    </div>
+                  </fieldset>
+                ) : (
+                  <div className="text-sm text-stone-500 bg-stone-50 rounded-lg px-4 py-3">
+                    <span className="font-medium text-stone-600">In-Store Pickup</span> — food &amp; drink orders are picked up at the counter
                   </div>
-                </fieldset>
+                )}
 
                 {/* Name */}
                 <div>

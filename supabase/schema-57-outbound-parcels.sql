@@ -71,9 +71,8 @@ CREATE POLICY "Staff can read outbound_parcels"
   USING (
     auth.role() = 'authenticated'
     AND EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.id = auth.uid()
-        AND profiles.role IN ('staff', 'manager', 'admin')
+      SELECT 1 FROM staff_directory
+      WHERE lower(staff_directory.email) = lower(auth.email())
     )
   );
 
@@ -83,9 +82,8 @@ CREATE POLICY "Staff can insert outbound_parcels"
   WITH CHECK (
     auth.role() = 'authenticated'
     AND EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.id = auth.uid()
-        AND profiles.role IN ('staff', 'manager', 'admin')
+      SELECT 1 FROM staff_directory
+      WHERE lower(staff_directory.email) = lower(auth.email())
     )
   );
 
@@ -95,9 +93,8 @@ CREATE POLICY "Staff can update outbound_parcels"
   USING (
     auth.role() = 'authenticated'
     AND EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.id = auth.uid()
-        AND profiles.role IN ('staff', 'manager', 'admin')
+      SELECT 1 FROM staff_directory
+      WHERE lower(staff_directory.email) = lower(auth.email())
     )
   );
 

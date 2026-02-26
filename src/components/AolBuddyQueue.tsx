@@ -175,14 +175,15 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
     return () => { clearTimeout(initial); clearInterval(interval) }
   }, [])
 
-  const readyOrders = orders.filter((o) => o.status === "ready")
+  // "Ready for pickup" = KDS completed (barista brought drink to counter)
+  const readyOrders = orders.filter((o) => o.status === "completed")
   const inProgressOrders = orders.filter(
-    (o) => o.status !== "ready" && !o.is_guest_order,
+    (o) => o.status !== "completed" && !o.is_guest_order,
   )
-  // Exclude ready guests — they already appear in "Orders Signed On" above
-  const guestOrders = orders.filter((o) => o.is_guest_order && o.status !== "ready")
+  // Exclude completed guests — they already appear in "Orders Signed On" above
+  const guestOrders = orders.filter((o) => o.is_guest_order && o.status !== "completed")
   const activeCount = orders.filter(
-    (o) => o.status !== "ready" && o.status !== "completed" && o.status !== "cancelled",
+    (o) => o.status !== "completed" && o.status !== "cancelled",
   ).length
 
   useEffect(() => {
@@ -210,18 +211,18 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
     prevReadyIds.current = currentIds
   }, [readyOrders])
 
-  // Track status transitions for all orders (ready/completed additions)
+  // Track status transitions — popup fires when KDS marks "completed" (drink at counter)
   useEffect(() => {
     const nextStatuses: Record<string, string> = { ...prevStatuses.current }
     orders.forEach((o) => {
       const prev = prevStatuses.current[o.id]
       if (prev !== o.status) {
-        // If transitioned into ready or completed, append to popups
-        if (o.status === "ready" || o.status === "completed") {
+        // Fire "ready" popup only when barista completes order on KDS
+        if (o.status === "completed") {
           setPopups((p) => {
-            const key = `${o.id}:${o.status}`
+            const key = `${o.id}:ready`
             if (p.some((x) => `${x.id}:${x.status}` === key)) return p
-            const merged = [...p, { id: o.id, handle: aimHandle(o), when: Date.now(), status: o.status }]
+            const merged = [...p, { id: o.id, handle: aimHandle(o), when: Date.now(), status: "ready" }]
             return merged.slice(-10)
           })
         }
@@ -231,13 +232,13 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
     prevStatuses.current = nextStatuses
   }, [orders])
 
-  // Auto-dismiss popups after 12 seconds
+  // Auto-dismiss popups after 3 minutes
   useEffect(() => {
     if (popups.length === 0) return
     const timer = setInterval(() => {
       const now = Date.now()
-      setPopups((p) => p.filter((x) => now - x.when < 12_000))
-    }, 2000)
+      setPopups((p) => p.filter((x) => now - x.when < 180_000))
+    }, 5_000)
     return () => clearInterval(timer)
   }, [popups.length])
 

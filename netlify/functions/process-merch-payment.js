@@ -326,7 +326,14 @@ exports.handler = async (event) => {
       customer_name: customerName || null,
       shipping_address: shippingAddress || null,
       fulfillment_type: (fulfillmentType === 'shipping' || fulfillmentType === 'pickup') ? fulfillmentType : 'pickup',
-      items: lineItems.map(i => ({ name: i.name, quantity: parseInt(i.quantity), price_cents: Number(i.basePriceMoney.amount) })),
+      items: lineItems.map((i, idx) => {
+        const cartItem = cart[idx];
+        const entry = { name: i.name, quantity: parseInt(i.quantity), price_cents: Number(i.basePriceMoney.amount) };
+        if (cartItem?.customizations && Array.isArray(cartItem.customizations) && cartItem.customizations.length > 0) {
+          entry.customizations = cartItem.customizations.map(c => String(c).slice(0, 50)).slice(0, 10);
+        }
+        return entry;
+      }),
       created_at: new Date().toISOString(),
     };
 

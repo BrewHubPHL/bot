@@ -38,6 +38,7 @@ const KNOWN_MODIFIERS = {
   'Vanilla Syrup': 50,
   'Caramel Syrup': 50,
   'Make it Iced': 0,
+  'Sugar': 0,
 };
 
 // ── CORS strict allowlist ─────────────────────────────────
@@ -310,7 +311,7 @@ exports.handler = async (event) => {
 
     // Stamp payment fields atomically for cash/comp
     if (isAtomicPayment) {
-      orderRow.payment_id = paymentMethod;                // 'cash' or 'comp'
+      orderRow.payment_id = `${paymentMethod}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       orderRow.paid_at = new Date().toISOString();
       orderRow.paid_amount_cents = totalCents;
     }

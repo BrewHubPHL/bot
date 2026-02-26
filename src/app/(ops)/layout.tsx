@@ -1,7 +1,15 @@
 // src/app/(ops)/layout.tsx
+import type { Metadata } from "next";
 import OpsGate from "@/components/OpsGate";
 import StaffNavigation from "@/components/StaffNavigation";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
+
+export const metadata: Metadata = {
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/favicon.ico",
+  },
+};
 
 export default function OpsLayout({ children }: { children: React.ReactNode }) {
   return (
