@@ -36,7 +36,7 @@ function toKdsOrder(q: QueueItem): KdsOrder {
     status: q.status,
     created_at: q.created_at,
     total_amount_cents: 0,
-    items: q.items.map((i) => ({ name: i.name, quantity: 1 })),
+    items: q.items.map((i, idx) => ({ id: `${q.id}-item-${idx}`, name: i.name, quantity: 1 })),
   }
 }
 

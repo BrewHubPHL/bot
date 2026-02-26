@@ -787,7 +787,7 @@ export default function PayrollSection() {
                                 {" by "}
                                 <span className="text-stone-200 font-semibold">{o.manager_email}</span>
                               </div>
-                              {o.details?.reason && (
+                              {typeof o.details?.reason === "string" && o.details.reason && (
                                 <div className="text-stone-400 mt-1">
                                   Reason: <span className="text-stone-300 italic">&quot;{String(o.details.reason)}&quot;</span>
                                 </div>
