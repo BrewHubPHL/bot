@@ -67,35 +67,27 @@ exports.handler = async (event) => {
       return json(404, { error: 'Order not found.' });
     }
 
-    // Only allow cancellation of pending orders (not yet paid/preparing)
-    if (order.status !== 'pending') {
-      return json(409, { error: `Cannot cancel order in "${order.status}" state.` });
+    // Only allow cancellation of pre-payment orders (pending or unpaid)
+    const CANCELLABLE_STATUSES = ['pending', 'unpaid'];
+    if (!CANCELLABLE_STATUSES.includes(order.status)) {
+      return json(409, { error: `Cannot cancel order in "${order.status}" state. Only pending/unpaid orders can be cancelled from POS.` });
     }
 
-    // Delete child coffee_orders rows first (FK constraint)
-    const { error: childErr } = await supabase
-      .from('coffee_orders')
-      .delete()
-      .eq('order_id', orderId);
-
-    if (childErr) {
-      console.error('[CANCEL] coffee_orders delete error:', childErr.message);
-      return json(500, { error: 'Failed to cancel order items.' });
-    }
-
-    // Delete the parent order row
-    const { error: delErr } = await supabase
+    // Soft-cancel: update status instead of deleting rows.
+    // This preserves the audit trail and avoids FK cascade issues
+    // (e.g. comp_audit.order_id references).
+    const { error: cancelErr } = await supabase
       .from('orders')
-      .delete()
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
       .eq('id', orderId);
 
-    if (delErr) {
-      console.error('[CANCEL] orders delete error:', delErr.message);
+    if (cancelErr) {
+      console.error('[CANCEL] orders soft-cancel error:', cancelErr.message);
       return json(500, { error: 'Failed to cancel order.' });
     }
 
-    console.log(`[CANCEL] Order ${orderId} cancelled by staff`);
-    return json(200, { success: true, cancelled_order_id: orderId });
+    console.log(`[CANCEL] Order ${orderId} soft-cancelled by staff (was: ${order.status})`);
+    return json(200, { success: true, cancelled_order_id: orderId, previous_status: order.status });
 
   } catch (err) {
     console.error('[CANCEL] Error:', err?.message);

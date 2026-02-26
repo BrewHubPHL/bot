@@ -59,6 +59,7 @@ interface MerchProduct {
   is_active: boolean;
   sort_order: number;
   category: "menu" | "merch" | null;
+  stock_quantity: number | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -72,6 +73,7 @@ interface FormState {
   image_url: string;
   is_active: boolean;
   category: "menu" | "merch";
+  stock_quantity: string; // "" = unlimited (NULL), digits = tracked
 }
 
 const EMPTY_FORM: FormState = {
@@ -82,6 +84,7 @@ const EMPTY_FORM: FormState = {
   image_url: "",
   is_active: true,
   category: "menu",
+  stock_quantity: "",
 };
 
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -110,11 +113,13 @@ function ProductCard({
   onEdit,
   onToggleActive,
   onDelete,
+  onReportShrinkage,
 }: {
   product: MerchProduct;
   onEdit: () => void;
   onToggleActive: () => void;
   onDelete: () => void;
+  onReportShrinkage: () => void;
 }) {
   return (
     <div
@@ -201,6 +206,19 @@ function ProductCard({
           🗑 Delete
         </button>
       </div>
+      {/* Shrinkage report button — only for tracked-stock items */}
+      {product.stock_quantity !== null && (
+        <div className="border-t border-stone-800">
+          <button
+            type="button"
+            onClick={onReportShrinkage}
+            className="w-full py-2 text-xs font-medium text-orange-400 hover:text-orange-300
+                       hover:bg-orange-500/10 transition-colors"
+          >
+            📋 Report Spoilage / Breakage
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -379,6 +397,15 @@ export default function CatalogManager() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [viewArchived, setViewArchived] = useState(false);
 
+  /* --- Shrinkage reporting state -------------------------------- */
+  const [shrinkageTarget, setShrinkageTarget] = useState<MerchProduct | null>(null);
+  const [shrinkageCategory, setShrinkageCategory] = useState<"breakage" | "spoilage" | "theft" | "other">("breakage");
+  const [shrinkageQty, setShrinkageQty] = useState("1");
+  const [shrinkageReason, setShrinkageReason] = useState("");
+  const [shrinkageSaving, setShrinkageSaving] = useState(false);
+  const [shrinkageError, setShrinkageError] = useState<string | null>(null);
+  const [shrinkageSuccess, setShrinkageSuccess] = useState<string | null>(null);
+
   /* --- Fetch products -------------------------------------------- */
   const fetchProducts = useCallback(async () => {
     if (!token) { setLoading(false); return; }
@@ -488,6 +515,9 @@ export default function CatalogManager() {
       image_url: p.image_url ?? "",
       is_active: p.is_active,
       category: (p.category === "merch" ? "merch" : "menu") as "menu" | "merch",
+      stock_quantity: p.stock_quantity !== null && p.stock_quantity !== undefined
+        ? String(p.stock_quantity)
+        : "",
     });
     setSaveError(null);
     setDrawerOpen(true);
@@ -515,6 +545,16 @@ export default function CatalogManager() {
 
     setSaving(true);
     try {
+      // Parse stock_quantity: empty string → null (unlimited), otherwise integer
+      const parsedStock = form.stock_quantity.trim() === ""
+        ? null
+        : parseInt(form.stock_quantity, 10);
+      if (parsedStock !== null && (Number.isNaN(parsedStock) || parsedStock < 0)) {
+        setSaveError("Stock quantity must be a non-negative number, or leave blank for unlimited.");
+        setSaving(false);
+        return;
+      }
+
       const row: Record<string, unknown> = {
         name: trimmedName,
         description: form.description.trim() || null,
@@ -522,6 +562,7 @@ export default function CatalogManager() {
         image_url: form.image_url || null,
         is_active: form.is_active,
         category: form.category,
+        stock_quantity: parsedStock,
       };
 
       let res: Response;
@@ -560,6 +601,69 @@ export default function CatalogManager() {
       setSaveError(toUserSafeMessageFromUnknown(err, "Unable to save catalog changes right now."));
     } finally {
       setSaving(false);
+    }
+  };
+
+  /* --- Report shrinkage (breakage / spoilage / theft) ----------- */
+  const openShrinkage = (p: MerchProduct) => {
+    setShrinkageTarget(p);
+    setShrinkageCategory("breakage");
+    setShrinkageQty("1");
+    setShrinkageReason("");
+    setShrinkageError(null);
+    setShrinkageSuccess(null);
+  };
+
+  const closeShrinkage = () => {
+    setShrinkageTarget(null);
+    setShrinkageError(null);
+    setShrinkageSuccess(null);
+  };
+
+  const handleShrinkage = async () => {
+    if (!shrinkageTarget) return;
+    setShrinkageError(null);
+    setShrinkageSuccess(null);
+    const qty = parseInt(shrinkageQty, 10);
+    if (!Number.isInteger(qty) || qty < 1) {
+      setShrinkageError("Quantity must be at least 1.");
+      return;
+    }
+    if (shrinkageReason.trim().length < 2) {
+      setShrinkageError("A reason is required (min 2 characters).");
+      return;
+    }
+    setShrinkageSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/log-shrinkage`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({
+          product_id: shrinkageTarget.id,
+          category: shrinkageCategory,
+          quantity: qty,
+          reason: shrinkageReason.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to record shrinkage");
+      }
+      setShrinkageSuccess(
+        `Recorded: ${qty}× ${data.shrinkage?.product_name ?? shrinkageTarget.name} ` +
+        `(${shrinkageCategory}) — loss $${((data.shrinkage?.total_loss_cents ?? 0) / 100).toFixed(2)}. ` +
+        `Stock: ${data.shrinkage?.old_stock ?? "?"} → ${data.shrinkage?.new_stock ?? "?"}`
+      );
+      // Refresh product list to reflect updated stock
+      await fetchProducts();
+    } catch (err: unknown) {
+      setShrinkageError(toUserSafeMessageFromUnknown(err, "Unable to record shrinkage right now."));
+    } finally {
+      setShrinkageSaving(false);
     }
   };
 
@@ -694,12 +798,124 @@ export default function CatalogManager() {
                   onEdit={() => openEdit(p)}
                   onToggleActive={() => handleToggleActive(p.id, p.is_active)}
                   onDelete={() => handleDelete(p.id)}
+                  onReportShrinkage={() => openShrinkage(p)}
                 />
               );
             })}
           </div>
         );
       })()}
+
+      {/* ── Shrinkage Report Modal ───────────────────────────── */}
+      {shrinkageTarget && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/60 z-50"
+            onClick={closeShrinkage}
+            aria-hidden
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              className="bg-stone-950 border border-stone-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold text-orange-400">📋 Report Shrinkage</h3>
+                <button
+                  type="button"
+                  onClick={closeShrinkage}
+                  className="text-stone-400 hover:text-white text-xl leading-none"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-sm text-stone-300">
+                Product: <strong>{shrinkageTarget.name}</strong>
+                {shrinkageTarget.stock_quantity !== null && (
+                  <> — Current stock: <strong>{shrinkageTarget.stock_quantity}</strong></>
+                )}
+              </p>
+
+              {/* Category */}
+              <div>
+                <label className="block text-sm text-stone-400 mb-1">Category</label>
+                <select
+                  value={shrinkageCategory}
+                  onChange={(e) => setShrinkageCategory(e.target.value as typeof shrinkageCategory)}
+                  className="w-full bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-sm
+                             text-stone-100 focus:outline-none focus:ring-2 focus:ring-orange-500
+                             appearance-none cursor-pointer"
+                >
+                  <option value="breakage">💔 Breakage</option>
+                  <option value="spoilage">🗑 Spoilage</option>
+                  <option value="theft">🚨 Theft</option>
+                  <option value="other">📝 Other</option>
+                </select>
+              </div>
+
+              {/* Quantity */}
+              <div>
+                <label className="block text-sm text-stone-400 mb-1">Quantity Lost</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={shrinkageQty}
+                  onChange={(e) => {
+                    if (/^\d*$/.test(e.target.value)) setShrinkageQty(e.target.value);
+                  }}
+                  className="w-full bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-sm
+                             text-stone-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="1"
+                />
+              </div>
+
+              {/* Reason */}
+              <div>
+                <label className="block text-sm text-stone-400 mb-1">Reason (required for IRS trail)</label>
+                <textarea
+                  value={shrinkageReason}
+                  onChange={(e) => setShrinkageReason(e.target.value)}
+                  maxLength={500}
+                  rows={3}
+                  className="w-full bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-sm
+                             text-stone-100 focus:outline-none focus:ring-2 focus:ring-orange-500
+                             resize-none"
+                  placeholder="e.g. Customer dropped mug on tile floor"
+                />
+                <p className="text-xs text-stone-500 mt-1">{shrinkageReason.length}/500</p>
+              </div>
+
+              {/* Error */}
+              {shrinkageError && (
+                <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                  {shrinkageError}
+                </p>
+              )}
+
+              {/* Success */}
+              {shrinkageSuccess && (
+                <p className="text-green-400 text-sm bg-green-500/10 border border-green-500/30 rounded-lg px-3 py-2">
+                  ✅ {shrinkageSuccess}
+                </p>
+              )}
+
+              {/* Submit */}
+              <button
+                type="button"
+                onClick={handleShrinkage}
+                disabled={shrinkageSaving}
+                className="w-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50
+                           disabled:cursor-not-allowed text-white font-medium py-2.5
+                           rounded-lg transition-colors text-sm"
+              >
+                {shrinkageSaving ? "Recording…" : "Record Shrinkage & Decrement Stock"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Overlay */}
       {drawerOpen && (
@@ -797,6 +1013,31 @@ export default function CatalogManager() {
                          text-stone-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="4.50"
             />
+          </div>
+
+          {/* Stock Quantity */}
+          <div>
+            <label htmlFor="catalog-stock" className="block text-sm text-stone-400 mb-1">
+              Stock Quantity
+            </label>
+            <input
+              id="catalog-stock"
+              type="text"
+              inputMode="numeric"
+              value={form.stock_quantity}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (/^\d*$/.test(v) || v === "") {
+                  setField("stock_quantity", v);
+                }
+              }}
+              className="w-full bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-sm
+                         text-stone-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Leave blank for unlimited"
+            />
+            <p className="text-xs text-stone-500 mt-1">
+              Leave blank for unlimited stock (e.g. cafe drinks). Enter a number for tracked inventory (e.g. bags of beans, hoodies).
+            </p>
           </div>
 
           {/* Category */}

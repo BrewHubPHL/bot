@@ -19,6 +19,7 @@
 const QRCode = require('qrcode');
 const crypto = require('crypto');
 const { generateReceiptString, queueReceipt } = require('./_receipt');
+const { logSystemError } = require('./_system-errors');
 
 // ── Voucher helpers (identical to square-webhook.js) ────────────
 const generateVoucherCode = () => {
@@ -85,6 +86,17 @@ async function confirmPayment({ supabase, orderId, paymentId, paidAmountCents, c
 
   if (orderError || !order) {
     console.error(`${tag} Order ${orderId} not found:`, orderError?.message);
+    // ── DEAD LETTER: Square paid but we can't find the order ───
+    await logSystemError(supabase, {
+      error_type: 'orphan_payment',
+      severity: 'critical',
+      source_function: `_process-payment:${confirmedVia}`,
+      order_id: orderId,
+      payment_id: paymentId,
+      amount_cents: paidAmountCents,
+      error_message: `Payment confirmed by Square but order not found in DB. Payment: ${paymentId}, Amount: $${(paidAmountCents / 100).toFixed(2)}`,
+      context: { confirmed_via: confirmedVia, currency },
+    });
     return { ok: false, reason: 'order_not_found' };
   }
 
@@ -151,6 +163,17 @@ async function confirmPayment({ supabase, orderId, paymentId, paidAmountCents, c
 
   if (updateError) {
     console.error(`${tag} Order update failed:`, updateError?.message);
+    // ── DEAD LETTER: Square paid but DB update failed ──────
+    await logSystemError(supabase, {
+      error_type: 'orphan_payment',
+      severity: 'critical',
+      source_function: `_process-payment:${confirmedVia}`,
+      order_id: orderId,
+      payment_id: paymentId,
+      amount_cents: paidAmountCents,
+      error_message: `Payment confirmed by Square but failed to update order status. DB error: ${updateError?.message}`,
+      context: { confirmed_via: confirmedVia, order_status: order.status },
+    });
     return { ok: false, reason: 'db_error' };
   }
 

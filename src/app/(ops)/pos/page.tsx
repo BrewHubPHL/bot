@@ -7,7 +7,7 @@ import {
   Coffee, CupSoda, Croissant, ShoppingCart, Plus, X,
   ChevronRight, CheckCircle2, Loader2, CreditCard, Monitor,
   AlertTriangle, RotateCcw, ScanLine, UserCheck, Ticket,
-  Gift, WifiOff, RefreshCw, Package, Printer
+  Gift, WifiOff, RefreshCw, Package, Printer, Banknote, Truck
 } from "lucide-react";
 import SwipeCartItem from "@/components/SwipeCartItem";
 import { useConnection } from "@/lib/useConnection";
@@ -41,6 +41,7 @@ interface CartItem {
   price_cents: number;
   modifiers: Modifier[];
   quantity: number;
+  isOpenPrice?: boolean; // true for shipping / TBD items with staff-entered price
 }
 
 interface LoyaltyCustomer {
@@ -89,6 +90,12 @@ const CATEGORIES: { key: string; label: string; icon: React.ReactNode; match: (n
     icon: <Package size={18} />,
     match: (n) => /tee|shirt|hat|cap|hoodie|beanie|mug|tumbler|sticker|tote|bag|merch|pin|patch|poster/i.test(n),
   },
+  {
+    key: "shipping",
+    label: "Shipping",
+    icon: <Truck size={18} />,
+    match: (n) => /shipping|parcel|outbound|fedex|ups|usps/i.test(n),
+  },
 ];
 
 const DRINK_MODIFIERS: Modifier[] = [
@@ -108,7 +115,10 @@ function categorize(name: string): string {
 }
 
 /** Categories that skip the drink modifier panel */
-const NO_MODIFIER_CATEGORIES = new Set(["food", "merch"]);
+const NO_MODIFIER_CATEGORIES = new Set(["food", "merch", "shipping"]);
+
+/** Categories that use open-price entry (staff enters price at register) */
+const OPEN_PRICE_CATEGORIES = new Set(["shipping"]);
 
 function cents(c: number) {
   return `$${(c / 100).toFixed(2)}`;
@@ -188,8 +198,19 @@ export default function POSPage() {
   const [compReason, setCompReason] = useState("");
   const [compSubmitting, setCompSubmitting] = useState(false);
 
+  // Guest-action routing: which button opened the guest name modal?
+  const [pendingGuestAction, setPendingGuestAction] = useState<"terminal" | "cash" | "comp" | null>(null);
+  // Temp guest name stored between guest-modal confirmation and comp-reason modal
+  const tempGuestNameRef = useRef<string | null>(null);
+
   // Receipt reprint
   const [reprintLoading, setReprintLoading] = useState(false);
+
+  // Open-price modal (for shipping / TBD items)
+  const [openPriceModalOpen, setOpenPriceModalOpen] = useState(false);
+  const [openPriceValue, setOpenPriceValue] = useState("");
+  const [openPriceItem, setOpenPriceItem] = useState<MenuItem | null>(null);
+  const openPriceInputRef = useRef<HTMLInputElement | null>(null);
 
   // POS-6: ref-stable handleLoyaltyScan so startLoyaltyDetection never holds a stale closure
   const handleLoyaltyScanRef = useRef<(rawValue: string) => Promise<void>>(null!);
@@ -236,6 +257,44 @@ export default function POSPage() {
         setLoading(false);
       }
     })();
+  }, []);
+
+  /* ─── Realtime catalog sync ─────────────────────────────────
+   * Listen for INSERT / UPDATE / DELETE on merch_products so the
+   * POS menu refreshes instantly when a manager edits the catalog,
+   * without requiring the barista to reload the page.
+   * ──────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    const channel = supabase
+      .channel("pos-catalog-sync")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "merch_products" },
+        async () => {
+          try {
+            const { data, error } = await supabase
+              .from("merch_products")
+              .select("id, name, price_cents, description, image_url")
+              .eq("is_active", true)
+              .is("archived_at", null)
+              .order("sort_order", { ascending: true })
+              .order("name", { ascending: true });
+
+            if (!error && data && data.length > 0) {
+              setMenuItems(data);
+              setMenuSource("live");
+              cacheMenu(data).catch(() => {});
+            }
+          } catch {
+            // Non-critical — menu stays as-is until next change event
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   /* ─── Auto-open offline session when connection drops ────── */
@@ -498,6 +557,16 @@ export default function POSPage() {
   );
   const cartCount = cart.reduce((s, ci) => s + ci.quantity, 0);
 
+  /** Build API payload from cart — includes open_price_cents for shipping items */
+  const buildCartPayload = useCallback(() => {
+    return cart.map((ci) => ({
+      product_id: ci.productId,
+      quantity: ci.quantity,
+      customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => m.name) : undefined,
+      ...(ci.isOpenPrice ? { open_price_cents: ci.price_cents } : {}),
+    }));
+  }, [cart]);
+
   /* ─── Cart helpers ───────────────────────────────────────────── */
   const addToCart = useCallback(
     (item: MenuItem, mods: Modifier[]) => {
@@ -577,12 +646,44 @@ export default function POSPage() {
   };
 
   const quickAdd = (item: MenuItem) => {
+    // For shipping items, open the price entry modal
+    if (OPEN_PRICE_CATEGORIES.has(categorize(item.name))) {
+      setOpenPriceItem(item);
+      setOpenPriceValue("");
+      setOpenPriceModalOpen(true);
+      setTimeout(() => openPriceInputRef.current?.focus(), 0);
+      return;
+    }
     // For food & merch items, skip the drink modifier builder and add directly
     if (NO_MODIFIER_CATEGORIES.has(categorize(item.name))) {
       addToCart(item, []);
     } else {
       openBuilder(item);
     }
+  };
+
+  /** Confirm open-price item — add to cart with staff-entered price */
+  const confirmOpenPrice = () => {
+    if (!openPriceItem) return;
+    const dollars = parseFloat(openPriceValue);
+    if (isNaN(dollars) || dollars <= 0) return;
+    const priceCents = Math.round(dollars * 100);
+    // Create a synthetic cart item with the entered price
+    setCart((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        productId: openPriceItem.id,
+        name: openPriceItem.name,
+        price_cents: priceCents,
+        modifiers: [],
+        quantity: 1,
+        isOpenPrice: true,
+      },
+    ]);
+    setOpenPriceModalOpen(false);
+    setOpenPriceItem(null);
+    setOpenPriceValue("");
   };
 
   /* ─── Auth: use PIN session token for API calls ───────────── */
@@ -720,6 +821,7 @@ export default function POSPage() {
 
     // If no loyalty customer or missing name, prompt for guest first name
     if (!loyaltyCustomer || !loyaltyCustomer.name) {
+      setPendingGuestAction("terminal");
       setGuestFirstName("");
       setGuestModalOpen(true);
       // Attempt to focus the input in the user gesture — fallback to autoFocus on mount
@@ -736,11 +838,8 @@ export default function POSPage() {
       // Build cart payload — one entry per distinct item with quantity
       // Uses product_id (UUID) for secure server-side price lookup
       // Include customizations (modifier names) for server-side pricing
-      const payload = cart.map((ci) => ({
-        product_id: ci.productId,
-        quantity: ci.quantity,
-        customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => m.name) : undefined,
-      }));
+      // Includes open_price_cents for shipping items
+      const payload = buildCartPayload();
 
       // Attach loyalty customer fields when scanned
       const checkoutBody: Record<string, unknown> = { items: payload, terminal: true };
@@ -833,11 +932,25 @@ export default function POSPage() {
     if (!name) return; // noop if blank
     setGuestModalOpen(false);
 
-    const payload = cart.map((ci) => ({
-      product_id: ci.productId,
-      quantity: ci.quantity,
-      customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => m.name) : undefined,
-    }));
+    const action = pendingGuestAction || "terminal";
+    setPendingGuestAction(null);
+
+    if (action === "cash") {
+      // Atomic cash checkout with guest name
+      await handleMarkPaid(name);
+      return;
+    }
+
+    if (action === "comp") {
+      // Store guest name for the comp reason modal, then open it
+      tempGuestNameRef.current = name;
+      setCompReason("");
+      setCompModalOpen(true);
+      return;
+    }
+
+    // Default: 'terminal' — existing behavior, create pending order for Square tap
+    const payload = buildCartPayload();
 
     const checkoutBody: Record<string, unknown> = { items: payload, terminal: true };
     checkoutBody.customer_name = name;
@@ -1064,8 +1177,176 @@ export default function POSPage() {
     }
   };
 
-  /* ─── Mark as Paid (skip terminal — cash, comp, etc.) ────────── */
-  const handleMarkPaid = async () => {
+  /* ─── Mark as Paid (atomic cash — single cafe-checkout call) ──── */
+  const handleMarkPaid = async (guestName?: string) => {
+    if (cart.length === 0) return;
+
+    // If no loyalty customer or missing name, prompt for guest first name
+    if (!guestName && (!loyaltyCustomer || !loyaltyCustomer.name)) {
+      setPendingGuestAction("cash");
+      setGuestFirstName("");
+      setGuestModalOpen(true);
+      setTimeout(() => guestInputRef.current?.focus(), 0);
+      return;
+    }
+
+    setTicketPhase("paying");
+    setTerminalStatus("Recording cash payment…");
+
+    try {
+      const token = getAccessToken();
+
+      // Build cart payload (same shape as handleSendToKDS)
+      const payload = buildCartPayload();
+
+      const checkoutBody: Record<string, unknown> = {
+        items: payload,
+        terminal: true,
+        paymentMethod: "cash",
+      };
+      if (loyaltyCustomer) {
+        checkoutBody.user_id = loyaltyCustomer.id;
+        checkoutBody.customer_email = loyaltyCustomer.email;
+        checkoutBody.customer_name = loyaltyCustomer.name;
+      }
+      if (guestName) {
+        checkoutBody.customer_name = guestName;
+      }
+
+      const resp = await fetch("/.netlify/functions/cafe-checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify(checkoutBody),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to record payment");
+      }
+
+      const result = await resp.json();
+      const orderId = result.order?.id;
+      if (!orderId) throw new Error("No order ID returned");
+
+      setCreatedOrderId(orderId);
+      setTicketPhase("paid");
+      setTerminalStatus("Marked paid (cash) — order on KDS");
+      haptic("success");
+
+      setTimeout(() => {
+        setCart([]);
+        setTicketPhase("building");
+        setCreatedOrderId(null);
+        setTerminalStatus("");
+      }, 3000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to record payment";
+      setErrorMsg(msg);
+      setTicketPhase("error");
+    }
+  };
+
+  /* ─── Comp Order (atomic — single cafe-checkout call with reason) ── */
+  const handleCompOrder = async () => {
+    if (cart.length === 0) return;
+    const reason = compReason.trim();
+    if (!reason || reason.length < 2) return;
+
+    // Resolve customer name: loyalty customer name, temp guest name, or missing
+    const customerName = loyaltyCustomer?.name || tempGuestNameRef.current || null;
+    if (!customerName) {
+      // Shouldn't reach here — guest modal should have been shown first
+      setErrorMsg("Customer name required. Please try again.");
+      setTicketPhase("error");
+      return;
+    }
+
+    setCompSubmitting(true);
+    setCompModalOpen(false);
+
+    try {
+      const token = getAccessToken();
+
+      const payload = buildCartPayload();
+
+      const checkoutBody: Record<string, unknown> = {
+        items: payload,
+        terminal: true,
+        paymentMethod: "comp",
+        reason,
+      };
+      if (loyaltyCustomer) {
+        checkoutBody.user_id = loyaltyCustomer.id;
+        checkoutBody.customer_email = loyaltyCustomer.email;
+        checkoutBody.customer_name = loyaltyCustomer.name;
+      }
+      if (tempGuestNameRef.current) {
+        checkoutBody.customer_name = tempGuestNameRef.current;
+      }
+
+      const resp = await fetch("/.netlify/functions/cafe-checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify(checkoutBody),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to comp order");
+      }
+
+      const result = await resp.json();
+      const orderId = result.order?.id;
+      if (!orderId) throw new Error("No order ID returned");
+
+      setCreatedOrderId(orderId);
+      setTicketPhase("paid");
+      setTerminalStatus("Comped — order on KDS");
+      haptic("success");
+
+      setTimeout(() => {
+        setCart([]);
+        setTicketPhase("building");
+        setCreatedOrderId(null);
+        setTerminalStatus("");
+        setCompReason("");
+        tempGuestNameRef.current = null;
+      }, 3000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to comp order";
+      setErrorMsg(msg);
+      setTicketPhase("error");
+    } finally {
+      setCompSubmitting(false);
+    }
+  };
+
+  /* ─── Comp Init (building phase — checks guest name first) ────── */
+  const handleCompInit = () => {
+    if (cart.length === 0) return;
+    if (!loyaltyCustomer || !loyaltyCustomer.name) {
+      setPendingGuestAction("comp");
+      setGuestFirstName("");
+      setGuestModalOpen(true);
+      setTimeout(() => guestInputRef.current?.focus(), 0);
+      return;
+    }
+    // Name already known — go straight to comp reason modal
+    tempGuestNameRef.current = null;
+    setCompReason("");
+    setCompModalOpen(true);
+  };
+
+  /* ─── Cash Fallback (confirm phase — order already created as pending) ── */
+  const handleCashFallback = async () => {
     if (!createdOrderId) return;
     setTicketPhase("paying");
     setTerminalStatus("Recording cash payment…");
@@ -1087,15 +1368,14 @@ export default function POSPage() {
       });
 
       if (!resp.ok) {
-        // 409 = order already moved past pending (e.g., KDS tapped "Start"
-        // or the abandon-cron fired). Parse the body to decide if it's safe.
+        // 409 = order already moved past pending — check if safe
         if (resp.status === 409) {
           const conflict = await resp.json().catch(() => ({} as Record<string, unknown>));
           const currentStatus = (conflict.currentStatus ?? conflict.status ?? "").toString().toLowerCase();
           const safeStatuses = ["preparing", "paid", "ready", "completed", "shipped", "picked_up"];
 
           if (safeStatuses.includes(currentStatus)) {
-            console.warn(`[POS] Cash payment 409 — backend status "${currentStatus}", safe to proceed`);
+            console.warn(`[POS] Cash fallback 409 — backend status "${currentStatus}", safe`);
             setTicketPhase("paid");
             setTerminalStatus("Payment recorded (order already active)");
             setTimeout(() => {
@@ -1107,12 +1387,11 @@ export default function POSPage() {
             return;
           }
 
-          // Unsafe / unknown status — surface error instead of false success
-          console.error(`[POS] Cash payment 409 — backend status "${currentStatus}", not safe`);
+          const detail = conflict.error || conflict.sqlState || "";
           throw new Error(
             currentStatus
               ? `Order is ${currentStatus} — cannot record cash payment`
-              : "Order conflict: unable to confirm payment (status unknown)"
+              : `Order conflict: unable to confirm payment${detail ? ` (${detail})` : ""}`
           );
         }
         const err = await resp.json().catch(() => ({}));
@@ -1132,57 +1411,6 @@ export default function POSPage() {
       const msg = e instanceof Error ? e.message : "Failed to record payment";
       setErrorMsg(msg);
       setTicketPhase("error");
-    }
-  };
-
-  /* ─── Comp Order (requires reason) ────────────────────────────── */
-  const handleCompOrder = async () => {
-    if (!createdOrderId) return;
-    const reason = compReason.trim();
-    if (!reason || reason.length < 2) return;
-
-    setCompSubmitting(true);
-    setCompModalOpen(false);
-
-    try {
-      const token = getAccessToken();
-      const resp = await fetch("/.netlify/functions/update-order-status", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
-        body: JSON.stringify({
-          orderId: createdOrderId,
-          status: "preparing",
-          paymentMethod: "comp",
-          reason,
-        }),
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to comp order");
-      }
-
-      setTicketPhase("paid");
-      setTerminalStatus("Comped — order on KDS");
-      haptic("success");
-
-      setTimeout(() => {
-        setCart([]);
-        setTicketPhase("building");
-        setCreatedOrderId(null);
-        setTerminalStatus("");
-        setCompReason("");
-      }, 3000);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to comp order";
-      setErrorMsg(msg);
-      setTicketPhase("error");
-    } finally {
-      setCompSubmitting(false);
     }
   };
 
@@ -1686,17 +1914,35 @@ export default function POSPage() {
           {ticketPhase === "building" && (
             <>
               {isOnline ? (
-                <button
-                  disabled={cart.length === 0 || isSubmitting}
-                  onClick={handleSendToKDS}
-                  className="w-full min-h-[48px] py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                >
-                  {isSubmitting ? (
-                    <><Loader2 size={16} className="animate-spin" /> Processing…</>
-                  ) : (
-                    <><ChevronRight size={16} /> Send to KDS</>
-                  )}
-                </button>
+                <>
+                  <button
+                    disabled={cart.length === 0 || isSubmitting}
+                    onClick={handleSendToKDS}
+                    className="w-full min-h-[48px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                  >
+                    {isSubmitting ? (
+                      <><Loader2 size={16} className="animate-spin" /> Processing…</>
+                    ) : (
+                      <><Monitor size={16} /> Pay on Terminal</>
+                    )}
+                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      disabled={cart.length === 0 || isSubmitting}
+                      onClick={() => handleMarkPaid()}
+                      className="min-h-[44px] py-3 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                    >
+                      <Banknote size={14} /> Cash
+                    </button>
+                    <button
+                      disabled={cart.length === 0 || isSubmitting}
+                      onClick={handleCompInit}
+                      className="min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                    >
+                      <Gift size={14} /> Comp
+                    </button>
+                  </div>
+                </>
               ) : (
                 <button
                   disabled={cart.length === 0 || offlineCapBlocked}
@@ -1756,7 +2002,9 @@ export default function POSPage() {
                       className="px-3 py-1 bg-stone-700 rounded-lg text-sm"
                     >{showOnscreenKeyboard ? 'Hide Keyboard' : 'Use On-screen Keyboard'}</button>
                     <button onClick={() => setGuestModalOpen(false)} className="px-4 py-2 bg-stone-700 rounded-lg">Cancel</button>
-                    <button onClick={confirmGuestAndSend} className="px-4 py-2 bg-emerald-600 rounded-lg">Send to KDS</button>
+                    <button onClick={confirmGuestAndSend} className="px-4 py-2 bg-emerald-600 rounded-lg">
+                      {pendingGuestAction === "cash" ? "Pay Cash" : pendingGuestAction === "comp" ? "Next" : "Send to KDS"}
+                    </button>
                   </div>
                 </div>
 
@@ -1773,6 +2021,70 @@ export default function POSPage() {
                     />
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Open-price modal (shipping / TBD items) */}
+          {openPriceModalOpen && openPriceItem && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="open-price-modal-title"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpenPriceModalOpen(false);
+                if (e.key === "Tab") { e.preventDefault(); openPriceInputRef.current?.focus(); }
+              }}
+            >
+              <div className="w-full max-w-md bg-stone-900 border border-stone-800 rounded-lg p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/20">
+                    <Truck className="h-5 w-5 text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 id="open-price-modal-title" className="text-lg font-bold">{openPriceItem.name}</h3>
+                    <p className="text-sm text-stone-400">Enter the quoted shipping price</p>
+                  </div>
+                </div>
+                <div className="relative mb-4">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-lg font-bold">$</span>
+                  <input
+                    ref={openPriceInputRef}
+                    autoFocus
+                    name="openPrice"
+                    aria-label="Shipping price in dollars"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max="999.99"
+                    value={openPriceValue}
+                    onChange={(e) => setOpenPriceValue(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmOpenPrice(); } }}
+                    placeholder="0.00"
+                    inputMode="decimal"
+                    className="w-full p-3 pl-8 bg-stone-800 border border-stone-700 rounded-lg outline-none text-xl font-mono tabular-nums"
+                  />
+                </div>
+                <p className="text-xs text-stone-500 mb-4">
+                  Enter the FedEx/UPS quoted rate. This will be charged to the customer at checkout.
+                  Price is locked once added to cart.
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => { setOpenPriceModalOpen(false); setOpenPriceItem(null); }}
+                    className="px-4 py-2.5 bg-stone-700 rounded-lg text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmOpenPrice}
+                    disabled={!openPriceValue || parseFloat(openPriceValue) <= 0}
+                    className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-bold"
+                  >
+                    Add to Cart
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1857,17 +2169,10 @@ export default function POSPage() {
               )}
 
               <button
-                onClick={handleMarkPaid}
+                onClick={handleCashFallback}
                 className="w-full min-h-[48px] py-3 bg-stone-800 hover:bg-stone-700 active:bg-stone-600 text-stone-300 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
               >
-                <CreditCard size={14} /> Cash / Already Paid
-              </button>
-
-              <button
-                onClick={() => { setCompReason(""); setCompModalOpen(true); }}
-                className="w-full min-h-[48px] py-3 bg-stone-800/60 hover:bg-stone-700 active:bg-stone-600 text-stone-400 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
-              >
-                <Gift size={14} /> Comp (Free)
+                <Banknote size={14} /> Switch to Cash
               </button>
 
               <button

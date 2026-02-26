@@ -107,11 +107,13 @@ exports.handler = async (event) => {
       const isPaid = ['paid', 'preparing', 'ready', 'completed'].includes(order.status);
 
       return {
+        id: order.id,
         position: index + 1,
         name: firstName,
         tag: `BRW-${idStr.slice(-4).toUpperCase()}`,
         items,
         status: order.status,
+        created_at: order.created_at,
         minutesAgo,
         isPaid,
       };

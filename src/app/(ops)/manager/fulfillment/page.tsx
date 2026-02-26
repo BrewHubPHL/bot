@@ -165,12 +165,13 @@ export default function FulfillmentDashboard() {
   }, []);
 
   /* ── Initial fetch + Supabase Realtime ─────────────── */
+  const channelIdRef = useRef(Math.random().toString(36).slice(2, 8));
   useEffect(() => {
     fetchOrders(true);
 
     // Subscribe to real-time changes on merch orders
     const channel = supabase
-      .channel('custom-fulfillment-channel')
+      .channel(`fulfillment-channel-${channelIdRef.current}`)
       .on(
         'postgres_changes',
         {

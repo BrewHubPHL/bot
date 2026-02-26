@@ -38,6 +38,8 @@ interface ParcelRow {
   masked_tracking: string;
   carrier: string | null;
   received_at: string | null;
+  direction: "inbound" | "outbound";
+  board_status: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -276,7 +278,7 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
   const fetchParcels = useCallback(async () => {
     const { data, error } = await supabase
       .from("parcel_departure_board")
-      .select("id, masked_name, masked_tracking, carrier, received_at")
+      .select("id, masked_name, masked_tracking, carrier, received_at, direction, board_status")
       .order("received_at", { ascending: false })
       .limit(100);
 
@@ -344,8 +346,12 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
     onBack?.();
   }
 
+  /* Direction counts for the header */
+  const inboundCount  = parcels.filter(p => p.direction !== "outbound").length;
+  const outboundCount = parcels.filter(p => p.direction === "outbound").length;
+
   /* Number of chars per column — adjusted for the board aesthetic */
-  const COL = { time: 5, name: 16, carrier: 3, tracking: 10, wait: 8, status: 9 };
+  const COL = { dir: 1, time: 5, name: 16, carrier: 3, tracking: 10, wait: 8, status: 11 };
 
   /* ---- Render --------------------------------------------------- */
   return (
@@ -396,9 +402,16 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
         </div>
 
         <div className="flex items-center gap-5 sm:gap-6">
-          <div className="flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: "#221a0a", boxShadow: "0 0 0 1px #332a1a" }}>
-            <span className="text-xs uppercase tracking-widest" style={{ color: "#665530" }}>Awaiting</span>
-            <span className="text-xl font-bold tabular-nums" style={{ color: "#ffcc00" }}>{parcels.length}</span>
+          <div className="flex items-center gap-3 rounded-lg px-3 py-1.5" style={{ background: "#221a0a", boxShadow: "0 0 0 1px #332a1a" }}>
+            <span className="flex items-center gap-1">
+              <span className="text-xs" style={{ color: "#665530" }}>▼</span>
+              <span className="text-lg font-bold tabular-nums" style={{ color: "#ffcc00" }}>{inboundCount}</span>
+            </span>
+            <span className="text-xs uppercase tracking-widest" style={{ color: "#665530" }}>|</span>
+            <span className="flex items-center gap-1">
+              <span className="text-xs" style={{ color: "#448899" }}>▲</span>
+              <span className="text-lg font-bold tabular-nums" style={{ color: "#44ddee" }}>{outboundCount}</span>
+            </span>
           </div>
           <MechanicalClock tick={tick} />
           <SystemStatus isStale={isStale} />
@@ -408,6 +421,7 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
       {/* ══════════ COLUMN HEADERS ══════════ */}
       {!loading && parcels.length > 0 && (
         <div className="shrink-0 solari-header" style={{ borderBottom: "1px solid #332a1a" }}>
+          <span style={{ width: COL.dir * 16 }}></span>
           <span style={{ width: COL.time * 16 }}>Time</span>
           <span className="flex-1">Resident</span>
           <span className="hidden sm:block" style={{ width: (COL.carrier + COL.tracking + 1) * 16 }}>Carrier / Tracking</span>
@@ -426,20 +440,36 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
           <div className="flex flex-col items-center justify-center h-full gap-4">
             <span className="text-6xl opacity-20">📭</span>
             <p className="text-2xl font-bold uppercase tracking-widest" style={{ color: "#332a1a" }}>
-              No Parcels Awaiting
+              No Parcels
             </p>
             <p className="text-xs uppercase tracking-[0.25em]" style={{ color: "#281f10" }}>
-              New arrivals will appear automatically
+              Inbound deliveries and outbound drop-offs appear automatically
             </p>
           </div>
         ) : (
           <div>
             {parcels.map((p, i) => {
-              const delayed = isDelayed(p.received_at, tick);
-              const fresh = !delayed && isNew(p.received_at, tick);
+              const isOutbound = p.direction === "outbound";
+              const delayed = !isOutbound && isDelayed(p.received_at, tick);
+              const fresh = !isOutbound && !delayed && isNew(p.received_at, tick);
               const tag = carrierTag(p.carrier);
-              const statusLabel = delayed ? "DELAYED" : fresh ? "NEW" : "IN LOCKER";
-              const statusColor = delayed ? "#ff4422" : fresh ? "#ffaa00" : "#44cc66";
+
+              // Status: outbound uses board_status from VIEW; inbound uses time-based heuristics
+              const statusLabel = isOutbound
+                ? (p.board_status || "PROCESSING")
+                : delayed ? "DELAYED" : fresh ? "NEW" : "IN LOCKER";
+              const statusColor = isOutbound
+                ? (p.board_status === "PICKED UP" ? "#44cc66" : p.board_status === "AWAITING PICKUP" ? "#44ddee" : "#77aacc")
+                : delayed ? "#ff4422" : fresh ? "#ffaa00" : "#44cc66";
+
+              // Color palette: outbound = cool cyan, inbound = warm amber
+              const nameColor   = isOutbound ? "#44ddee" : "#ffdd44";
+              const timeColor   = isOutbound ? "#44bbcc" : "#ffcc00";
+              const tagColor    = isOutbound ? "#2299aa" : "#cc8800";
+              const trkColor    = isOutbound ? "#447788" : "#776640";
+              const waitColor   = isOutbound ? "#55aaaa" : "#cc9944";
+              const dirArrow    = isOutbound ? "▲" : "▼";
+              const dirColor    = isOutbound ? "#44ddee" : "#cc8800";
               const isFlapping = flappingRowId === p.id;
 
               return (
@@ -449,18 +479,29 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
                     "solari-row",
                     fresh && "solari-row--new",
                     delayed && "solari-row--delayed",
+                    isOutbound && "solari-row--outbound",
                   )}
                   style={{
                     borderBottom: "1px solid #221a0a",
-                    background: i % 2 === 0 ? "#1e1810" : "#1a1510",
+                    background: isOutbound
+                      ? (i % 2 === 0 ? "#0f1a1e" : "#0d1618")
+                      : (i % 2 === 0 ? "#1e1810" : "#1a1510"),
                   }}
                 >
+                  {/* DIRECTION ARROW */}
+                  <SplitFlapText
+                    text={dirArrow}
+                    length={COL.dir}
+                    flapping={isFlapping}
+                    color={dirColor}
+                  />
+
                   {/* TIME */}
                   <SplitFlapText
                     text={arrivalTime(p.received_at)}
                     length={COL.time}
                     flapping={isFlapping}
-                    color="#ffcc00"
+                    color={timeColor}
                   />
 
                   {/* RESIDENT */}
@@ -469,7 +510,7 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
                       text={p.masked_name}
                       length={COL.name}
                       flapping={isFlapping}
-                      color="#ffdd44"
+                      color={nameColor}
                     />
                   </span>
 
@@ -479,14 +520,14 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
                       text={tag}
                       length={COL.carrier}
                       flapping={isFlapping}
-                      color="#cc8800"
+                      color={tagColor}
                     />
                     <SplitFlapChar char=" " flapping={false} color="transparent" />
                     <SplitFlapText
                       text={p.masked_tracking}
                       length={COL.tracking}
                       flapping={isFlapping}
-                      color="#776640"
+                      color={trkColor}
                     />
                   </span>
 
@@ -496,7 +537,7 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
                     length={COL.wait}
                     flapping={isFlapping}
                     align="right"
-                    color="#cc9944"
+                    color={waitColor}
                   />
 
                   {/* STATUS */}
@@ -522,7 +563,7 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
         style={{ borderTop: "1px solid #332a1a", color: "#443820", fontSize: "11px" }}
       >
         <span className="uppercase tracking-widest">
-          Please bring your ID for pickup &bull; Ask a barista for help
+          <span style={{ color: "#cc8800" }}>▼ Pickup: bring ID</span> &bull; <span style={{ color: "#448899" }}>▲ Drop-off: see barista</span>
         </span>
         <span className="uppercase tracking-widest">BrewHub PHL</span>
       </footer>
@@ -631,6 +672,15 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
         }
         .solari-row--delayed {
           animation: solari-delayed-pulse 2s ease-in-out infinite;
+        }
+
+        /* ── Outbound: cool cyan pulse ── */
+        @keyframes solari-outbound-glow {
+          0%, 100% { box-shadow: inset 0 0 0 0 rgba(68,187,204,0); }
+          50%      { box-shadow: inset 0 0 30px 0 rgba(68,187,204,0.03); }
+        }
+        .solari-row--outbound {
+          animation: solari-outbound-glow 4s ease-in-out infinite;
         }
 
         /* ── Text blink ── */

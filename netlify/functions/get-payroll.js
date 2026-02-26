@@ -101,7 +101,40 @@ exports.handler = async (event) => {
 
       const maskedShifts = (openShifts || []).map(s => ({ id: s.id, employee_email: s.employee_email, clock_in: s.clock_in, created_at: s.created_at }));
 
-      return { statusCode: 200, headers, body: JSON.stringify({ summary: data || [], openShifts: maskedShifts }) };
+      // Also fetch recent override/audit log entries so the UI can show "Edited" badges
+      let overrides = [];
+      try {
+        let oQuery = supabase
+          .from('manager_override_log')
+          .select('id, action_type, manager_email, target_employee, details, created_at')
+          .in('action_type', ['adjust_hours', 'fix_clock'])
+          .order('created_at', { ascending: false })
+          .limit(500);
+
+        if (startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+          oQuery = oQuery.gte('created_at', startDate + 'T00:00:00Z');
+        }
+        if (endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+          oQuery = oQuery.lte('created_at', endDate + 'T23:59:59Z');
+        }
+
+        const { data: oData, error: oErr } = await oQuery;
+        if (!oErr && oData) {
+          overrides = oData.map(o => ({
+            id: o.id,
+            action_type: o.action_type,
+            manager_email: o.manager_email,
+            target_employee: o.target_employee,
+            details: o.details || {},
+            created_at: o.created_at,
+          }));
+        }
+      } catch (_overrideErr) {
+        // Non-fatal: overrides display is supplementary
+        console.error('[GET-PAYROLL] Override log fetch failed (non-fatal):', _overrideErr?.message || 'unknown');
+      }
+
+      return { statusCode: 200, headers, body: JSON.stringify({ summary: data || [], openShifts: maskedShifts, overrides }) };
     }
 
     // ── Default: raw staff + logs for client-side calculation ──

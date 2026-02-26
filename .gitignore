@@ -42,6 +42,9 @@ snyk-results.json
 !.vscode/extensions.json
 .idea/
 
+# ── SECURITY AUDIT ───────────────────────────────────────────────────
+Doomsday.md
+
 # ── ARCHIVES & OS ────────────────────────────────────────────────────
 legacy/
 dead/

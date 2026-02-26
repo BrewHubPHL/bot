@@ -4,8 +4,6 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import AolBuddyQueue from "@/components/AolBuddyQueue"
 import type { KdsOrder } from "@/components/KdsOrderCard"
-import AuthzErrorStateCard from "@/components/AuthzErrorState"
-import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz"
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog"
 
 interface QueueMonitorProps { onBack?: () => void; }
@@ -16,53 +14,38 @@ const API_BASE =
     ? "http://localhost:8888/.netlify/functions"
     : "/.netlify/functions"
 
-function getAccessToken(): string | null {
-  try {
-    const raw = sessionStorage.getItem("ops_session")
-    if (!raw) return null
-    return JSON.parse(raw)?.token ?? null
-  } catch {
-    return null
-  }
-}
-
-interface APIOrder {
+/* ── Shape returned by get-queue (public endpoint) ───────────── */
+interface QueueItem {
   id: string
+  position: number
+  name: string
+  tag: string
+  items: { name: string; mods?: string | null }[]
   status: string
-  first_name: string | null
   created_at: string
-  is_guest_order?: boolean
-  total_amount_cents?: number
-  coffee_orders?: {
-    id: string
-    drink_name: string
-    customizations?: string
-    price?: number
-  }[]
+  minutesAgo: number | null
+  isPaid: boolean
 }
 
-function toKdsOrder(o: APIOrder): KdsOrder {
+/** Map the public get-queue response into KdsOrder for AolBuddyQueue */
+function toKdsOrder(q: QueueItem): KdsOrder {
   return {
-    id: o.id,
-    customer_name: o.first_name,
-    is_guest_order: o.is_guest_order ?? false,
-    status: o.status,
-    created_at: o.created_at,
-    total_amount_cents: o.total_amount_cents ?? 0,
-    items: (o.coffee_orders ?? []).map((c) => ({
-      name: c.drink_name,
-      quantity: 1,
-    })),
+    id: q.id,
+    customer_name: q.name,
+    is_guest_order: !q.isPaid && ["pending", "unpaid"].includes(q.status),
+    status: q.status,
+    created_at: q.created_at,
+    total_amount_cents: 0,
+    items: q.items.map((i) => ({ name: i.name, quantity: 1 })),
   }
 }
 
-/* ── Poll interval (ms) ──────────────────────────────────────── */
-const POLL_MS = 15_000
+/* ── Poll interval (ms) — matches /queue page cadence ────────── */
+const POLL_MS = 10_000
 
 export default function QueueMonitor({ onBack }: QueueMonitorProps) {
   const [orders, setOrders] = useState<KdsOrder[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   /* ---- Auto-fullscreen on mount --------------------------------- */
@@ -72,25 +55,19 @@ export default function QueueMonitor({ onBack }: QueueMonitorProps) {
     return () => { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}) }
   }, [])
 
+  /* ── Fetch from the PUBLIC get-queue endpoint (no auth needed) ── */
   const fetchOrders = useCallback(async () => {
-    const token = getAccessToken()
     try {
-      const res = await fetch(`${API_BASE}/get-kds-orders`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
+      const res = await fetch(`${API_BASE}/get-queue`)
       if (!res.ok) {
-        const info = await getErrorInfoFromResponse(res, "Failed to load orders")
-        setAuthzState(info.authz)
-        setError(info.authz ? null : info.message)
+        setError("Failed to load orders")
         return
       }
-      // API returns { orders: [...] } — destructure before mapping
-      const { orders: rawOrders } = await res.json() as { orders: APIOrder[] }
-      setOrders(rawOrders.map(toKdsOrder))
-      setAuthzState(null)
+      const data = await res.json() as { queue: QueueItem[] }
+      const items: QueueItem[] = Array.isArray(data.queue) ? data.queue : []
+      setOrders(items.map(toKdsOrder))
       setError(null)
     } catch (e) {
-      setAuthzState(null)
       setError(toUserSafeMessageFromUnknown(e, "Unable to refresh queue monitor right now."))
     }
   }, [])
@@ -126,9 +103,10 @@ export default function QueueMonitor({ onBack }: QueueMonitorProps) {
 
   // Realtime push via Supabase — resets the poll cadence so the next
   // scheduled tick doesn't fire immediately after a push-triggered fetch.
+  const channelIdRef = useRef(Math.random().toString(36).slice(2, 8))
   useEffect(() => {
     const channel = supabase
-      .channel("queue-monitor-orders")
+      .channel(`queue-monitor-orders-${channelIdRef.current}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "orders" },
@@ -148,23 +126,6 @@ export default function QueueMonitor({ onBack }: QueueMonitorProps) {
   function handleBack() {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
     onBack?.()
-  }
-
-  function handleAuthzAction() {
-    if (authzState?.status === 401) {
-      sessionStorage.removeItem("ops_session")
-      window.location.reload()
-      return
-    }
-    handleBack()
-  }
-
-  if (authzState) {
-    return (
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ background: "oklch(0.12 0.02 20)" }}>
-        <AuthzErrorStateCard state={authzState} onAction={handleAuthzAction} className="max-w-md w-full" />
-      </div>
-    )
   }
 
   if (error) {

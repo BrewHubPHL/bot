@@ -35,7 +35,8 @@ import ParcelsMonitor from "./ParcelsMonitor";
 import ParcelOpsPanel from "./ParcelOpsPanel";
 /* ─── Outbound fulfillment (manager-only) ────────────────── */
 import FulfillmentDashboard from "./fulfillment/page";
-
+/* ─── Live Staff Pulse (persistent header badge) ───── */
+import LiveStaffPulse from "@/app/(site)/components/manager/LiveStaffPulse";
 /* ─── Tab definitions ────────────────────────────────────── */
 const TABS: ManagerTab[] = [
   { key: "overview",  label: "Overview",        icon: LayoutDashboard },
@@ -80,14 +81,17 @@ export default function ManagerDashboard() {
               BrewHub PHL &middot; Staff Operations
             </p>
           </div>
-          <span className="text-xs text-stone-400 hidden sm:block">
-            {new Date().toLocaleDateString("en-US", {
-              weekday: "long",
-              month: "long",
-              day: "numeric",
-              year: "numeric",
-            })}
-          </span>
+          <div className="flex items-center gap-3">
+            <LiveStaffPulse />
+            <span className="text-xs text-stone-400 hidden sm:block">
+              {new Date().toLocaleDateString("en-US", {
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </span>
+          </div>
         </div>
 
         {/* ── Quick nav links to other ops pages ── */}

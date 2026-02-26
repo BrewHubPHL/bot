@@ -86,7 +86,7 @@ exports.handler = async (event) => {
   try {
     const { data, error } = await supabase
       .from('orders')
-      .select('id, customer_name, status, created_at, is_guest_order, total_amount_cents, coffee_orders(id, drink_name, customizations, price)')
+      .select('id, customer_name, status, created_at, is_guest_order, total_amount_cents, claimed_by, coffee_orders(id, drink_name, customizations, price, completed_at, completed_by)')
       .in('status', ['unpaid', 'pending', 'paid', 'preparing', 'ready'])
       .neq('type', 'merch')
       .order('created_at', { ascending: true })
@@ -96,7 +96,9 @@ exports.handler = async (event) => {
 
     const orders = (data || []).map((o) => {
       const full = String(o.customer_name || '').trim();
-      const firstName = full ? full.split(/\s+/)[0] : null;
+      // DOOMSDAY FIX: Sanitize customer name on read path for defense-in-depth
+      const rawFirst = full ? full.split(/\s+/)[0] : null;
+      const firstName = rawFirst ? String(sanitizeInput(rawFirst)).slice(0, 50) : null;
       // Avoid returning full PII; expose first name only for KDS display
       const { customer_name, ...rest } = o;
 
@@ -106,9 +108,11 @@ exports.handler = async (event) => {
         drink_name: String(sanitizeInput(ci.drink_name || '')).slice(0, 200),
         customizations: String(sanitizeInput(ci.customizations || '')).slice(0, 1000),
         price: ci.price,
+        completed_at: ci.completed_at || null,
+        completed_by: ci.completed_by || null,
       }));
 
-      return { ...rest, first_name: firstName, coffee_orders: coffee };
+      return { ...rest, first_name: firstName, claimed_by: o.claimed_by || null, coffee_orders: coffee };
     });
 
     return jsonResp(200, { orders }, origin);

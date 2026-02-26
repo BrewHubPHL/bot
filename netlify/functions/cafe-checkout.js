@@ -2,6 +2,8 @@ const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { checkQuota } = require('./_usage');
+const { generateReceiptString, queueReceipt } = require('./_receipt');
+const { logSystemError } = require('./_system-errors');
 
 // HTML-escape user-supplied strings to prevent injection in emails
 const escapeHtml = (s) => String(s || '')
@@ -103,6 +105,23 @@ exports.handler = async (event) => {
 
     const { terminal, user_id, customer_email: ce, customer_name: cn, offline_id } = body;
 
+    // ── PAYMENT METHOD (atomic cash/comp) ────────────────────
+    // If paymentMethod is 'cash' or 'comp', the order is created
+    // directly as 'preparing' with payment stamped — single round-trip.
+    // 'terminal' keeps the existing two-step pending→preparing flow.
+    const ATOMIC_METHODS = ['cash', 'comp'];
+    const rawPaymentMethod = body.paymentMethod;
+    const paymentMethod = (typeof rawPaymentMethod === 'string' && ['cash', 'comp', 'terminal'].includes(rawPaymentMethod))
+      ? rawPaymentMethod
+      : null;
+    const isAtomicPayment = paymentMethod && ATOMIC_METHODS.includes(paymentMethod);
+
+    // Comp orders require a reason (validated early before DB work)
+    const compReason = (body.reason || '').toString().trim();
+    if (paymentMethod === 'comp' && (!compReason || compReason.length < 2)) {
+      return json(400, { error: 'A reason is required when comping an order.' });
+    }
+
     // ── Require customer_name for non-terminal (site/guest) orders ───
     // POS terminal flow supplies the name via staff input; site orders must
     // include it so baristas have a callout name on the KDS.
@@ -151,10 +170,22 @@ exports.handler = async (event) => {
         validMods.push(mod);
       }
 
+      // Accept open_price_cents ONLY from staff sessions (for shipping/TBD items)
+      const openPrice = entry?.open_price_cents;
+      if (openPrice !== undefined && openPrice !== null) {
+        if (authMode !== 'staff') {
+          return json(403, { error: 'Open-price items can only be added by staff at the register.' });
+        }
+        const cents = parseInt(openPrice);
+        if (!Number.isInteger(cents) || cents < 1 || cents > 99999) {
+          return json(400, { error: 'open_price_cents must be 1–99999.' });
+        }
+      }
+
       if (pid && typeof pid === 'string' && UUID_RE.test(pid)) {
-        normalized.push({ product_id: pid, quantity: qty, customizations: validMods });
+        normalized.push({ product_id: pid, quantity: qty, customizations: validMods, open_price_cents: openPrice ?? null });
       } else if (name && typeof name === 'string' && name.length > 0 && name.length <= 200) {
-        normalized.push({ name, quantity: qty, customizations: validMods });
+        normalized.push({ name, quantity: qty, customizations: validMods, open_price_cents: openPrice ?? null });
       } else {
         return json(400, { error: 'Each item must have a valid product_id (UUID) or name (string).' });
       }
@@ -169,7 +200,7 @@ exports.handler = async (event) => {
       const uniqueIds = [...new Set(byId.map(i => i.product_id))];
       const { data, error: prodErr } = await supabase
         .from('merch_products')
-        .select('id, name, price_cents')
+        .select('id, name, price_cents, category')
         .in('id', uniqueIds)
         .eq('is_active', true)
         .is('archived_at', null);
@@ -185,7 +216,7 @@ exports.handler = async (event) => {
       const uniqueNames = [...new Set(byName.map(i => i.name))];
       const { data, error: prodErr } = await supabase
         .from('merch_products')
-        .select('id, name, price_cents')
+        .select('id, name, price_cents, category')
         .in('name', uniqueNames)
         .eq('is_active', true)
         .is('archived_at', null);
@@ -212,6 +243,19 @@ exports.handler = async (event) => {
       if (!product) {
         return json(400, { error: `Unknown or inactive product: ${item.product_id || item.name}` });
       }
+
+      // ── Open-price override: only allowed for 'shipping' category products ──
+      // Staff enters the FedEx/UPS quoted rate at the register.
+      // The DB product acts as a placeholder (price_cents = 0 or 1).
+      let effectivePriceCents = product.price_cents;
+      if (item.open_price_cents !== null && item.open_price_cents !== undefined) {
+        if (product.category !== 'shipping') {
+          return json(400, { error: `Open pricing is only allowed for shipping items, not "${product.name}".` });
+        }
+        effectivePriceCents = parseInt(item.open_price_cents);
+        console.log(`[CAFE] Open-price override: ${product.name} → $${(effectivePriceCents / 100).toFixed(2)} (staff: ${auth.user?.email || 'unknown'})`);
+      }
+
       const mods = item.customizations || [];
       const modKey = mods.slice().sort().join(',');
       const compositeKey = `${product.id}::${modKey}`;
@@ -219,7 +263,7 @@ exports.handler = async (event) => {
         const modCostCents = mods.reduce(
           (sum, m) => sum + (KNOWN_MODIFIERS[m] || 0), 0
         );
-        qtyMap[compositeKey] = { product, totalQty: 0, customizations: mods, modCostCents };
+        qtyMap[compositeKey] = { product, totalQty: 0, customizations: mods, modCostCents, effectivePriceCents };
       }
       qtyMap[compositeKey].totalQty += item.quantity;
     }
@@ -227,8 +271,8 @@ exports.handler = async (event) => {
     let totalCents = 0;
     const validatedItems = [];
 
-    for (const { product, totalQty, customizations, modCostCents } of Object.values(qtyMap)) {
-      const unitCents = product.price_cents + modCostCents;
+    for (const { product, totalQty, customizations, modCostCents, effectivePriceCents: epCents } of Object.values(qtyMap)) {
+      const unitCents = epCents + modCostCents;
       const lineCents = unitCents * totalQty;
       totalCents += lineCents;
       validatedItems.push({
@@ -246,17 +290,35 @@ exports.handler = async (event) => {
     }
 
     // ── Create order with SERVER-calculated total ────────────
-    // POS terminal orders start as 'pending' — the Square webhook will
-    // transition them to 'preparing' once payment is confirmed. This
-    // eliminates the "Limbo State" where unpaid orders pollute the KDS.
+    // Atomic cash/comp: order lands on KDS as 'preparing', fully paid.
+    // Terminal (Square tap): order starts as 'pending' until webhook confirms.
     // Online/direct orders are marked 'paid' immediately.
-    const orderStatus = terminal ? 'pending' : 'paid';
+    let orderStatus;
+    if (isAtomicPayment) {
+      orderStatus = 'preparing';          // cash/comp — ready for barista
+    } else if (terminal) {
+      orderStatus = 'pending';            // Square terminal — awaiting card tap
+    } else {
+      orderStatus = 'paid';               // online / direct
+    }
 
     const orderRow = {
       status: orderStatus,
       type: 'cafe',
       total_amount_cents: totalCents,
     };
+
+    // Stamp payment fields atomically for cash/comp
+    if (isAtomicPayment) {
+      orderRow.payment_id = paymentMethod;                // 'cash' or 'comp'
+      orderRow.paid_at = new Date().toISOString();
+      orderRow.paid_amount_cents = totalCents;
+    }
+    // Online pre-pay: stamp payment fields so receipts & finance queries are complete
+    if (orderStatus === 'paid' && !isAtomicPayment) {
+      orderRow.paid_at = new Date().toISOString();
+      orderRow.paid_amount_cents = totalCents;
+    }
     // Only attach user_id / customer fields if provided (prevents null FK issues)
     // For logged-in customers, auto-attach their user_id for loyalty tracking
     const effectiveUserId = user_id || (authMode === 'customer' && auth.user?.id) || null;
@@ -291,6 +353,25 @@ exports.handler = async (event) => {
         }
       }
       console.error('Cafe order create error:', orderErr?.message);
+      // ── DEAD LETTER: Log orphan payment risk ──────────────
+      // If this was a terminal order, Square may have already captured payment
+      // but we failed to create the order row → $50 disappears into the void.
+      await logSystemError(supabase, {
+        error_type: 'db_insert_failed',
+        severity: 'critical',
+        source_function: 'cafe-checkout',
+        amount_cents: totalCents,
+        error_message: `Order INSERT failed: ${orderErr?.message || 'unknown'}. Payment method: ${paymentMethod || 'terminal'}. Customer: ${cn || 'unknown'}.`,
+        context: {
+          payment_method: paymentMethod || 'terminal',
+          customer_name: cn || null,
+          customer_email: ce || null,
+          total_cents: totalCents,
+          item_count: validatedItems?.length || 0,
+          auth_mode: authMode,
+          offline_id: offline_id || null,
+        },
+      });
       return json(500, { error: 'Failed to create order' });
     }
     const order = insertedOrder;
@@ -315,7 +396,66 @@ exports.handler = async (event) => {
     if (itemErr) {
       // Coffee items failed — rollback the parent order to prevent a ghost KDS card
       await supabase.from('orders').delete().eq('id', order.id);
+      // ── DEAD LETTER: order was created then rolled back ─────
+      await logSystemError(supabase, {
+        error_type: 'db_insert_failed',
+        severity: 'critical',
+        source_function: 'cafe-checkout',
+        order_id: order.id,
+        amount_cents: totalCents,
+        error_message: `Coffee items INSERT failed after order created (rolled back): ${itemErr?.message || 'unknown'}`,
+        context: {
+          payment_method: paymentMethod || 'terminal',
+          customer_name: cn || null,
+          item_count: coffeeItems?.length || 0,
+        },
+      });
       return json(500, { error: 'Failed to save order items. Please try again.' });
+    }
+
+    // ── Comp audit logging (mirrors update-order-status guard) ──
+    if (paymentMethod === 'comp' && order) {
+      const COMP_CAP_CENTS = 1500;
+      const isManager = auth.ok && (auth.role === 'manager' || auth.role === 'admin');
+
+      // Non-managers cannot comp orders above the cap
+      if (!isManager && totalCents > COMP_CAP_CENTS) {
+        // Rollback: delete the order we just created
+        await supabase.from('coffee_orders').delete().eq('order_id', order.id);
+        await supabase.from('orders').delete().eq('id', order.id);
+        return json(403, {
+          error: `Comp limit is $${(COMP_CAP_CENTS / 100).toFixed(2)} for non-manager staff. Ask a manager to approve.`,
+        });
+      }
+
+      try {
+        await supabase.from('comp_audit').insert({
+          order_id:     order.id,
+          staff_id:     auth.user?.id || null,
+          staff_email:  auth.user?.email || 'unknown',
+          staff_role:   auth.role || 'unknown',
+          amount_cents: totalCents,
+          reason:       compReason.slice(0, 500),
+          is_manager:   !!isManager,
+        });
+        console.log(`[COMP AUDIT] ${auth.user?.email} (${auth.role}) comped order ${order.id} ($${(totalCents / 100).toFixed(2)}): ${compReason}`);
+      } catch (auditErr) {
+        console.error('[COMP AUDIT] Non-fatal audit insert error:', auditErr.message);
+      }
+    }
+
+    // ── Receipt generation for atomic cash/comp ─────────────
+    if (isAtomicPayment && order) {
+      try {
+        const lineItems = coffeeItems.map(ci => ({
+          drink_name: ci.drink_name,
+          price: ci.price,
+        }));
+        const receiptText = generateReceiptString(order, lineItems);
+        await queueReceipt(supabase, order.id, receiptText);
+      } catch (receiptErr) {
+        console.error('[RECEIPT] Non-fatal receipt error in cafe-checkout:', receiptErr.message);
+      }
     }
 
     // Send order confirmation email if customer email provided

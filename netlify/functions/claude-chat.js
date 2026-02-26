@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { chatBucket } = require('./_token-bucket');
 const { sendSMS } = require('./_sms');
 const { hashIP } = require('./_ip-hash');
+const { sanitizeInput } = require('./_sanitize');
 
 // ═══════════════════════════════════════════════════════════════════
 // ALLERGEN / DIETARY / MEDICAL SAFETY LAYER
@@ -331,6 +332,12 @@ async function executeTool(toolName, toolInput, supabase) {
             return { success: false, result: 'No items provided for the order.' };
         }
 
+        // ── DOOMSDAY FIX: Cap distinct line items to prevent KDS/DB flooding ──
+        const MAX_ORDER_LINE_ITEMS = 10;
+        if (items.length > MAX_ORDER_LINE_ITEMS) {
+            return { success: false, result: `Orders are limited to ${MAX_ORDER_LINE_ITEMS} different items. Please reduce your order.` };
+        }
+
         // Cap quantity to prevent abuse
         const MAX_ITEM_QUANTITY = 20;
 
@@ -364,6 +371,8 @@ async function executeTool(toolName, toolInput, supabase) {
 
             const menuItemNames = Object.keys(menuPrices);
             let totalCents = 0;
+            let totalDrinkCount = 0;
+            const MAX_TOTAL_DRINKS = 20;
             const validatedItems = [];
 
             for (const item of items) {
@@ -380,6 +389,13 @@ async function executeTool(toolName, toolInput, supabase) {
                 }
 
                 const priceCents = menuPrices[matchedName];
+                totalDrinkCount += quantity;
+                if (totalDrinkCount > MAX_TOTAL_DRINKS) {
+                    return {
+                        success: false,
+                        result: `Orders are limited to ${MAX_TOTAL_DRINKS} total items. Please reduce your quantities.`
+                    };
+                }
                 totalCents += priceCents * quantity;
                 validatedItems.push({ name: matchedName, quantity, price_cents: priceCents });
             }
@@ -456,14 +472,18 @@ async function executeTool(toolName, toolInput, supabase) {
                     }
                 }
 
+                // ── DOOMSDAY FIX: Sanitize free-text fields before DB insert ──
+                const safeCustomerName = sanitizeInput(customer_name || 'Voice Order').slice(0, 100);
+                const safeNotes = notes ? sanitizeInput(notes).slice(0, 500) : null;
+
                 const { data: order, error: orderErr } = await supabase
                     .from('orders')
                     .insert({
                         status: 'unpaid',
                         type: 'cafe',
                         total_amount_cents: totalCents,
-                        customer_name: customer_name || 'Voice Order',
-                        notes: notes || null,
+                        customer_name: safeCustomerName,
+                        notes: safeNotes,
                         is_guest_order: isGuest,
                         client_ip_hash: ipHash !== 'unknown' ? ipHash : null,
                         ...(authedUser?.id ? { user_id: authedUser.id } : {}),

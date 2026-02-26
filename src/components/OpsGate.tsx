@@ -307,6 +307,14 @@ export default function OpsGate({ children, requireManager = false }: { children
     setClockMsg("");
     sessionStorage.removeItem("ops_session");
 
+    // Scenario 8 defense: wipe any session-sensitive localStorage that
+    // could bleed into the next operator's session on a shared iPad.
+    try {
+      localStorage.removeItem("brewhub_cart");
+      localStorage.removeItem("brewhub_cafe_cart");
+      localStorage.removeItem("brewhub_email");
+    } catch { /* storage unavailable */ }
+
     // Clear the HttpOnly session cookie via a logout endpoint
     fetch(`${API_BASE}/pin-logout`, { method: "POST", headers: { "X-BrewHub-Action": "true" }, credentials: "include" }).catch(() => {});
   }, []);

@@ -15,6 +15,25 @@ const supabase = createClient(
 const VALID_CATEGORIES = ['menu', 'merch'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Fire-and-forget: bust the Next.js ISR cache for /shop so customers
+ * see catalog changes immediately instead of waiting up to 60 seconds.
+ */
+async function revalidateShopCache() {
+  const siteUrl = process.env.URL || process.env.SITE_URL || 'https://brewhubphl.com';
+  const secret = process.env.INTERNAL_SYNC_SECRET;
+  if (!secret) { console.warn('[manage-catalog] Skipping revalidation — INTERNAL_SYNC_SECRET not set'); return; }
+  try {
+    await fetch(`${siteUrl}/api/revalidate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-brewhub-secret': secret },
+      body: JSON.stringify({ paths: ['/shop'] }),
+    });
+  } catch (err) {
+    console.warn('[manage-catalog] Shop revalidation failed (non-blocking):', err.message);
+  }
+}
+
 exports.handler = async (event) => {
   const ALLOWED_ORIGINS = [process.env.URL, 'https://brewhubphl.com', 'https://www.brewhubphl.com'].filter(Boolean);
   const origin = event.headers?.origin || '';
@@ -55,7 +74,7 @@ exports.handler = async (event) => {
 
     // ─── CREATE ──────────────────────────────────────────
     if (event.httpMethod === 'POST') {
-      const { name, description, price_cents, image_url, is_active, category } = body;
+      const { name, description, price_cents, image_url, is_active, category, stock_quantity } = body;
 
       if (!name || typeof name !== 'string' || !name.trim()) {
         return corsJson(422, { error: 'Name is required' });
@@ -65,6 +84,13 @@ exports.handler = async (event) => {
       }
       if (category && !VALID_CATEGORIES.includes(category)) {
         return corsJson(422, { error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}` });
+      }
+
+      // stock_quantity: null = unlimited, integer >= 0 = tracked
+      if (stock_quantity !== undefined && stock_quantity !== null) {
+        if (typeof stock_quantity !== 'number' || !Number.isInteger(stock_quantity) || stock_quantity < 0) {
+          return corsJson(422, { error: 'stock_quantity must be a non-negative integer or null (unlimited)' });
+        }
       }
 
       // Validate image_url if provided — must be our Supabase storage
@@ -88,12 +114,14 @@ exports.handler = async (event) => {
           image_url: image_url || null,
           is_active: is_active !== false,
           category: category || 'menu',
+          stock_quantity: stock_quantity !== undefined ? stock_quantity : null,
           updated_at: new Date().toISOString(),
         })
         .select()
         .single();
 
       if (error) throw error;
+      revalidateShopCache().catch(() => {}); // bust ISR cache — non-blocking
       return corsJson(201, { product: data });
     }
 
@@ -114,6 +142,11 @@ exports.handler = async (event) => {
       if ('name' in updates && (!updates.name || !updates.name.trim())) {
         return corsJson(422, { error: 'Name cannot be empty' });
       }
+      if ('stock_quantity' in updates && updates.stock_quantity !== null) {
+        if (typeof updates.stock_quantity !== 'number' || !Number.isInteger(updates.stock_quantity) || updates.stock_quantity < 0) {
+          return corsJson(422, { error: 'stock_quantity must be a non-negative integer or null (unlimited)' });
+        }
+      }
       if ('image_url' in updates && updates.image_url) {
         if (typeof updates.image_url !== 'string' || updates.image_url.length > 2048) {
           return corsJson(422, { error: 'Image URL too long (max 2048)' });
@@ -123,7 +156,7 @@ exports.handler = async (event) => {
       }
 
       // Whitelist allowed columns
-      const allowed = ['name', 'description', 'price_cents', 'image_url', 'is_active', 'category', 'archived_at'];
+      const allowed = ['name', 'description', 'price_cents', 'image_url', 'is_active', 'category', 'archived_at', 'stock_quantity'];
       const row = { updated_at: new Date().toISOString() };
       for (const key of allowed) {
         if (key in updates) row[key] = updates[key];
@@ -139,6 +172,7 @@ exports.handler = async (event) => {
         .single();
 
       if (error) throw error;
+      revalidateShopCache().catch(() => {}); // bust ISR cache — non-blocking
       return corsJson(200, { product: data });
     }
 
@@ -155,6 +189,7 @@ exports.handler = async (event) => {
         .eq('id', id);
 
       if (error) throw error;
+      revalidateShopCache().catch(() => {}); // bust ISR cache — non-blocking
       return corsJson(200, { ok: true });
     }
 

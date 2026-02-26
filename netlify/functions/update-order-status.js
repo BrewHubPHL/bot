@@ -76,7 +76,7 @@ async function logSyncError(source, detail, extra = {}) {
  * Build an error response from a Postgres/Supabase error, logging it
  * to system_sync_logs and returning a mapped HTTP status + errorId.
  */
-async function buildPgErrorResponse(err, orderId, authEmail, corsHeaders) {
+async function buildPgErrorResponse(err, orderId, authEmail, corsHeaders, currentStatus) {
   const sqlState = extractSqlState(err) || 'UNKNOWN';
   const mapped = PG_ERROR_MAP[sqlState] || PG_ERROR_MAP[sqlState.substring(0, 5)] || null;
 
@@ -98,7 +98,7 @@ async function buildPgErrorResponse(err, orderId, authEmail, corsHeaders) {
   return {
     statusCode: httpStatus,
     headers,
-    body: JSON.stringify({ error: userMsg, errorId, sqlState }),
+    body: JSON.stringify({ error: userMsg, errorId, sqlState, currentStatus: currentStatus || null }),
   };
 }
 
@@ -377,7 +377,22 @@ exports.handler = async (event) => {
     );
 
     if (rpcError) {
-      return await buildPgErrorResponse(rpcError, orderId, auth.user?.email, CORS_HEADERS);
+      return await buildPgErrorResponse(rpcError, orderId, auth.user?.email, CORS_HEADERS, currentOrder.status);
+    }
+
+    // ── BARISTA CLAIM TRACKING ────────────────────────────────
+    // When a barista moves an order to 'preparing', record who
+    // claimed it so other KDS screens show "Claimed by <name>".
+    // Non-fatal — don't block the status update if claiming fails.
+    if (status === 'preparing' && auth.user?.id) {
+      try {
+        await supabase.rpc('claim_order', {
+          p_order_id: orderId,
+          p_staff_id: auth.user.id,
+        });
+      } catch (claimErr) {
+        console.error('[CLAIM] Non-fatal claim_order error:', claimErr?.message);
+      }
     }
 
     // RPC returns the updated order as a single JSON row

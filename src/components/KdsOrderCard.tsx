@@ -9,6 +9,7 @@ import {
   Check,
   AlertTriangle,
   CreditCard,
+  Hourglass,
 } from "lucide-react"
 
 /* ------------------------------------------------------------------ */
@@ -16,8 +17,11 @@ import {
 /* ------------------------------------------------------------------ */
 
 export interface KdsOrderItem {
+  id: string
   name: string
   quantity: number
+  completed_at?: string | null
+  completed_by?: string | null
 }
 
 export interface KdsOrder {
@@ -27,6 +31,7 @@ export interface KdsOrder {
   status: string
   created_at: string
   total_amount_cents: number
+  claimed_by?: string | null
   items: KdsOrderItem[]
 }
 
@@ -59,21 +64,32 @@ interface KdsOrderCardProps {
   actionSlot?: React.ReactNode
   urgencyRing?: string
   isExiting?: boolean
+  /** True for unpaid / pending orders that haven't been paid yet */
+  isAwaitingPayment?: boolean
+  /** Called when a barista toggles an item checkbox — fires DB write */
+  onItemToggle?: (itemId: string) => void
 }
 
-export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyRing, isExiting = false }: KdsOrderCardProps) {
-  const [tickedItems, setTickedItems] = useState<Set<number>>(new Set())
+export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyRing, isExiting = false, isAwaitingPayment = false, onItemToggle }: KdsOrderCardProps) {
+  // Optimistic toggle state: tracks items being toggled (waiting for Realtime)
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set())
 
-  const toggleItem = useCallback((idx: number) => {
-    setTickedItems((prev) => {
-      const next = new Set(prev)
-      if (next.has(idx)) next.delete(idx)
-      else next.add(idx)
-      return next
-    })
-  }, [])
+  const handleToggle = useCallback((itemId: string) => {
+    if (!itemId || !onItemToggle) return
+    setTogglingIds((prev) => new Set(prev).add(itemId))
+    onItemToggle(itemId)
+    // Clear toggling state after Realtime should have caught up
+    setTimeout(() => {
+      setTogglingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(itemId)
+        return next
+      })
+    }, 3000)
+  }, [onItemToggle])
 
-  const allDone = tickedItems.size === order.items.length
+  const completedCount = order.items.filter((i) => i.completed_at).length
+  const allDone = completedCount === order.items.length && order.items.length > 0
   const isGuest = order.is_guest_order
 
   return (
@@ -81,6 +97,7 @@ export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyR
       className={cn(
         "relative flex flex-col rounded-xl border bg-card text-card-foreground shadow-sm transition-all duration-300",
         isGuest && "animate-pulse-border",
+        isAwaitingPayment && "border-dashed border-amber-500/50 opacity-70",
         urgencyRing,
         isExiting
           ? "opacity-0 scale-95 translate-y-4"
@@ -90,6 +107,15 @@ export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyR
         className,
       )}
     >
+      {/* ------- Awaiting Payment Banner ------- */}
+      {isAwaitingPayment && (
+        <div className="mx-5 mt-4 flex items-center gap-2 rounded-lg bg-amber-500/15 px-3 py-2 border border-amber-500/30">
+          <Hourglass className="h-3.5 w-3.5 shrink-0 text-amber-400 animate-pulse" />
+          <span className="text-xs font-bold uppercase tracking-widest text-amber-400">
+            Awaiting Payment
+          </span>
+        </div>
+      )}
       {/* ------- Header ------- */}
       <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -127,15 +153,27 @@ export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyR
         </div>
       )}
 
+      {/* ------- Claimed By Banner ------- */}
+      {order.claimed_by && (
+        <div className="mx-5 mt-2 flex items-center gap-2 rounded-lg bg-sky-500/10 px-3 py-1.5 border border-sky-500/20">
+          <User className="h-3 w-3 shrink-0 text-sky-400" />
+          <span className="text-xs font-semibold uppercase tracking-wide text-sky-400">
+            Claimed
+          </span>
+        </div>
+      )}
+
       {/* ------- Items ------- */}
       <div className="flex flex-col gap-0 px-5 pt-3 pb-2">
-        {order.items.map((item, idx) => {
-          const done = tickedItems.has(idx)
+        {order.items.map((item) => {
+          const done = !!item.completed_at
+          const isToggling = togglingIds.has(item.id)
           return (
             <button
-              key={idx}
+              key={item.id}
               type="button"
-              onClick={() => toggleItem(idx)}
+              disabled={isToggling}
+              onClick={() => handleToggle(item.id)}
               className={cn(
                 "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-200",
                 "hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -203,7 +241,7 @@ export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyR
             <Check className="h-3 w-3" /> All Items Done
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground">{tickedItems.size}/{order.items.length} done</span>
+          <span className="text-xs text-muted-foreground">{completedCount}/{order.items.length} done</span>
         )}
       </div>
 

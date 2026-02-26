@@ -39,11 +39,13 @@ SET search_path = public
 AS $$
 DECLARE
   cancelled_count int;
+  v_unpaid_count  int;
 BEGIN
+  -- 1. Cancel stale PENDING orders (no terminal checkout started)
   UPDATE orders
   SET    status     = 'cancelled',
          updated_at = now()
-  WHERE  status IN ('pending')
+  WHERE  status = 'pending'
     AND  payment_id IS NULL
     -- CRITICAL: Do NOT cancel orders that were sent to the terminal.
     -- The customer may have already tapped/inserted their card.
@@ -52,6 +54,20 @@ BEGIN
     AND  created_at < now() - (stale_minutes || ' minutes')::interval;
 
   GET DIAGNOSTICS cancelled_count = ROW_COUNT;
+
+  -- 2. Cancel stale UNPAID orders (chatbot/guest — 60-min grace period)
+  --    These guests were given time to walk to the cafe; if they never
+  --    showed up, clear the ghost cards from the KDS.
+  UPDATE orders
+  SET    status     = 'cancelled',
+         updated_at = now()
+  WHERE  status = 'unpaid'
+    AND  payment_id IS NULL
+    AND  created_at < now() - interval '60 minutes';
+
+  GET DIAGNOSTICS v_unpaid_count = ROW_COUNT;
+  cancelled_count := cancelled_count + v_unpaid_count;
+
   RETURN cancelled_count;
 END;
 $$;

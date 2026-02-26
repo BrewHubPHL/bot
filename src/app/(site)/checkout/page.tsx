@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, ShoppingBag, CreditCard, Loader2, CheckCircle, Wallet } from 'lucide-react';
+import { ArrowLeft, ShoppingBag, CreditCard, Loader2, CheckCircle, Wallet, AlertTriangle, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import Script from 'next/script';
 
@@ -75,7 +75,7 @@ export default function CheckoutPage() {
   const [googlePayReady, setGooglePayReady] = useState(false);
   const [awaitingFinality, setAwaitingFinality] = useState(false);
   const [finalityMessage, setFinalityMessage] = useState('');
-
+  const [paymentTimedOut, setPaymentTimedOut] = useState(false);
   const cardRef = useRef<SquareCard | null>(null);
   const paymentsRef = useRef<SquarePayments | null>(null);
   const applePayRef = useRef<SquarePaymentMethod | null>(null);
@@ -243,33 +243,58 @@ export default function CheckoutPage() {
   }, []);
 
   const submitPayment = useCallback(async (sourceId: string) => {
+    const SUBMIT_TIMEOUT_MS = 15_000; // 15-second hard timeout (Scenario 9 fix)
+
     setLoading(true);
     setError('');
     setAwaitingFinality(false);
     setFinalityMessage('');
+    setPaymentTimedOut(false);
+
+    // AbortController: kills the fetch if the network hangs (Wi-Fi→5G switch)
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SUBMIT_TIMEOUT_MS);
 
     try {
-      const response = await fetch('/.netlify/functions/process-merch-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-BrewHub-Action': 'true' },
-        body: JSON.stringify({
-          cart,
-          sourceId,
-          customerEmail: email.trim().slice(0, 254),
-          customerName: name.trim().slice(0, 100),
-          fulfillmentType,
-          ...(fulfillmentType === 'shipping' ? {
-            shippingAddress: {
-              line1: addressLine1.trim().slice(0, 200),
-              line2: addressLine2.trim().slice(0, 200) || undefined,
-              city: city.trim().slice(0, 100),
-              state: state.trim().slice(0, 50),
-              zip: zip.trim().slice(0, 10),
-              phone: phone.trim().slice(0, 20),
-            },
-          } : {}),
-        }),
-      });
+      let response: Response;
+      try {
+        response = await fetch('/.netlify/functions/process-merch-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-BrewHub-Action': 'true' },
+          body: JSON.stringify({
+            cart,
+            sourceId,
+            customerEmail: email.trim().slice(0, 254),
+            customerName: name.trim().slice(0, 100),
+            fulfillmentType,
+            ...(fulfillmentType === 'shipping' ? {
+              shippingAddress: {
+                line1: addressLine1.trim().slice(0, 200),
+                line2: addressLine2.trim().slice(0, 200) || undefined,
+                city: city.trim().slice(0, 100),
+                state: state.trim().slice(0, 50),
+                zip: zip.trim().slice(0, 10),
+                phone: phone.trim().slice(0, 20),
+              },
+            } : {}),
+          }),
+          signal: controller.signal,
+        });
+      } catch (fetchErr) {
+        clearTimeout(timer);
+        // Network timeout — payment may have been captured server-side
+        if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+          setPaymentTimedOut(true);
+          setError(
+            'The connection timed out while processing your payment. ' +
+            'Your card may have been charged. Please check your email for a receipt ' +
+            'before trying again, or tap "Verify Payment" below.'
+          );
+          return;
+        }
+        throw fetchErr;
+      }
+      clearTimeout(timer);
 
       const data = await response.json();
 
@@ -301,13 +326,16 @@ export default function CheckoutPage() {
       setSuccess(true);
       localStorage.removeItem('brewhub_cart');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Payment failed. Please try again.');
+      if (!paymentTimedOut) {
+        setError(err instanceof Error ? err.message : 'Payment failed. Please try again.');
+      }
     } finally {
+      clearTimeout(timer);
       setLoading(false);
       setWalletProcessing(false);
       setAwaitingFinality(false);
     }
-  }, [cart, email, name, fulfillmentType, addressLine1, addressLine2, city, state, zip, phone, waitForPaymentFinality]);
+  }, [cart, email, name, fulfillmentType, addressLine1, addressLine2, city, state, zip, phone, waitForPaymentFinality, paymentTimedOut]);
 
   /** Validate fulfillment fields; returns error message or empty string */
   function validateFulfillment(): string {
@@ -660,8 +688,50 @@ export default function CheckoutPage() {
                 {/* Error */}
                 {error && (
                   <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                    {paymentTimedOut && (
+                      <div className="flex items-center gap-2 mb-2 font-semibold">
+                        <AlertTriangle size={16} />
+                        Connection Timeout
+                      </div>
+                    )}
                     {error}
                   </div>
+                )}
+
+                {/* Timeout recovery: Verify Payment button */}
+                {paymentTimedOut && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentTimedOut(false);
+                      setError('');
+                      setAwaitingFinality(true);
+                      setFinalityMessage('Checking payment status with Square…');
+                      // Use the email as a lookup hint — waitForPaymentFinality
+                      // polls poll-merch-payment which checks the DB for recent
+                      // orders matching this email.
+                      waitForPaymentFinality('', '').then((confirmed) => {
+                        if (confirmed) {
+                          setSuccess(true);
+                          localStorage.removeItem('brewhub_cart');
+                        } else {
+                          setError(
+                            'Could not verify a completed payment. If your card was charged, ' +
+                            'please contact us at hello@brewhubphl.com with your email address and we\'ll sort it out.'
+                          );
+                        }
+                      }).catch(() => {
+                        setError('Verification failed. Please check your email for a receipt or contact us.');
+                      }).finally(() => {
+                        setAwaitingFinality(false);
+                        setLoading(false);
+                      });
+                    }}
+                    className="w-full py-3 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <RefreshCw size={18} />
+                    Verify Payment Status
+                  </button>
                 )}
 
                 {/* Finality status */}

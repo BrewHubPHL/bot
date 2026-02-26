@@ -35,11 +35,14 @@ export interface APIOrder {
   created_at: string;
   is_guest_order?: boolean;
   total_amount_cents?: number;
+  claimed_by?: string | null;
   coffee_orders?: {
     id: string;
     drink_name: string;
     customizations?: string;
     price?: number | null;
+    completed_at?: string | null;
+    completed_by?: string | null;
   }[];
 }
 
@@ -132,9 +135,13 @@ function mapOrder(o: APIOrder): KdsOrder {
     created_at: o.created_at,
     is_guest_order: o.is_guest_order ?? false,
     total_amount_cents: o.total_amount_cents ?? 0,
+    claimed_by: o.claimed_by ?? null,
     items: (o.coffee_orders || []).map((ci) => ({
+      id: ci.id,
       name: ci.drink_name,
       quantity: 1,
+      completed_at: ci.completed_at ?? null,
+      completed_by: ci.completed_by ?? null,
     })),
   };
 }
@@ -239,10 +246,11 @@ export function KdsGrid({ token, onStateChange, fetchRef }: KdsGridProps) {
   }, [fetchOrders]);
 
   /* ── Initial fetch + Realtime ───────────────────────────────── */
+  const channelIdRef = useRef(Math.random().toString(36).slice(2, 8));
   useEffect(() => {
     fetchOrders();
     const channel = supabase
-      .channel("kds-grid-realtime")
+      .channel(`kds-grid-realtime-${channelIdRef.current}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" },       () => debouncedFetch())
       .on("postgres_changes", { event: "*", schema: "public", table: "coffee_orders" }, () => debouncedFetch())
       .subscribe();
@@ -328,6 +336,32 @@ export function KdsGrid({ token, onStateChange, fetchRef }: KdsGridProps) {
     }
   }
 
+  /* ── Item toggle handler (passed to KdsOrderCard) ────────── */
+  const handleItemToggle = useCallback(async (itemId: string) => {
+    try {
+      const t = token ?? getAccessToken();
+      if (!t) throw new Error("No PIN session");
+      const res = await fetch(`${API_BASE}/update-item-status`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${t}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({ itemId }),
+      });
+      if (!res.ok) {
+        const info = await getErrorInfoFromResponse(res, "Item update failed");
+        throw new Error(info.message);
+      }
+      haptic("tap");
+    } catch (err: unknown) {
+      const msg = toUserSafeMessageFromUnknown(err, "Unable to update item.");
+      showToast(msg, "error");
+      haptic("error");
+    }
+  }, [token, showToast]);
+
   /* ── Render ─────────────────────────────────────────────────── */
   if (authzState) {
     return (
@@ -369,6 +403,7 @@ export function KdsGrid({ token, onStateChange, fetchRef }: KdsGridProps) {
           const nextStatus   = STATUS_FLOW[status];
           const isExiting    = exitingIds.has(order.id);
           const borderTop    = STATUS_BORDER_TOP[status] || "border-t-8 border-t-stone-600";
+          const isAwaitingPayment = status === "unpaid" || status === "pending";
 
           return (
             <KdsOrderCard
@@ -376,8 +411,10 @@ export function KdsGrid({ token, onStateChange, fetchRef }: KdsGridProps) {
               order={order}
               createdAt={new Date(order.created_at)}
               isExiting={isExiting}
+              isAwaitingPayment={isAwaitingPayment}
               urgencyRing={urgencyRing(order.created_at, status)}
               className={borderTop}
+              onItemToggle={handleItemToggle}
               actionSlot={
                 <div
                   className="space-y-2"

@@ -184,49 +184,58 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid order total' }) };
     }
 
-    // ── Pre-charge stock check — prevent overselling ─────────────
-    // Only enforced when merch_products.stock_quantity is NOT NULL.
-    // NULL stock_quantity = unlimited (print-on-demand / digital).
-    const stockCheckedIds = productIds.length > 0 ? productIds : [];
-    if (stockCheckedIds.length > 0 || sanitizedNames.length > 0) {
-      // Re-use dbProducts we already fetched — just need stock_quantity
-      const { data: stockRows, error: stockErr } = await supabase
+    // ── ATOMIC pre-charge stock reservation ─────────────────────
+    // Strategy: Reserve (decrement) stock BEFORE charging the card.
+    // The Postgres UPDATE … WHERE stock_quantity >= qty acquires a
+    // row-level lock, so concurrent requests serialise automatically.
+    // If anything fails later we call rollback_merch_stock to restock.
+    //
+    // NULL stock_quantity = unlimited (print-on-demand / digital) — skipped.
+    const reservedItems = []; // Track what we reserved so we can rollback
+
+    for (const item of cart) {
+      const product = (dbProducts || []).find(p => p.id === item.id || p.name === item.name);
+      if (!product) continue;
+
+      // Fetch current stock_quantity for this product
+      const { data: stockRow } = await supabase
         .from('merch_products')
-        .select('id, name, stock_quantity')
-        .eq('is_active', true)
-        .is('archived_at', null)
-        .or(filterParts.join(','));
+        .select('stock_quantity')
+        .eq('id', product.id)
+        .single();
 
-      if (stockErr) {
-        console.error('[MERCH-PAY] Stock check failed:', stockErr.message);
-        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Failed to check stock availability' }) };
-      }
+      // NULL = unlimited — no reservation needed
+      if (!stockRow || stockRow.stock_quantity === null) continue;
 
-      const stockById = {};
-      const stockByName = {};
-      for (const s of (stockRows || [])) {
-        if (s.id) stockById[s.id] = s.stock_quantity;
-        if (s.name) stockByName[s.name] = s.stock_quantity;
-      }
+      const requestedQty = Math.min(20, Math.max(1, parseInt(item.quantity) || 1));
 
-      for (const item of cart) {
-        const available = stockById[item.id] ?? stockByName[item.name];
-        // NULL = unlimited — skip check
-        if (available === null || available === undefined) continue;
-        const requestedQty = Math.min(20, Math.max(1, parseInt(item.quantity) || 1));
-        if (requestedQty > available) {
-          const displayName = item.name || item.id;
-          return {
-            statusCode: 400,
-            headers,
-            body: JSON.stringify({
-              error: available <= 0
-                ? `${displayName} is out of stock.`
-                : `Only ${available} of ${displayName} available (you requested ${requestedQty}).`,
-            }),
-          };
+      // Atomic reserve: decrements stock only if enough is available
+      const { data: reserved, error: reserveErr } = await supabase
+        .rpc('reserve_merch_stock', { p_product_id: product.id, p_quantity: requestedQty });
+
+      if (reserveErr || !reserved || reserved.length === 0) {
+        // Insufficient stock — rollback any previously reserved items
+        for (const r of reservedItems) {
+          await supabase.rpc('rollback_merch_stock', {
+            p_product_id: r.productId,
+            p_quantity: r.quantity,
+          }).catch(e => console.error('[MERCH-PAY] Rollback failed during stock rejection:', e.message));
         }
+
+        const displayName = item.name || item.id;
+        const available = stockRow.stock_quantity;
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error: available <= 0
+              ? `${displayName} is out of stock.`
+              : `Only ${available} of ${displayName} available (you requested ${requestedQty}).`,
+          }),
+        };
       }
+
+      reservedItems.push({ productId: product.id, quantity: requestedQty });
     }
 
     // Deterministic idempotency key: same cart + same customer = same key
@@ -261,28 +270,47 @@ exports.handler = async (event) => {
     const referenceId = `MERCH-${Date.now()}-${idempotencyKey.slice(0, 8)}`;
 
     // Create Square Payment
-    const paymentResponse = await square.payments.create({
-      idempotencyKey,
-      sourceId,
-      amountMoney: {
-        amount: BigInt(totalCents),
-        currency: 'USD',
-      },
-      locationId: process.env.SQUARE_LOCATION_ID,
-      referenceId,
-      note: `BrewHub Merch Order: ${lineItems.map(i => `${i.quantity}x ${i.name}`).join(', ')}`,
-      buyerEmailAddress: customerEmail || undefined,
-    });
+    let payment;
+    try {
+      const paymentResponse = await square.payments.create({
+        idempotencyKey,
+        sourceId,
+        amountMoney: {
+          amount: BigInt(totalCents),
+          currency: 'USD',
+        },
+        locationId: process.env.SQUARE_LOCATION_ID,
+        referenceId,
+        note: `BrewHub Merch Order: ${lineItems.map(i => `${i.quantity}x ${i.name}`).join(', ')}`,
+        buyerEmailAddress: customerEmail || undefined,
+      });
 
-    const payment = paymentResponse.result?.payment;
+      payment = paymentResponse.result?.payment;
 
-    if (!payment || payment.status === 'FAILED') {
-      console.error('Payment failed:', paymentResponse);
-      return { 
-        statusCode: 400, 
-        headers, 
-        body: JSON.stringify({ error: 'Payment failed. Please try again.' }) 
-      };
+      if (!payment || payment.status === 'FAILED') {
+        console.error('Payment failed:', paymentResponse);
+        // Rollback reserved stock — card was NOT charged
+        for (const r of reservedItems) {
+          await supabase.rpc('rollback_merch_stock', {
+            p_product_id: r.productId,
+            p_quantity: r.quantity,
+          }).catch(e => console.error('[MERCH-PAY] Rollback failed after payment decline:', e.message));
+        }
+        return { 
+          statusCode: 400, 
+          headers, 
+          body: JSON.stringify({ error: 'Payment failed. Please try again.' }) 
+        };
+      }
+    } catch (squareErr) {
+      // Square threw — rollback reserved stock
+      for (const r of reservedItems) {
+        await supabase.rpc('rollback_merch_stock', {
+          p_product_id: r.productId,
+          p_quantity: r.quantity,
+        }).catch(e => console.error('[MERCH-PAY] Rollback failed after Square error:', e.message));
+      }
+      throw squareErr; // re-throw so outer catch returns 400/500
     }
 
     // Store order in Supabase — let Postgres auto-generate the UUID primary key.
@@ -309,29 +337,39 @@ exports.handler = async (event) => {
       .single();
 
     if (insertErr || !insertedOrder) {
-      // CRITICAL: Log the Square Payment ID with the error so we can find it later
-      console.error(`[CRITICAL] Payment ${payment.id} succeeded but DB failed:`, insertErr?.message);
-      
-      // Do NOT return 200. Return 500 so the frontend doesn't show a success message.
+      // CRITICAL: Payment succeeded but DB insert failed.
+      // 1. Rollback reserved stock
+      for (const r of reservedItems) {
+        await supabase.rpc('rollback_merch_stock', {
+          p_product_id: r.productId,
+          p_quantity: r.quantity,
+        }).catch(e => console.error('[MERCH-PAY] Rollback failed after DB insert error:', e.message));
+      }
+      // 2. Refund the Square payment so the customer isn't silently charged
+      try {
+        await square.refunds.refundPayment({
+          idempotencyKey: `refund-${payment.id}`,
+          paymentId: payment.id,
+          amountMoney: { amount: BigInt(totalCents), currency: 'USD' },
+          reason: 'Automatic refund: order recording failed after payment',
+        });
+        console.error(`[CRITICAL] Payment ${payment.id} refunded after DB insert failure: ${insertErr?.message}`);
+      } catch (refundErr) {
+        // If the refund also fails, log everything needed for manual reconciliation
+        console.error(`[CRITICAL-UNRECOVERABLE] Payment ${payment.id} charged but refund ALSO failed. Manual action required.`, refundErr.message);
+      }
+
       return {
         statusCode: 500,
         headers,
         body: JSON.stringify({ 
-          error: "Payment processed but order recording failed. Please contact info@brewhubphl.com with your receipt."
+          error: "Payment has been reversed. Please try again or contact info@brewhubphl.com."
         })
       };
     }
 
-    // Decrement stock for items that have a finite stock_quantity
-    for (const item of cart) {
-      const productId = productIds.length > 0
-        ? (dbProducts || []).find(p => p.id === item.id || p.name === item.name)?.id
-        : (dbProducts || []).find(p => p.name === item.name)?.id;
-      if (!productId) continue;
-      const qty = Math.min(20, Math.max(1, parseInt(item.quantity) || 1));
-      // Only decrement if stock_quantity is tracked (NOT NULL)
-      await supabase.rpc('decrement_merch_stock', { p_product_id: productId, p_quantity: qty }).catch(() => {});
-    }
+    // Stock was already reserved atomically before charging.
+    // No additional decrement needed.
 
     const newOrderId = insertedOrder.id;
 

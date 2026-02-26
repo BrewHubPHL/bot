@@ -65,7 +65,7 @@ const AdjustmentSchema = z.object({
 
   reason: z
     .string({ required_error: 'reason is required' })
-    .min(5, 'reason must be at least 5 characters')
+    .min(10, 'reason must be at least 10 characters (IRS compliance)')
     .max(500, 'reason must be at most 500 characters'),
 
   target_date: z

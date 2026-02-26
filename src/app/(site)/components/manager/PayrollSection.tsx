@@ -1,7 +1,7 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
-import { Download, RefreshCw, X, Clock, AlertTriangle } from "lucide-react";
+import { Download, RefreshCw, X, Clock, AlertTriangle, Pencil, Info } from "lucide-react";
 import ManagerChallengeModal from "@/components/ManagerChallengeModal";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 
@@ -103,6 +103,22 @@ interface PendingFixAction {
   reason: string;
 }
 
+interface PendingAdjustAction {
+  employee_email: string;
+  delta_minutes: number;
+  reason: string;
+  target_date?: string;
+}
+
+interface OverrideLogEntry {
+  id: string;
+  action_type: string;
+  manager_email: string;
+  target_employee: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
 interface SheetTarget {
   email: string;
   displayName: string;
@@ -196,6 +212,20 @@ export default function PayrollSection() {
   const [fixSuccess, setFixSuccess] = useState("");
   const [fixReason, setFixReason] = useState("");
 
+  // ---- Adjust Hours modal state --------------------------------
+  const [adjustTarget, setAdjustTarget] = useState<PayrollSummaryRow | null>(null);
+  const [adjustDelta, setAdjustDelta] = useState("");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjustBusy, setAdjustBusy] = useState(false);
+  const [adjustError, setAdjustError] = useState("");
+  const [adjustSuccess, setAdjustSuccess] = useState("");
+  const [pendingAdjust, setPendingAdjust] = useState<PendingAdjustAction | null>(null);
+  const [showAdjustChallenge, setShowAdjustChallenge] = useState(false);
+
+  // ---- Override / audit log (for "Edited" badges) ---------------
+  const [overrides, setOverrides] = useState<OverrideLogEntry[]>([]);
+  const [auditPopup, setAuditPopup] = useState<string | null>(null); // employee_email
+
   // Open/close helpers ----------------------------------------
   const openSheet = useCallback((target: SheetTarget) => {
     setSheetTarget(target);
@@ -243,10 +273,12 @@ export default function PayrollSection() {
       const data = await res.json();
       setSummaryRows(data.summary ?? []);
       setOpenShifts(data.openShifts ?? []);
+      setOverrides(data.overrides ?? []);
     } catch (err) {
       console.error("Summary fetch failed:", err);
       setSummaryRows([]);
       setOpenShifts([]);
+      setOverrides([]);
     }
     setSummaryLoading(false);
   }, [startDate, endDate, token]);
@@ -373,6 +405,107 @@ export default function PayrollSection() {
       setFixBusy(false);
     }
   }, [pendingAction, token, fetchSummary, closeSheet]);
+
+  // ---- Adjust Hours handler -------------------------------------
+  const handleAdjustHours = async (challengeNonce?: string) => {
+    if (!token || !adjustTarget) return;
+    const delta = Number(adjustDelta);
+    if (!delta || isNaN(delta)) { setAdjustError("Enter a non-zero number of minutes."); return; }
+    if (Math.abs(delta) > 1440) { setAdjustError("Adjustment cannot exceed ±24 hours (1440 minutes)."); return; }
+    const reason = adjustReason.trim();
+    if (reason.length < 10) { setAdjustError("Reason must be at least 10 characters (IRS compliance)."); return; }
+
+    setAdjustBusy(true);
+    setAdjustError("");
+    setAdjustSuccess("");
+
+    try {
+      const res = await fetch(`${API_BASE}/update-hours`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+          ...(challengeNonce ? { "x-brewhub-challenge": challengeNonce } : {}),
+        },
+        body: JSON.stringify({
+          employee_email: adjustTarget.employee_email,
+          delta_minutes: delta,
+          reason,
+          ...(challengeNonce ? { _challenge_nonce: challengeNonce } : {}),
+        }),
+      });
+
+      const data = await res.json();
+
+      // Step-up: backend requires manager TOTP challenge
+      if (res.status === 403 && (data.error ?? "").toLowerCase().includes("challenge")) {
+        setPendingAdjust({ employee_email: adjustTarget.employee_email, delta_minutes: delta, reason });
+        setShowAdjustChallenge(true);
+        setAdjustBusy(false);
+        return;
+      }
+
+      if (!res.ok) {
+        const msg = data.details?.map((d: { message: string }) => d.message).join("; ") || data.error || "Adjustment failed";
+        throw new Error(msg);
+      }
+
+      setAdjustSuccess(`Hours adjusted for ${adjustTarget.employee_name || adjustTarget.employee_email}`);
+      setAdjustTarget(null);
+      setPendingAdjust(null);
+      setTimeout(() => setAdjustSuccess(""), 4000);
+      fetchSummary();
+    } catch (err: unknown) {
+      setAdjustError(toUserSafeMessageFromUnknown(err, "Unable to adjust hours right now."));
+    } finally {
+      setAdjustBusy(false);
+    }
+  };
+
+  // ---- Replay adjust-hours after successful TOTP challenge ------
+  const handleAdjustChallengeSuccess = useCallback(async (nonce: string) => {
+    setShowAdjustChallenge(false);
+    if (!pendingAdjust || !token) return;
+
+    setAdjustBusy(true);
+    setAdjustError("");
+    try {
+      const res = await fetch(`${API_BASE}/update-hours`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+          "x-brewhub-challenge": nonce,
+        },
+        body: JSON.stringify({
+          employee_email: pendingAdjust.employee_email,
+          delta_minutes: pendingAdjust.delta_minutes,
+          reason: pendingAdjust.reason,
+          _challenge_nonce: nonce,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Adjustment failed after challenge");
+
+      setAdjustSuccess(`Hours adjusted for ${pendingAdjust.employee_email}`);
+      setAdjustTarget(null);
+      setPendingAdjust(null);
+      setTimeout(() => setAdjustSuccess(""), 4000);
+      fetchSummary();
+    } catch (err: unknown) {
+      setAdjustError(toUserSafeMessageFromUnknown(err, "Unable to adjust hours right now."));
+    } finally {
+      setAdjustBusy(false);
+    }
+  }, [pendingAdjust, token, fetchSummary]);
+
+  // ---- Helper: get overrides for a specific employee ------------
+  const getEmployeeOverrides = useCallback((email: string) => {
+    return overrides.filter((o) => o.target_employee === email);
+  }, [overrides]);
 
   // ---- Render ---------------------------------------------------
   return (
@@ -584,7 +717,7 @@ export default function PayrollSection() {
         </div>
 
         <div
-          className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr]
+          className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto]
                      gap-2 px-5 py-2 text-xs font-bold uppercase tracking-wider
                      text-stone-500 bg-stone-800"
         >
@@ -594,6 +727,7 @@ export default function PayrollSection() {
           <span>Adjustments</span>
           <span>Total Hours</span>
           <span>Gross Pay</span>
+          <span className="text-center">Actions</span>
         </div>
 
         {summaryLoading ? (
@@ -607,15 +741,74 @@ export default function PayrollSection() {
             No payroll data for this period.
           </div>
         ) : (
-          summaryRows.map((row, idx) => (
+          summaryRows.map((row, idx) => {
+            const empOverrides = getEmployeeOverrides(row.employee_email);
+            const hasEdits = row.adjustment_minutes !== 0 || empOverrides.length > 0;
+            return (
             <div
               key={`${row.employee_email}-${row.pay_period_start}-${idx}`}
-              className="flex flex-col md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr]
+              className="flex flex-col md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto]
                          gap-2 px-5 py-4 border-t border-stone-800 text-sm"
             >
               <div className="min-w-0">
-                <div className="font-semibold truncate">
+                <div className="font-semibold truncate flex items-center gap-2">
                   {row.employee_name || row.employee_email}
+                  {hasEdits && (
+                    <span className="relative inline-flex">
+                      <button
+                        type="button"
+                        onClick={() => setAuditPopup(auditPopup === row.employee_email ? null : row.employee_email)}
+                        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide
+                                   bg-amber-500/20 text-amber-400 border border-amber-500/30
+                                   rounded px-1.5 py-0.5 cursor-pointer hover:bg-amber-500/30 transition-colors"
+                        title="This timesheet has been edited. Click for details."
+                      >
+                        <Info size={10} />
+                        Edited
+                      </button>
+                      {auditPopup === row.employee_email && empOverrides.length > 0 && (
+                        <div
+                          className="absolute left-0 top-full mt-1 z-50 w-80 max-h-60 overflow-y-auto
+                                     bg-stone-950 border border-amber-500/40 rounded-xl shadow-2xl p-3 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="font-bold text-amber-400 mb-2 flex items-center justify-between">
+                            <span>Audit Trail</span>
+                            <button type="button" onClick={() => setAuditPopup(null)} className="text-stone-500 hover:text-white">
+                              <X size={12} />
+                            </button>
+                          </div>
+                          {empOverrides.map((o) => (
+                            <div key={o.id} className="border-t border-stone-800 pt-2 mt-2 first:border-0 first:pt-0 first:mt-0">
+                              <div className="text-stone-300">
+                                <span className="font-semibold text-amber-400">
+                                  {o.action_type === "adjust_hours" ? "Hours Adjusted" : "Clock Fixed"}
+                                </span>
+                                {" by "}
+                                <span className="text-stone-200 font-semibold">{o.manager_email}</span>
+                              </div>
+                              {o.details?.reason && (
+                                <div className="text-stone-400 mt-1">
+                                  Reason: <span className="text-stone-300 italic">&quot;{String(o.details.reason)}&quot;</span>
+                                </div>
+                              )}
+                              {o.details?.delta_minutes != null && (
+                                <div className="text-stone-500 mt-0.5">
+                                  Delta: {Number(o.details.delta_minutes) > 0 ? "+" : ""}{Number(o.details.delta_minutes)} min
+                                </div>
+                              )}
+                              <div className="text-stone-600 mt-0.5">
+                                {new Date(o.created_at).toLocaleString("en-US", { timeZone: SHOP_TZ, dateStyle: "short", timeStyle: "short" })}
+                              </div>
+                            </div>
+                          ))}
+                          {empOverrides.length === 0 && (
+                            <div className="text-stone-500 italic">Adjustment recorded — no additional details available.</div>
+                          )}
+                        </div>
+                      )}
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-stone-500 truncate">
                   {row.employee_email}
@@ -660,12 +853,216 @@ export default function PayrollSection() {
                 <span className="md:hidden text-xs font-semibold text-stone-500">Gross: </span>
                 ${row.gross_pay.toFixed(2)}
               </div>
+              <div className="flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdjustTarget(row);
+                    setAdjustDelta("");
+                    setAdjustReason("");
+                    setAdjustError("");
+                    setAdjustSuccess("");
+                  }}
+                  className="flex items-center gap-1 text-xs font-semibold
+                             text-stone-400 hover:text-amber-400
+                             border border-stone-700 hover:border-amber-500/40
+                             rounded-lg px-2.5 min-h-[36px] transition-colors active:scale-[0.98]"
+                  title="Adjust hours for this employee"
+                >
+                  <Pencil size={12} />
+                  <span className="hidden lg:inline">Adjust Hours</span>
+                </button>
+              </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
-      {/* -- Manager Challenge Modal -- */}
+      {/* -- Adjust success / error banners -- */}
+      {adjustSuccess && (
+        <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 rounded-xl px-4 py-3 text-green-400 text-sm">
+          ✓ {adjustSuccess}
+        </div>
+      )}
+
+      {/* -- Adjust Hours Modal -- */}
+      {adjustTarget && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-40 bg-black/60"
+            onClick={() => { if (!adjustBusy) setAdjustTarget(null); }}
+            aria-hidden="true"
+          />
+
+          {/* Modal panel */}
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="adjust-modal-title"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          >
+            <div
+              className="w-full max-w-md bg-stone-900 border border-stone-700 rounded-2xl shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-stone-800">
+                <div className="min-w-0 flex-1 pr-3">
+                  <h2 id="adjust-modal-title" className="text-base font-bold text-white flex items-center gap-2">
+                    <Pencil size={16} className="text-amber-400 flex-shrink-0" />
+                    Adjust Hours
+                  </h2>
+                  <div className="mt-1 text-sm text-stone-300 font-semibold truncate">
+                    {adjustTarget.employee_name || adjustTarget.employee_email}
+                  </div>
+                  <div className="text-xs text-stone-500 truncate">
+                    {adjustTarget.employee_email}
+                  </div>
+                  <div className="mt-1 text-xs text-stone-500">
+                    Period: {adjustTarget.pay_period_start} → {adjustTarget.pay_period_end}
+                  </div>
+                  <div className="mt-1 text-xs text-stone-400">
+                    Current: {adjustTarget.total_hours.toFixed(1)}h total ({(adjustTarget.clocked_minutes / 60).toFixed(1)}h clocked
+                    {adjustTarget.adjustment_minutes !== 0 && (
+                      <>, {adjustTarget.adjustment_minutes > 0 ? "+" : ""}{(adjustTarget.adjustment_minutes / 60).toFixed(1)}h adj</>
+                    )}
+                    )
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { if (!adjustBusy) setAdjustTarget(null); }}
+                  aria-label="Close"
+                  className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full
+                             bg-stone-700 hover:bg-stone-600 text-stone-400 hover:text-white
+                             transition-colors active:scale-[0.95]"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Form body */}
+              <div className="px-5 pt-5 pb-6 space-y-5">
+                {/* Inline error */}
+                {adjustError && (
+                  <div
+                    role="alert"
+                    className="flex items-center gap-2 bg-red-500/10 border border-red-500/30
+                               rounded-xl px-4 py-3 text-red-400 text-sm"
+                  >
+                    <AlertTriangle size={16} className="flex-shrink-0" />
+                    {adjustError}
+                  </div>
+                )}
+
+                {/* Delta minutes */}
+                <div className="space-y-2">
+                  <label
+                    htmlFor="adjust-delta"
+                    className="block text-xs font-semibold text-stone-400 uppercase tracking-wider"
+                  >
+                    Adjustment (minutes) <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    id="adjust-delta"
+                    type="number"
+                    value={adjustDelta}
+                    onChange={(e) => setAdjustDelta(e.target.value)}
+                    placeholder="e.g. 30 to add, -30 to subtract"
+                    min={-1440}
+                    max={1440}
+                    className="w-full bg-stone-950 border border-stone-700 rounded-xl px-4
+                               text-sm text-white placeholder:text-stone-600
+                               focus:outline-none focus:ring-2 focus:ring-amber-500/60 min-h-[52px]"
+                  />
+                  <p className="text-[10px] text-stone-600">
+                    Positive = add hours · Negative = subtract hours · Max ±1440 min (24h)
+                  </p>
+                  {adjustDelta && !isNaN(Number(adjustDelta)) && Number(adjustDelta) !== 0 && (
+                    <p className="text-xs text-amber-400 font-semibold">
+                      New total will be ≈ {(adjustTarget.total_hours + Number(adjustDelta) / 60).toFixed(1)}h
+                    </p>
+                  )}
+                </div>
+
+                {/* Reason (IRS-compliant: minimum 10 characters) */}
+                <div className="space-y-2">
+                  <label
+                    htmlFor="adjust-reason"
+                    className="block text-xs font-semibold text-stone-400 uppercase tracking-wider"
+                  >
+                    Reason (IRS Audit) <span className="text-red-400">*</span>
+                  </label>
+                  <textarea
+                    id="adjust-reason"
+                    value={adjustReason}
+                    onChange={(e) => setAdjustReason(e.target.value)}
+                    placeholder="Minimum 10 characters — e.g. 'Missed 30 min break deduction per employee request on 2/24'"
+                    maxLength={500}
+                    rows={3}
+                    className="w-full bg-stone-950 border border-stone-700 rounded-xl px-4 py-3
+                               text-sm text-white placeholder:text-stone-600
+                               focus:outline-none focus:ring-2 focus:ring-amber-500/60 resize-none"
+                  />
+                  <div className="flex justify-between text-[10px] text-stone-600">
+                    <span>
+                      {adjustReason.trim().length < 10
+                        ? `${10 - adjustReason.trim().length} more character${10 - adjustReason.trim().length !== 1 ? "s" : ""} required`
+                        : "✓ Meets minimum length"}
+                    </span>
+                    <span>{adjustReason.length}/500</span>
+                  </div>
+                </div>
+
+                {/* IRS compliance notice */}
+                <div className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/20 rounded-xl px-3 py-2.5">
+                  <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-stone-400 leading-relaxed">
+                    <strong className="text-amber-400">IRS Audit Trail:</strong> This adjustment will be
+                    permanently recorded with your manager ID, the reason provided, and a timestamp. This
+                    record cannot be edited or deleted.
+                  </p>
+                </div>
+
+                {/* Buttons */}
+                <div className="flex gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { if (!adjustBusy) setAdjustTarget(null); }}
+                    className="flex-1 min-h-[52px] rounded-xl border border-stone-700
+                               text-stone-400 hover:text-white hover:border-stone-400
+                               text-sm font-semibold transition-all active:scale-[0.98]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      adjustBusy ||
+                      !adjustDelta ||
+                      isNaN(Number(adjustDelta)) ||
+                      Number(adjustDelta) === 0 ||
+                      adjustReason.trim().length < 10
+                    }
+                    onClick={() => handleAdjustHours()}
+                    className="flex-[2] min-h-[52px] rounded-xl
+                               bg-gradient-to-br from-amber-500 to-amber-600
+                               hover:from-amber-400 hover:to-amber-500
+                               disabled:opacity-40 disabled:cursor-not-allowed
+                               text-white text-sm font-bold transition-all active:scale-[0.98]"
+                  >
+                    {adjustBusy ? "Submitting…" : "Submit Adjustment"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* -- Manager Challenge Modal (fix-clock) -- */}
       {showChallengeModal && token && (
         <ManagerChallengeModal
           actionType="fix_clock"
@@ -679,6 +1076,22 @@ export default function PayrollSection() {
           }}
         />
       )}
+
+      {/* -- Manager Challenge Modal (adjust-hours) -- */}
+      {showAdjustChallenge && token && (
+        <ManagerChallengeModal
+          actionType="adjust_hours"
+          actionDescription={`Adjust hours for ${pendingAdjust?.employee_email ?? ""}`}
+          token={token}
+          onSuccess={handleAdjustChallengeSuccess}
+          onCancel={() => {
+            setShowAdjustChallenge(false);
+            setPendingAdjust(null);
+            setAdjustBusy(false);
+          }}
+        />
+      )}
+
       {/* ── Fix Clock-Out Bottom Sheet ── */}
       {sheetTarget && (
         <>
