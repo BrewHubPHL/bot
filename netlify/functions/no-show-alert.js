@@ -1,11 +1,6 @@
 /**
  * NO-SHOW ALERT (Scheduled Cron — every 5 minutes)
- * * Logic:
- * 1. Scans scheduled_shifts for 'scheduled' status past 15 min grace.
- * 2. Calculates lateness severity (Standard vs. Maldives Event).
- * 3. Checks time_logs for missing clock-in via employee_email bridge.
- * 4. Sends Tiered SMS via Twilio.
- * 5. Updates shift status to 'no_show' and logs to 'schedule_audit_logs'.
+ * Path: netlify/functions/no-show-alert.js
  */
 
 const { createClient } = require('@supabase/supabase-js');
@@ -31,26 +26,20 @@ const json = (code, data) => ({
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 exports.handler = async (event, context) => {
-  // 1. Normalize headers
   const hdrs = {};
   for (const k of Object.keys(event.headers || {})) {
     hdrs[k.toLowerCase()] = event.headers[k];
   }
 
-  // 2. Security: Only allow Netlify scheduled invocations or requests with CRON_SECRET
-  const isScheduled =
-    context?.clientContext?.custom?.scheduled === true ||
-    hdrs['x-netlify-event'] === 'schedule';
-
-  const hasCronSecret = process.env.CRON_SECRET
-    ? safeCompare(hdrs['x-cron-secret'], process.env.CRON_SECRET)
-    : false;
+  // Security Gate
+  const isScheduled = context?.clientContext?.custom?.scheduled === true || hdrs['x-netlify-event'] === 'schedule';
+  const hasCronSecret = process.env.CRON_SECRET ? safeCompare(hdrs['x-cron-secret'], process.env.CRON_SECRET) : false;
 
   if (!isScheduled && !hasCronSecret) {
+    console.error('[NO-SHOW] Access Denied: Invalid Secret or Unauthorized Request');
     return json(403, { error: 'Forbidden' });
   }
 
-  // 3. Configuration Check
   const {
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
@@ -60,21 +49,22 @@ exports.handler = async (event, context) => {
     MANAGER_PHONE = '+17174259285'
   } = process.env;
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
-    console.error('[NO-SHOW] Missing critical configuration environment variables');
-    return json(500, { error: 'Server misconfiguration' });
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    return json(500, { error: 'Missing Supabase Config' });
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
-  console.log('[NO-SHOW] Heartbeat: Scanning for missed shifts…');
+  console.log('[NO-SHOW] Heartbeat: Starting Check...');
 
   try {
-    // 4. Find candidates (Shifts starting 15m to 2h ago)
+    // 1. Define Search Window (Started between 15m and 120m ago)
     const now = new Date();
     const fifteenAgo = new Date(now.getTime() - 15 * 60 * 1000).toISOString();
-    const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+    const twoHoursAgo = new Date(now.getTime() - 120 * 60 * 1000).toISOString();
+
+    console.log(`[NO-SHOW] Step 1: Querying shifts starting between ${twoHoursAgo} and ${fifteenAgo}`);
 
     const { data: shifts, error: shiftErr } = await supabase
       .from('scheduled_shifts')
@@ -83,26 +73,37 @@ exports.handler = async (event, context) => {
       .lt('start_time', fifteenAgo)
       .gt('start_time', twoHoursAgo);
 
-    if (shiftErr) throw shiftErr;
-    if (!shifts || shifts.length === 0) return json(200, { alerted: 0 });
+    if (shiftErr) throw new Error(`Shift Query Failed: ${shiftErr.message}`);
+
+    console.log(`[NO-SHOW] Step 2: Found ${shifts?.length || 0} potential no-shows.`);
+
+    if (!shifts || shifts.length === 0) {
+      return json(200, { alerted: 0, status: 'Clear' });
+    }
 
     let alertedCount = 0;
 
     for (const shift of shifts) {
-      // 5. Bridge to staff_directory for email/name
-      const { data: staffRow } = await supabase
+      console.log(`[NO-SHOW] Step 3: Checking staff directory for user_id: ${shift.user_id}`);
+      
+      const { data: staffRow, error: staffErr } = await supabase
         .from('staff_directory')
         .select('name, email')
         .eq('id', shift.user_id)
         .single();
 
-      if (!staffRow) continue;
+      if (staffErr || !staffRow) {
+        console.error(`[NO-SHOW] Skipping shift ${shift.id}: Staff record not found.`);
+        continue;
+      }
 
-      // 6. Check time_logs for matching clock-in
+      console.log(`[NO-SHOW] Step 4: Checking time_logs for ${staffRow.email}`);
+
+      // Window for clock-in (30m before shift start to 15m after)
       const windowStart = new Date(new Date(shift.start_time).getTime() - 30 * 60 * 1000).toISOString();
       const windowEnd = new Date(new Date(shift.start_time).getTime() + 15 * 60 * 1000).toISOString();
 
-      const { data: clockIn } = await supabase
+      const { data: clockIn, error: logErr } = await supabase
         .from('time_logs')
         .select('id')
         .ilike('employee_email', staffRow.email)
@@ -111,12 +112,16 @@ exports.handler = async (event, context) => {
         .lte('clock_in', windowEnd)
         .limit(1);
 
-      // 7. If no clock-in found, we have a No-Show
+      if (logErr) {
+        console.error(`[NO-SHOW] Log check error for ${staffRow.name}:`, logErr.message);
+        continue;
+      }
+
+      // 2. If NO clock-in found, execute alert
       if (!clockIn || clockIn.length === 0) {
         const startTime = new Date(shift.start_time);
         const latenessMinutes = Math.floor((now - startTime) / 1000 / 60);
         
-        // Variance Logic
         const isMaldives = latenessMinutes >= 30;
         const severityEmoji = isMaldives ? '🚨🚨🚨' : '🚨';
         const severityHeader = isMaldives ? 'URGENT: CRITICAL NO-SHOW' : 'BREWHUB ALERT';
@@ -125,39 +130,44 @@ exports.handler = async (event, context) => {
           hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York'
         });
 
+        console.log(`[NO-SHOW] Step 5: Sending SMS for ${staffRow.name}`);
+
         try {
-          // 8. Fire the Tiered SMS
           await twilioClient.messages.create({
-            body: `${severityEmoji} ${severityHeader}: ${staffRow.name} is ${latenessMinutes}m late for their ${shiftLocal} shift. No clock-in detected.`,
+            body: `${severityEmoji} ${severityHeader}: ${staffRow.name} is ${latenessMinutes}m late for their ${shiftLocal} shift.`,
             from: TWILIO_PHONE_NUMBER,
             to: MANAGER_PHONE,
           });
 
-          // 9. Update Database: Mark as no_show and Log to Audit Trail
-          await supabase
-            .from('scheduled_shifts')
-            .update({ status: 'no_show' })
-            .eq('id', shift.id);
+          console.log(`[NO-SHOW] Step 6: Updating shift status to no_show`);
+          await supabase.from('scheduled_shifts').update({ status: 'no_show' }).eq('id', shift.id);
 
-          await supabase.from('schedule_audit_logs').insert([{
-            changed_by_name: 'SYSTEM_WATCHDOG',
-            action_type: 'NO_SHOW',
-            employee_name: staffRow.name,
-            details: `Auto-alert sent. Delay: ${latenessMinutes}m. Severity: ${isMaldives ? 'High' : 'Normal'}`
-          }]);
+          console.log(`[NO-SHOW] Step 7: Logging to audit trail`);
+          // We wrap this in a try/catch in case the table doesn't exist yet
+          try {
+            await supabase.from('schedule_audit_logs').insert([{
+              changed_by_name: 'SYSTEM_WATCHDOG',
+              action_type: 'NO_SHOW',
+              employee_name: staffRow.name,
+              details: `Alert sent. Delay: ${latenessMinutes}m.`
+            }]);
+          } catch (auditErr) {
+            console.error('[NO-SHOW] Audit table missing or error:', auditErr.message);
+          }
 
           alertedCount++;
-          console.log(`[NO-SHOW] Alert sent for ${staffRow.name} (${latenessMinutes}m late)`);
         } catch (smsErr) {
-          console.error(`[NO-SHOW] SMS failed for ${staffRow.name}:`, smsErr.message);
+          console.error(`[NO-SHOW] SMS Failed: ${smsErr.message}`);
         }
+      } else {
+        console.log(`[NO-SHOW] Employee ${staffRow.name} is clocked in. No alert needed.`);
       }
     }
 
-    return json(200, { alerted: alertedCount, total_processed: shifts.length });
+    return json(200, { alerted: alertedCount, shifts_checked: shifts.length });
 
   } catch (err) {
-    console.error('[NO-SHOW] Unexpected Internal Error:', err.message);
+    console.error('[NO-SHOW] CRASH:', err.message);
     return json(500, { error: err.message });
   }
 };
