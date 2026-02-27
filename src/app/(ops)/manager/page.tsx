@@ -33,8 +33,6 @@ import QueueMonitor from "./QueueMonitor";
 import ParcelsMonitor from "./ParcelsMonitor";
 /* ─── Parcel operations panel (staff view) ─────────── */
 import ParcelOpsPanel from "./ParcelOpsPanel";
-/* ─── Outbound fulfillment (manager-only) ────────────────── */
-import FulfillmentDashboard from "./fulfillment/page";
 /* ─── Live Staff Pulse (persistent header badge) ───── */
 import LiveStaffPulse from "@/app/(site)/components/manager/LiveStaffPulse";
 /* ─── Tab definitions ────────────────────────────────────── */
@@ -45,7 +43,6 @@ const TABS: ManagerTab[] = [
   { key: "hiring",    label: "Hiring",          icon: Users },
   { key: "queue",     label: "Queue Monitor",   icon: MonitorPlay },
   { key: "parcels",   label: "Parcel Board",    icon: Package },
-  { key: "fulfillment", label: "Fulfillment",   icon: Truck },
 ];
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -129,8 +126,6 @@ export default function ManagerDashboard() {
             ? <ParcelsMonitor onBack={() => setShowDepartureBoard(false)} />
             : <ParcelOpsPanel onLaunchBoard={() => setShowDepartureBoard(true)} />
         )}
-
-        {activeTab === "fulfillment" && <FulfillmentDashboard />}
       </main>
 
       {/* ── Mobile bottom tab bar ───────────────────────── */}

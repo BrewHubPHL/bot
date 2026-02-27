@@ -204,7 +204,7 @@ export default function CheckoutPage() {
   }, [totalCents]);
 
   // ── Shared: submit payment with a tokenized nonce ──
-  const waitForPaymentFinality = useCallback(async (pendingOrderId: string, pendingPaymentId: string) => {
+  const waitForPaymentFinality = useCallback(async (pendingOrderId: string, pendingPaymentId: string, customerEmail?: string) => {
     const MAX_ATTEMPTS = 12;
     const POLL_INTERVAL_MS = 2_500;
     const PER_FETCH_TIMEOUT_MS = 8_000; // abort if a single poll hangs > 8s
@@ -220,7 +220,7 @@ export default function CheckoutPage() {
         const res = await fetch('/.netlify/functions/poll-merch-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-BrewHub-Action': 'true' },
-          body: JSON.stringify({ orderId: pendingOrderId, paymentId: pendingPaymentId }),
+          body: JSON.stringify({ orderId: pendingOrderId, paymentId: pendingPaymentId, ...(customerEmail ? { customerEmail } : {}) }),
           signal: controller.signal,
         });
         clearTimeout(timer);
@@ -726,10 +726,9 @@ export default function CheckoutPage() {
                       setError('');
                       setAwaitingFinality(true);
                       setFinalityMessage('Checking payment status with Square…');
-                      // Use the email as a lookup hint — waitForPaymentFinality
-                      // polls poll-merch-payment which checks the DB for recent
-                      // orders matching this email.
-                      waitForPaymentFinality('', '').then((confirmed) => {
+                      // Timeout recovery: use email for DB lookup since we never
+                      // received an orderId before the connection was aborted.
+                      waitForPaymentFinality('', '', email.trim()).then((confirmed) => {
                         if (confirmed) {
                           setSuccess(true);
                           localStorage.removeItem('brewhub_cart');

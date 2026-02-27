@@ -212,6 +212,12 @@ export default function StaffHubPage() {
             <div className="text-3xl mb-2">📋</div>
             <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">Inventory</div>
           </Link>
+          <Link href="/manager/calender" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
+                                            transition-all hover:-translate-y-1 hover:border-amber-400"
+            style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(10px)" }}>
+            <div className="text-3xl mb-2">📅</div>
+            <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">My Schedule</div>
+          </Link>
           {isManager && (
             <Link href="/manager" className="group rounded-2xl p-6 text-center text-white no-underline col-span-2 sm:col-span-4
                                               border border-amber-400/40 transition-all hover:-translate-y-1 hover:border-amber-400"

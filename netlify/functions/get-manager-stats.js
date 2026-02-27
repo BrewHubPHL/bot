@@ -56,7 +56,7 @@ exports.handler = async (event) => {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
 
-    const [ordersRes, staffRes, logsRes] = await Promise.all([
+    const [ordersRes, staffRes, logsRes, inventoryRes] = await Promise.all([
       supabase
         .from('orders')
         .select('total_amount_cents, created_at')
@@ -67,14 +67,23 @@ exports.handler = async (event) => {
         .select('email, full_name, hourly_rate, role'),
       supabase
         .from('time_logs')
-        .select('employee_email, clock_in, clock_out')
-        // active shifts (any start date) OR shifts that started today
-        .or(`clock_out.is.null,clock_in.gte.${start}`),
+        .select('employee_email, clock_in, clock_out, action_type')
+        // Only real clock-in shifts: open (clock_out IS NULL + action_type=in)
+        // OR any shift that started today (for labor calculation).
+        // Excludes adjustment rows which always have clock_out=NULL.
+        .or(`and(clock_out.is.null,action_type.eq.in),clock_in.gte.${start}`),
+      supabase
+        .from('merch_products')
+        .select('id, name, stock_quantity')
+        .eq('is_active', true)
+        .not('stock_quantity', 'is', null)
+        .lt('stock_quantity', 10),
     ]);
 
     const orderData = ordersRes.data || [];
     const staffData = staffRes.data || [];
     const logsData = logsRes.data || [];
+    const lowStockItems = inventoryRes.data || [];
 
     const orderCount = orderData.length;
     const totalRevenue = orderData.reduce((sum, o) => sum + (o.total_amount_cents || 0), 0) / 100;
@@ -100,6 +109,10 @@ exports.handler = async (event) => {
     let totalLabor = 0;
 
     for (const log of logsData) {
+      // Skip non-clock rows (e.g. payroll adjustments) — they have
+      // clock_out=NULL but are NOT active shifts.
+      if (log.action_type && log.action_type !== 'in' && log.action_type !== 'out') continue;
+
       const email = String(log.employee_email || '').toLowerCase();
       const rate = rateMap[email] || 0;
       const clockInMs = log.clock_in ? new Date(log.clock_in).getTime() : startMs;
@@ -110,7 +123,7 @@ exports.handler = async (event) => {
       if (shiftEnd > shiftStart) {
         totalLabor += ((shiftEnd - shiftStart) / 3_600_000) * rate;
       }
-      if (!log.clock_out) {
+      if (!log.clock_out && log.action_type === 'in') {
         activeEmails.add(email);
         // Keep most recent open clock_in per person
         const prev = activeShiftsMap.get(email);
@@ -136,7 +149,7 @@ exports.handler = async (event) => {
       role: String(s.role || '').slice(0, 30),
     }));
 
-    return { statusCode: 200, headers, body: JSON.stringify({ revenue: totalRevenue, orders: orderCount, staffCount: activeStaff, labor: totalLabor, staff: sanitizedStaff, activeShifts }) };
+    return { statusCode: 200, headers, body: JSON.stringify({ revenue: totalRevenue, orders: orderCount, staffCount: activeStaff, labor: totalLabor, staff: sanitizedStaff, activeShifts, lowStockItems }) };
   } catch (err) {
     const res = sanitizedError(err, 'get-manager-stats');
     res.headers = Object.assign({}, res.headers || {}, headers);

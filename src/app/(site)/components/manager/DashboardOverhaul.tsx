@@ -12,6 +12,7 @@ import {
   WifiOff,
   Monitor,
   Package,
+  AlertTriangle,
 } from "lucide-react";
 
 /* ================================================================== */
@@ -39,6 +40,12 @@ interface ActiveShift {
   name: string;
   email: string;
   clock_in: string;
+}
+
+interface LowStockItem {
+  id: string;
+  name: string;
+  stock_quantity: number;
 }
 
 /* ================================================================== */
@@ -69,12 +76,14 @@ export default function DashboardOverhaul() {
     staffCount: number;
     labor: number;
     activeShifts: ActiveShift[];
+    lowStockItems: LowStockItem[];
   }>({
     revenue: 0,
     orders: 0,
     staffCount: 0,
     labor: 0,
     activeShifts: [],
+    lowStockItems: [],
   });
   const [statsLoading, setStatsLoading] = useState(true);
 
@@ -126,6 +135,7 @@ export default function DashboardOverhaul() {
         staffCount: d.staffCount ?? 0,
         labor: d.labor ?? 0,
         activeShifts: d.activeShifts ?? [],
+        lowStockItems: d.lowStockItems ?? [],
       });
       setAuthzState(null);
       setStatsLoading(false);
@@ -290,6 +300,33 @@ export default function DashboardOverhaul() {
           </div>
         ))}
       </div>
+
+      {/* ═══════════════════════════════════════════════════
+          LOW STOCK ALERTS
+          ═══════════════════════════════════════════════════ */}
+      {!statsLoading && stats.lowStockItems.length > 0 && (
+        <div className="bg-stone-900 border border-red-500/30 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 min-h-[56px] border-b border-red-500/20 bg-red-500/5">
+            <span className="font-semibold text-base text-red-400 flex items-center gap-2">
+              <AlertTriangle size={18} />
+              Low Stock Alerts
+            </span>
+            <span className="text-sm font-bold rounded-full px-3 py-1 bg-red-500/20 text-red-400">
+              {stats.lowStockItems.length} items
+            </span>
+          </div>
+          <div className="divide-y divide-stone-800">
+            {stats.lowStockItems.map((item) => (
+              <div key={item.id} className="flex items-center justify-between px-5 min-h-[56px] py-3">
+                <div className="font-semibold text-sm text-white truncate">{item.name}</div>
+                <div className="text-sm font-bold text-red-400">
+                  {item.stock_quantity} left
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════
           ON THE CLOCK — active staff roster

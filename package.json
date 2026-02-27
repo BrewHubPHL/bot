@@ -28,9 +28,12 @@
     "@braintree/sanitize-url": "^7.1.2",
     "@elevenlabs/client": "^0.14.0",
     "@elevenlabs/elevenlabs-js": "^2.34.0",
+    "@fullcalendar/interaction": "^6.1.20",
+    "@fullcalendar/react": "^6.1.20",
+    "@fullcalendar/timegrid": "^6.1.20",
     "@google/generative-ai": "^0.24.1",
     "@netlify/functions": "^5.1.2",
-    "@supabase/supabase-js": "^2.95.3",
+    "@supabase/supabase-js": "^2.98.0",
     "axios": "^1.13.4",
     "canvas-confetti": "^1.9.4",
     "date-fns": "^4.1.0",
@@ -47,6 +50,7 @@
   },
   "devDependencies": {
     "@netlify/plugin-nextjs": "^5.15.8",
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -57,6 +61,7 @@
     "sonarqube-scanner": "^3.5.0",
     "supabase": "^2.76.12",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }

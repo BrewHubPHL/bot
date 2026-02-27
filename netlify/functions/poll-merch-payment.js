@@ -57,17 +57,35 @@ exports.handler = async (event) => {
 
   const orderId = String(body.orderId || '').trim();
   const paymentIdHint = String(body.paymentId || '').trim();
+  const customerEmail = String(body.customerEmail || '').trim().toLowerCase();
 
-  if (!orderId) {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'orderId is required' }) };
+  if (!orderId && !customerEmail) {
+    return { statusCode: 400, headers, body: JSON.stringify({ error: 'orderId or customerEmail is required' }) };
   }
 
   try {
-    const { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .select('id, status, payment_id, total_amount_cents')
-      .eq('id', orderId)
-      .single();
+    let order, orderErr;
+
+    if (orderId) {
+      // Primary path: lookup by explicit order ID
+      ({ data: order, error: orderErr } = await supabase
+        .from('orders')
+        .select('id, status, payment_id, total_amount_cents')
+        .eq('id', orderId)
+        .single());
+    } else {
+      // Fallback path: timeout recovery — find the most recent order for this
+      // email created in the last 5 minutes (covers the 15s-timeout window).
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      ({ data: order, error: orderErr } = await supabase
+        .from('orders')
+        .select('id, status, payment_id, total_amount_cents')
+        .eq('customer_email', customerEmail)
+        .gte('created_at', fiveMinAgo)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single());
+    }
 
     if (orderErr || !order) {
       return { statusCode: 404, headers, body: JSON.stringify({ error: 'Order not found' }) };

@@ -21,6 +21,10 @@ coverage/
 .nyc_output/
 *.lcov
 .jest/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
 
 # ── AI JUNK & MEMORY FILES (The "Brain" Purge) ───────────────────────
 BRAIN_PART_*.md

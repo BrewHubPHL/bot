@@ -113,6 +113,7 @@ export function ManagerQuickLinks() {
       <Link href="/scanner"   className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Scanner</Link>
       <Link href="/staff-hub" className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Staff Hub</Link>
       <Link href="/manager/fulfillment" className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Fulfillment</Link>
+      <Link href="/manager/calender"    className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Schedule</Link>
       <span className="text-stone-600" aria-hidden="true">|</span>
       <Link href="/"          className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Main Site</Link>
     </div>

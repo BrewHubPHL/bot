@@ -63,6 +63,9 @@
 [functions."reconcile-pending-payments"]
   schedule = "*/2 * * * *"
 
+[functions."no-show-alert"]
+  schedule = "*/5 * * * *"
+
 # ── Rate Limiting (Netlify Traffic Rules) ────────────────────────
 # These are enforced at the edge CDN before functions spin up,
 # preventing cold-start costs from botnet floods.
