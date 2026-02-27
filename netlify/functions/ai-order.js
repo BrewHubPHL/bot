@@ -30,6 +30,27 @@
 const { createClient } = require('@supabase/supabase-js');
 const { checkQuota } = require('./_usage');
 const { orderBucket } = require('./_token-bucket');
+const { sanitizeInput } = require('./_sanitize');
+
+// ═══════════════════════════════════════════════════════════════════
+// ALLERGEN / DIETARY / MEDICAL SAFETY LAYER
+// ═══════════════════════════════════════════════════════════════════
+// Mirrored from claude-chat.js — this standalone endpoint must also
+// reject orders whose notes or customer_name contain allergen /
+// medical constraints that could be mis-interpreted downstream.
+// ═══════════════════════════════════════════════════════════════════
+const ALLERGEN_KEYWORDS = /\b(allerg(y|ies|ic|en|ens)|anaphyla\w*|epipen|celiac|coeliac|gluten[- ]?free|nut[- ]?free|peanut[- ]?free|dairy[- ]?free|lactose[- ]?(?:free|intoleran\w*)|soy[- ]?free|egg[- ]?free|shellfish|tree[- ]?nut|sesame|sulfite|mustard|lupin|cross[- ]?contam\w*|food[- ]?(?:safe|safety)|intoleran\w*|sensitiv\w*.*(?:food|ingredien|dairy|gluten|nut|soy|egg)|anaphylax\w*|histamine|mast[- ]?cell|immunoglobulin|ige[- ]?mediat\w*)\b/i;
+
+const MEDICAL_KEYWORDS = /\b(diabet\w*|insulin|blood[- ]?sugar|glycemi\w*|keto(?:genic|sis)?|autoimmun\w*|crohn|colitis|ibs|irritable[- ]?bowel|fodmap|phenylketon\w*|pku|galactosem\w*|fructose[- ]?intoleran\w*|hemodialysis|renal[- ]?diet|potassium[- ]?restrict\w*|sodium[- ]?restrict\w*|pregnant|pregnanc\w*|gestational|breastfeed\w*|medication|drug[- ]?interact\w*|blood[- ]?thinn\w*|warfarin|maoi|tyramine)\b/i;
+
+const DIETARY_SAFETY_KEYWORDS = /\b(safe\s+(?:to|for)\s+(?:eat|drink|consum)|(?:can|is|does|do|will|would)\s+(?:it|this|that|the)\s+(?:contain|have|include)\s+.{0,30}(?:nuts?|peanuts?|dairy|milk|egg|soy|wheat|gluten|shellfish|fish|sesame)|(?:free\s+(?:of|from))\s+(?:nuts?|peanuts?|dairy|milk|egg|soy|wheat|gluten|shellfish|fish|sesame)|what(?:'s| is| are)\s+(?:in\s+(?:the|your|a)|the\s+ingredient)|ingredient\w*\s+(?:in|of|for)\s+(?:the|your|a|this|that))\b/i;
+
+const ALLERGEN_SAFE_RESPONSE = `I appreciate you looking out for your health! I'm not able to give allergen, ingredient, or dietary safety information — I'm an AI and I could get it wrong, which is dangerous for food allergies and medical conditions. Please ask our staff in person or email info@brewhubphl.com so a real human who knows exactly what's in our food can help you stay safe. Your safety is way more important than a quick answer from a chatbot.`;
+
+function isAllergenOrMedicalQuery(text) {
+  const t = (text || '').toLowerCase();
+  return ALLERGEN_KEYWORDS.test(t) || MEDICAL_KEYWORDS.test(t) || DIETARY_SAFETY_KEYWORDS.test(t);
+}
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -238,14 +259,29 @@ exports.handler = async (event) => {
       });
     }
 
+    // ── Allergen / medical safety gate ──────────────────────────────
+    // Reject orders whose free-text fields smuggle allergen constraints
+    // that could be mis-interpreted by staff or downstream systems.
+    if (isAllergenOrMedicalQuery(customer_name) || isAllergenOrMedicalQuery(notes)) {
+      console.warn('[AI-ORDER] Allergen/medical content detected — rejecting order');
+      return json(400, {
+        success: false,
+        error: ALLERGEN_SAFE_RESPONSE,
+      });
+    }
+
+    // Sanitize free-text fields before DB insert (defence-in-depth)
+    const safeCustomerName = sanitizeInput(customer_name).slice(0, 100) || 'AI Order';
+    const safeNotes = notes ? sanitizeInput(notes).slice(0, 500) : null;
+
     // Create order in database
     const { data: order, error: orderErr } = await supabase
       .from('orders')
       .insert({
         status: 'unpaid',
         total_amount_cents: totalCents,
-        customer_name: customer_name || 'AI Order',
-        notes: notes || null,
+        customer_name: safeCustomerName,
+        notes: safeNotes,
       })
       .select()
       .single();

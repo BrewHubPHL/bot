@@ -2,8 +2,9 @@
 
 import { useState, useCallback, useEffect, createContext, useContext, type ReactNode } from "react";
 import {
-  Lock, LogIn, LogOut, Loader2, Clock, AlertCircle, User, CheckCircle2, Delete, Shield
+  Lock, LogIn, LogOut, Loader2, Clock, AlertCircle, User, CheckCircle2, Delete, Shield, ScanFace, Fingerprint
 } from "lucide-react";
+import { startRegistration, startAuthentication, browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import PinRotationModal from "./PinRotationModal";
 import ManagerChallengeModal from "./ManagerChallengeModal";
 import { supabase } from "@/lib/supabase";
@@ -91,10 +92,43 @@ export default function OpsGate({ children, requireManager = false }: { children
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
 
+  // WebAuthn / Passkey state
+  const [passkeyAvailable, setPasskeyAvailable] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+  const [passkeyMsg, setPasskeyMsg] = useState("");
+  const [showPasskeySetup, setShowPasskeySetup] = useState(false);
+  const [passkeySetupLoading, setPasskeySetupLoading] = useState(false);
+
+  // Terminal Mode: shared POS iPads use ?mode=pos or localStorage flag.
+  // In POS mode, WebAuthn/Face ID is hidden — PIN only for per-barista tracking.
+  const [terminalMode, setTerminalMode] = useState(false);
+
   // Hydration-safe mount — defer client-only rendering
   useEffect(() => {
     setCurrentTime(new Date());
     setMounted(true);
+
+    // Detect Terminal / POS mode:
+    //   1. URL param ?mode=pos sets the flag + persists to localStorage
+    //   2. localStorage flag persists across page loads on iPad
+    //   3. Remove with ?mode=personal (for testing / resetting)
+    const params = new URLSearchParams(window.location.search);
+    const modeParam = params.get('mode');
+    if (modeParam === 'pos') {
+      setTerminalMode(true);
+      try { localStorage.setItem('brewhub_terminal_mode', 'pos'); } catch { /* */ }
+    } else if (modeParam === 'personal') {
+      setTerminalMode(false);
+      try { localStorage.removeItem('brewhub_terminal_mode'); } catch { /* */ }
+    } else {
+      try {
+        const stored = localStorage.getItem('brewhub_terminal_mode');
+        if (stored === 'pos') setTerminalMode(true);
+      } catch { /* */ }
+    }
+
+    // Only offer WebAuthn on non-POS devices that support it
+    setPasskeyAvailable(browserSupportsWebAuthn());
   }, []);
 
   // Clock display
@@ -330,6 +364,119 @@ export default function OpsGate({ children, requireManager = false }: { children
   }, [handleLogout]);
 
   // ═══════════════════════════════════════════════════════════════
+  // WebAuthn: Passkey Login (Face ID / Touch ID / Windows Hello)
+  // ═══════════════════════════════════════════════════════════════
+  const handlePasskeyLogin = useCallback(async () => {
+    setPasskeyLoading(true);
+    setPasskeyMsg("");
+    setError("");
+
+    try {
+      // Phase 1: Get authentication options from server
+      const optRes = await fetch(`${API_BASE}/webauthn-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-BrewHub-Action": "true" },
+        body: JSON.stringify({ action: "options" }),
+      });
+      if (!optRes.ok) {
+        const errData = await optRes.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to get passkey options");
+      }
+
+      const { options } = await optRes.json();
+
+      // Phase 2: Browser prompts biometric (Face ID / Touch ID / Windows Hello)
+      const credential = await startAuthentication({ optionsJSON: options });
+
+      // Phase 3: Verify with server
+      const verifyRes = await fetch(`${API_BASE}/webauthn-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-BrewHub-Action": "true" },
+        credentials: "include",
+        body: JSON.stringify({ action: "verify", credential }),
+      });
+
+      const data = await verifyRes.json();
+      if (!verifyRes.ok) throw new Error(data.error || "Passkey login failed");
+
+      // Success — create session (same format as PIN login)
+      const newSession: OpsSession = {
+        staff: data.staff,
+        token: data.token,
+        needsPinRotation: false,
+      };
+      setSession(newSession);
+      sessionStorage.setItem("ops_session", JSON.stringify(newSession));
+      setPin("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Passkey login failed";
+      // Don't show error for user cancellation
+      if (!msg.includes("AbortError") && !msg.includes("cancelled") && !msg.includes("not allowed")) {
+        setError(msg);
+      }
+    } finally {
+      setPasskeyLoading(false);
+    }
+  }, []);
+
+  // WebAuthn: Register a new passkey (while logged in via PIN)
+  const handlePasskeySetup = useCallback(async () => {
+    if (!session) return;
+    setPasskeySetupLoading(true);
+    setPasskeyMsg("");
+
+    try {
+      // Phase 1: Get registration options
+      const optRes = await fetch(`${API_BASE}/webauthn-register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({ action: "options" }),
+      });
+      if (!optRes.ok) {
+        const errData = await optRes.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to get registration options");
+      }
+
+      const { options } = await optRes.json();
+
+      // Phase 2: Browser prompts biometric enrollment
+      const credential = await startRegistration({ optionsJSON: options });
+
+      // Phase 3: Verify & store
+      const verifyRes = await fetch(`${API_BASE}/webauthn-register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({
+          action: "verify",
+          credential,
+          deviceName: navigator.platform || "Unknown device",
+        }),
+      });
+
+      const data = await verifyRes.json();
+      if (!verifyRes.ok) throw new Error(data.error || "Registration failed");
+
+      setPasskeyMsg("Passkey registered! You can now use Face ID / Touch ID to log in.");
+      setShowPasskeySetup(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Passkey setup failed";
+      if (!msg.includes("AbortError") && !msg.includes("cancelled") && !msg.includes("not allowed")) {
+        setPasskeyMsg(`Setup failed: ${msg}`);
+      }
+    } finally {
+      setPasskeySetupLoading(false);
+    }
+  }, [session]);
+
+  // ═══════════════════════════════════════════════════════════════
   // Schema 47: Manager Challenge — prompts TOTP verification
   // for sensitive actions. Returns a Promise that resolves with
   // the nonce (or null if cancelled).
@@ -474,7 +621,28 @@ export default function OpsGate({ children, requireManager = false }: { children
                 <span className="text-xs text-amber-300 max-w-48 truncate">{clockMsg}</span>
               )}
 
+              {passkeyMsg && (
+                <span className="text-xs text-green-400 max-w-48 truncate">{passkeyMsg}</span>
+              )}
+
               <div className="w-px h-5 bg-zinc-700 mx-1" />
+
+              {/* Passkey setup — hidden in POS/terminal mode */}
+              {passkeyAvailable && !terminalMode && (
+                <button
+                  onClick={handlePasskeySetup}
+                  disabled={passkeySetupLoading}
+                  className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-amber-400 text-xs transition-colors disabled:opacity-50"
+                  title="Set up Face ID / Touch ID"
+                >
+                  {passkeySetupLoading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Fingerprint className="w-3.5 h-3.5" />
+                  )}
+                  {passkeySetupLoading ? "Setting up…" : "Set up Face ID"}
+                </button>
+              )}
 
               <button
                 onClick={handleLogout}
@@ -580,6 +748,33 @@ export default function OpsGate({ children, requireManager = false }: { children
       </div>
 
       <p className="mt-8 text-zinc-600 text-xs">Enter your 6-digit staff PIN</p>
+
+      {/* Passkey / Face ID login — hidden in POS/terminal mode */}
+      {passkeyAvailable && !terminalMode && (
+        <button
+          onClick={handlePasskeyLogin}
+          disabled={passkeyLoading || loading}
+          className="mt-6 flex items-center gap-2 px-6 py-3 rounded-xl
+                     bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600
+                     text-white text-sm font-medium transition-all
+                     disabled:opacity-50 touch-manipulation
+                     border border-zinc-700 hover:border-amber-500/40"
+        >
+          {passkeyLoading ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <ScanFace className="w-5 h-5 text-amber-400" />
+          )}
+          {passkeyLoading ? "Verifying…" : "Use Face ID / Touch ID"}
+        </button>
+      )}
+
+      {/* Terminal mode indicator */}
+      {terminalMode && (
+        <p className="mt-6 text-zinc-700 text-xs flex items-center gap-1">
+          <Lock className="w-3 h-3" /> POS Terminal Mode
+        </p>
+      )}
     </div>
   );
 }

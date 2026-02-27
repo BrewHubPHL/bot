@@ -13,6 +13,14 @@
 const W = 32; // Thermal printer column width
 
 /**
+ * Strip non-printable / control characters to prevent ESC/POS injection.
+ * Allows only printable ASCII (0x20–0x7E) and newlines.
+ * @param {string} str
+ * @returns {string}
+ */
+const stripControlChars = (str) => String(str).replace(/[^\x20-\x7E\n]/g, '');
+
+/**
  * Center a string within a fixed width.
  * @param {string} str
  * @param {number} width
@@ -126,7 +134,7 @@ function generateReceiptString(order, items) {
   lines.push(`Order #: ${tag}`);
   lines.push(`Date:    ${formatDate(order.created_at)}`);
   if (order.customer_name) {
-    const safeName = String(order.customer_name).substring(0, 20);
+    const safeName = stripControlChars(order.customer_name).substring(0, 20);
     lines.push(`Name:    ${safeName}`);
   }
   lines.push(thinDiv);
@@ -136,7 +144,7 @@ function generateReceiptString(order, items) {
   // Group identical items: { "Oat Latte": { qty: 2, unitPrice: 5.50 } }
   const grouped = new Map();
   for (const item of safeItems) {
-    const name = String(item.drink_name || 'Item');
+    const name = stripControlChars(item.drink_name || 'Item');
     const price = Number(item.price) || 0;
     if (grouped.has(name)) {
       const entry = grouped.get(name);

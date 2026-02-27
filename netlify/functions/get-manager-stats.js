@@ -56,7 +56,9 @@ exports.handler = async (event) => {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
 
-    const [ordersRes, staffRes, logsRes, inventoryRes] = await Promise.all([
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+
+    const [ordersRes, staffRes, logsRes, inventoryRes, noShowRes] = await Promise.all([
       supabase
         .from('orders')
         .select('total_amount_cents, created_at')
@@ -78,12 +80,26 @@ exports.handler = async (event) => {
         .eq('is_active', true)
         .not('stock_quantity', 'is', null)
         .lt('stock_quantity', 10),
+      supabase
+        .from('scheduled_shifts')
+        .select('id, user_id, start_time, staff_directory(name)')
+        .eq('status', 'no_show')
+        .gte('start_time', twentyFourHoursAgo),
     ]);
 
     const orderData = ordersRes.data || [];
     const staffData = staffRes.data || [];
     const logsData = logsRes.data || [];
     const lowStockItems = inventoryRes.data || [];
+
+    // No-show shifts from the last 24 hours
+    const noShowData = noShowRes.data || [];
+    const noShows = noShowData.map(s => ({
+      shiftId: s.id,
+      userId: s.user_id,
+      startTime: s.start_time,
+      employeeName: s.staff_directory?.name || 'Unknown',
+    }));
 
     const orderCount = orderData.length;
     const totalRevenue = orderData.reduce((sum, o) => sum + (o.total_amount_cents || 0), 0) / 100;
@@ -149,7 +165,7 @@ exports.handler = async (event) => {
       role: String(s.role || '').slice(0, 30),
     }));
 
-    return { statusCode: 200, headers, body: JSON.stringify({ revenue: totalRevenue, orders: orderCount, staffCount: activeStaff, labor: totalLabor, staff: sanitizedStaff, activeShifts, lowStockItems }) };
+    return { statusCode: 200, headers, body: JSON.stringify({ revenue: totalRevenue, orders: orderCount, staffCount: activeStaff, labor: totalLabor, staff: sanitizedStaff, activeShifts, lowStockItems, noShows }) };
   } catch (err) {
     const res = sanitizedError(err, 'get-manager-stats');
     res.headers = Object.assign({}, res.headers || {}, headers);

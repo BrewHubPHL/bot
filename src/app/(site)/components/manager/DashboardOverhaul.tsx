@@ -48,6 +48,13 @@ interface LowStockItem {
   stock_quantity: number;
 }
 
+interface NoShow {
+  shiftId: string;
+  userId: string;
+  startTime: string;
+  employeeName: string;
+}
+
 /* ================================================================== */
 /*  Helpers                                                            */
 /* ================================================================== */
@@ -77,6 +84,7 @@ export default function DashboardOverhaul() {
     labor: number;
     activeShifts: ActiveShift[];
     lowStockItems: LowStockItem[];
+    noShows: NoShow[];
   }>({
     revenue: 0,
     orders: 0,
@@ -84,6 +92,7 @@ export default function DashboardOverhaul() {
     labor: 0,
     activeShifts: [],
     lowStockItems: [],
+    noShows: [],
   });
   const [statsLoading, setStatsLoading] = useState(true);
 
@@ -136,6 +145,7 @@ export default function DashboardOverhaul() {
         labor: d.labor ?? 0,
         activeShifts: d.activeShifts ?? [],
         lowStockItems: d.lowStockItems ?? [],
+        noShows: d.noShows ?? [],
       });
       setAuthzState(null);
       setStatsLoading(false);
@@ -401,6 +411,85 @@ export default function DashboardOverhaul() {
           </div>
         )}
       </div>
+
+      {/* ═══════════════════════════════════════════════════
+          🚨 LATE / NO-SHOW ALERTS
+          ═══════════════════════════════════════════════════ */}
+      {!statsLoading && stats.noShows.length > 0 && (
+        <div className="bg-stone-900 border border-red-500/30 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 min-h-[56px] border-b border-red-500/20 bg-red-500/5">
+            <span className="font-semibold text-base text-red-400 flex items-center gap-2">
+              <AlertTriangle size={18} />
+              🚨 Late / No-Show
+            </span>
+            <span className="text-sm font-bold rounded-full px-3 py-1 bg-red-500/20 text-red-400">
+              {stats.noShows.length} alert{stats.noShows.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="divide-y divide-stone-800">
+            {stats.noShows.map((ns) => {
+              const shiftTime = new Date(ns.startTime).toLocaleTimeString(
+                "en-US",
+                { timeZone: SHOP_TZ, hour: "numeric", minute: "2-digit", hour12: true }
+              );
+              return (
+                <div
+                  key={ns.shiftId}
+                  className="flex items-center gap-4 px-5 min-h-[56px] py-3"
+                >
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-red-500 animate-pulse" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm text-white truncate">
+                      {ns.employeeName}
+                    </div>
+                    <div className="text-xs text-stone-500">
+                      Shift started {shiftTime}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const reason = prompt("Reason for excusing this no-show:");
+                      if (!reason) return;
+                      try {
+                        const res = await fetch(
+                          `${API_BASE}/resolve-no-show`,
+                          {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Authorization: `Bearer ${token}`,
+                              "X-BrewHub-Action": "true",
+                            },
+                            body: JSON.stringify({
+                              shiftId: ns.shiftId,
+                              reason,
+                            }),
+                          }
+                        );
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}));
+                          showToast("error", err.error || "Failed to resolve no-show");
+                          return;
+                        }
+                        showToast("success", `${ns.employeeName} no-show excused`);
+                        fetchStats();
+                      } catch {
+                        showToast("error", "Network error resolving no-show");
+                      }
+                    }}
+                    className="flex-shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg
+                               bg-amber-500/10 border border-amber-500/30 text-amber-300
+                               hover:bg-amber-500/20 active:scale-[0.96] transition-all"
+                  >
+                    Resolve (Excuse)
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════
           LAUNCH DISPLAY SCREENS

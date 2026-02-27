@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
-import { supabase } from "@/lib/supabase";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import { RefreshCw } from "lucide-react";
@@ -134,19 +133,8 @@ export default function ReceiptRoll() {
     window.location.href = "/staff-hub";
   }, [authzState]);
 
-  // Supabase Realtime — instant update when a new receipt is inserted
-  useEffect(() => {
-    if (!token) return;
-    const channel = supabase
-      .channel("receipt-queue-inserts")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "receipt_queue" },
-        () => { loadReceipts(); }
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [token, loadReceipts]);
+  // Realtime subscription removed — anon SELECT on receipt_queue was revoked
+  // (schema-66-receipt-leak-fix.sql). Polling via get-receipts is the sole path.
 
   if (!token) {
     return (

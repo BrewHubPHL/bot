@@ -1,7 +1,6 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase";
 
 const MIN_SUBMIT_MS = 2000; // reject submissions faster than 2 s after mount
 const COOLDOWN_MS   = 10000; // 10 s cooldown between submissions
@@ -51,20 +50,28 @@ export default function WaitlistPage() {
     }
     setLoading(true);
     lastSubmitRef.current = Date.now();
-    const { error: insertError } = await supabase.from("waitlist").insert({ email });
-    if (insertError) {
-      const code = (insertError as { code?: string }).code;
-      setError(
-        code === "23505"
-          ? "You're already on the list! Check your inbox."
-          : "Something went wrong. Please try again."
-      );
+    try {
+      const res = await fetch("/.netlify/functions/join-waitlist", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({ email, honeypot }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.error || "Something went wrong. Please try again.");
+        setLoading(false);
+        return;
+      }
+      setSuccess(true);
       setLoading(false);
-      return;
+      setEmail("");
+    } catch {
+      setError("Something went wrong. Please try again.");
+      setLoading(false);
     }
-    setSuccess(true);
-    setLoading(false);
-    setEmail("");
   }
 
   return (

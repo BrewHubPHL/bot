@@ -163,8 +163,9 @@ exports.handler = async (event) => {
     if (!matchedStaff) {
       const { data: staff, error } = await supabase
         .from('staff_directory')
-        .select('id, name, full_name, email, role, pin, is_working')
-        .not('pin', 'is', null);
+        .select('id, name, full_name, email, role, pin, is_working, is_active')
+        .not('pin', 'is', null)
+        .eq('is_active', true);  // Block deactivated / fired staff
 
       if (error) {
         console.error('[PIN-LOGIN] DB error:', error);

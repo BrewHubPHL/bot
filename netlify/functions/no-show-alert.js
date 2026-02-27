@@ -5,7 +5,7 @@
  * MODE A  "Relay"  — called by the Supabase check_for_noshows() pg_cron
  *   function via HTTP POST with a JSON body:
  *     { employeeName, shiftTime, latenessMinutes, shiftId, managerPhone }
- *   Responsibility: send the SMS + write audit log.
+ *   Responsibility: send the SMS (audit log is handled by the DB trigger).
  *   The SQL function already marks the shift as no_show.
  *
  * MODE B  "Full Detection"  — fired by the Netlify scheduler (every 5 min)
@@ -104,17 +104,9 @@ exports.handler = async (event) => {
       });
       console.log(`[NO-SHOW][RELAY] SMS sent to ${phone}`);
 
-      // Audit log (SQL already marks the shift as no_show)
-      try {
-        await supabase.from('schedule_audit_logs').insert([{
-          changed_by_name: 'SYSTEM_WATCHDOG',
-          action_type: 'NO_SHOW',
-          employee_name: body.employeeName,
-          details: `Relay alert sent for ${body.shiftTime} shift. Delay: ${body.latenessMinutes ?? '?'}m.`,
-        }]);
-      } catch (auditErr) {
-        console.error('[NO-SHOW][RELAY] Audit log error:', auditErr.message);
-      }
+      // Note: shift_audit_log is NOT inserted manually — the DB trigger
+      // `log_shift_change` on scheduled_shifts handles it automatically.
+      // The SQL check_for_noshows() function already marks the shift as no_show.
 
       return json(200, { alerted: 1, mode: 'relay', employee: body.employeeName });
     } catch (err) {
@@ -205,18 +197,13 @@ exports.handler = async (event) => {
             to: MANAGER_PHONE,
           });
 
-          await supabase.from('scheduled_shifts').update({ status: 'no_show' }).eq('id', shift.id);
-
-          try {
-            await supabase.from('schedule_audit_logs').insert([{
-              changed_by_name: 'SYSTEM_WATCHDOG',
-              action_type: 'NO_SHOW',
-              employee_name: staffRow.name,
-              details: `Alert sent. Delay: ${latenessMinutes}m.`,
-            }]);
-          } catch (auditErr) {
-            console.error('[NO-SHOW][DETECT] Audit log error:', auditErr.message);
+          const { error: statusErr } = await supabase.from('scheduled_shifts').update({ status: 'no_show' }).eq('id', shift.id);
+          if (statusErr) {
+            console.error(`[NO-SHOW][DETECT] Failed to update shift ${shift.id} status: ${statusErr.message}`);
           }
+
+          // Note: shift_audit_log is NOT inserted manually — the DB trigger
+          // `log_shift_change` on scheduled_shifts handles it automatically.
 
           alertedCount++;
         } catch (smsErr) {

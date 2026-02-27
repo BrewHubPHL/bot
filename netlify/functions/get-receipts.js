@@ -4,6 +4,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json, sanitizedError } = require('./_auth');
+const { requireCsrfHeader } = require('./_csrf');
 const { publicBucket } = require('./_token-bucket');
 
 const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -39,10 +40,10 @@ exports.handler = async (event) => {
   if (MISSING_ENV) return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server misconfiguration' }) };
 
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers: Object.assign({}, headers, { 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, OPTIONS' }), body: '' };
+    return { statusCode: 200, headers: Object.assign({}, headers, { 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' }), body: '' };
   }
 
-  if (event.httpMethod !== 'GET') {
+  if (event.httpMethod !== 'GET' && event.httpMethod !== 'POST') {
     return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
@@ -60,12 +61,48 @@ exports.handler = async (event) => {
   }
 
   try {
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+    /* ── POST: single-receipt reprint by orderId ── */
+    if (event.httpMethod === 'POST') {
+      const csrfBlock = requireCsrfHeader(event);
+      if (csrfBlock) return csrfBlock;
+
+      const body = JSON.parse(event.body || '{}');
+      const orderId = body.orderId;
+      if (!orderId || typeof orderId !== 'string') {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'orderId is required' }) };
+      }
+
+      // Validate UUID format to prevent injection
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!UUID_RE.test(orderId)) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid orderId format' }) };
+      }
+
+      const { data, error } = await supabase
+        .from('receipt_queue')
+        .select('id, receipt_text, created_at')
+        .eq('order_id', orderId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error || !data) {
+        return { statusCode: 404, headers, body: JSON.stringify({ error: 'Receipt not found for this order' }) };
+      }
+
+      let txt = String(data.receipt_text || '').slice(0, 2000);
+      txt = redactPII(txt);
+
+      return { statusCode: 200, headers, body: JSON.stringify({ id: data.id, receipt_text: txt, created_at: data.created_at }) };
+    }
+
+    /* ── GET: latest receipts for Manager Dashboard Receipt Roll ── */
     const params = event.queryStringParameters || {};
     let limit = Number(params.limit);
     if (!Number.isFinite(limit) || limit <= 0) limit = 10;
     limit = Math.min(Math.max(1, Math.floor(limit)), 100);
-
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
     const { data, error } = await supabase
       .from('receipt_queue')

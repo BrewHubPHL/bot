@@ -324,6 +324,16 @@ async function executeTool(toolName, toolInput, supabase) {
     if (toolName === 'place_order') {
         const { items, customer_name, notes } = toolInput;
 
+        // ── ALLERGEN / MEDICAL INJECTION DEFENSE ──────────────────────────
+        // Attackers (or well-meaning users) can smuggle allergen constraints
+        // into notes/customer_name via prompt injection. Catch it here
+        // BEFORE we touch the DB, using the same regex gate that guards the
+        // top-level chat input.
+        if (isAllergenOrMedicalQuery(notes) || isAllergenOrMedicalQuery(customer_name)) {
+            console.warn('[SAFETY] Allergen/medical content detected in place_order fields — aborting order');
+            return { success: false, result: ALLERGEN_SAFE_RESPONSE };
+        }
+
         // Guest orders are allowed — authedUser may be null.
         // user_id / customer_email are only stamped when the user is authenticated.
         // The order is still created with status: 'unpaid' and customer_name for KDS display.
