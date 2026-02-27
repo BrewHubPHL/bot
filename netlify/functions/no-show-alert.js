@@ -1,6 +1,16 @@
 /**
- * NO-SHOW ALERT (Scheduled Cron — every 5 minutes)
+ * NO-SHOW ALERT — Dual-mode Netlify Function
  * Path: netlify/functions/no-show-alert.js
+ *
+ * MODE A  "Relay"  — called by the Supabase check_for_noshows() pg_cron
+ *   function via HTTP POST with a JSON body:
+ *     { employeeName, shiftTime, latenessMinutes, shiftId, managerPhone }
+ *   Responsibility: send the SMS + write audit log.
+ *   The SQL function already marks the shift as no_show.
+ *
+ * MODE B  "Full Detection"  — fired by the Netlify scheduler (every 5 min)
+ *   as a safety-net fallback. Queries Supabase for missed shifts, sends SMS,
+ *   updates status, and writes audit -- the original behaviour.
  */
 
 const { createClient } = require('@supabase/supabase-js');
@@ -23,48 +33,107 @@ const json = (code, data) => ({
   body: JSON.stringify(data),
 });
 
+function buildSmsBody({ employeeName, shiftTime, latenessMinutes }) {
+  const mins = Number(latenessMinutes) || 0;
+  const isCritical = mins >= 30;
+  const emoji = isCritical ? '🚨🚨🚨' : '🚨';
+  const header = isCritical ? 'URGENT: CRITICAL NO-SHOW' : 'BREWHUB ALERT';
+  const lateClause = mins > 0 ? ` is ${mins}m late for their` : ' has not clocked in for their';
+  return `${emoji} ${header}: ${employeeName}${lateClause} ${shiftTime} shift.`;
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 
-exports.handler = async (event, context) => {
+exports.handler = async (event) => {
   const hdrs = {};
   for (const k of Object.keys(event.headers || {})) {
     hdrs[k.toLowerCase()] = event.headers[k];
   }
 
-  // Security Gate
-  const isScheduled = context?.clientContext?.custom?.scheduled === true || hdrs['x-netlify-event'] === 'schedule';
-  const hasCronSecret = process.env.CRON_SECRET ? safeCompare(hdrs['x-cron-secret'], process.env.CRON_SECRET) : false;
+  // ── Parse body (may be empty for scheduled triggers) ──────────────────
+  let body = {};
+  try { body = JSON.parse(event.body || '{}'); } catch { /* no-op */ }
+
+  // ── Security Gate ─────────────────────────────────────────────────────
+  // Accept: Netlify scheduled event header  OR  x-cron-secret header/body
+  const isScheduled = hdrs['x-netlify-event'] === 'schedule';
+  const secret = process.env.CRON_SECRET;
+  const hasCronSecret = secret
+    ? (safeCompare(hdrs['x-cron-secret'], secret) || safeCompare(body.cronSecret, secret))
+    : false;
 
   if (!isScheduled && !hasCronSecret) {
     console.error('[NO-SHOW] Access Denied: Invalid Secret or Unauthorized Request');
     return json(403, { error: 'Forbidden' });
   }
 
+  // ── Environment ───────────────────────────────────────────────────────
   const {
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
     TWILIO_ACCOUNT_SID,
     TWILIO_AUTH_TOKEN,
     TWILIO_PHONE_NUMBER,
-    MANAGER_PHONE = '+17174259285'
+    MANAGER_PHONE = '+17174259285',
   } = process.env;
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     return json(500, { error: 'Missing Supabase Config' });
   }
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
+    return json(500, { error: 'Missing Twilio Config' });
+  }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
-  console.log('[NO-SHOW] Heartbeat: Starting Check...');
+  // =====================================================================
+  //  MODE A — Relay (called from SQL check_for_noshows via http_post)
+  // =====================================================================
+  if (body.employeeName && body.shiftTime) {
+    console.log(`[NO-SHOW][RELAY] Received alert for ${body.employeeName} — ${body.shiftTime}`);
+
+    try {
+      const smsBody = buildSmsBody(body);
+      const phone = body.managerPhone || MANAGER_PHONE;
+
+      await twilioClient.messages.create({
+        body: smsBody,
+        from: TWILIO_PHONE_NUMBER,
+        to: phone,
+      });
+      console.log(`[NO-SHOW][RELAY] SMS sent to ${phone}`);
+
+      // Audit log (SQL already marks the shift as no_show)
+      try {
+        await supabase.from('schedule_audit_logs').insert([{
+          changed_by_name: 'SYSTEM_WATCHDOG',
+          action_type: 'NO_SHOW',
+          employee_name: body.employeeName,
+          details: `Relay alert sent for ${body.shiftTime} shift. Delay: ${body.latenessMinutes ?? '?'}m.`,
+        }]);
+      } catch (auditErr) {
+        console.error('[NO-SHOW][RELAY] Audit log error:', auditErr.message);
+      }
+
+      return json(200, { alerted: 1, mode: 'relay', employee: body.employeeName });
+    } catch (err) {
+      console.error('[NO-SHOW][RELAY] CRASH:', err.message);
+      return json(500, { error: err.message });
+    }
+  }
+
+  // =====================================================================
+  //  MODE B — Full Detection (Netlify scheduled fallback)
+  // =====================================================================
+  console.log('[NO-SHOW][DETECT] Heartbeat: Starting full detection check...');
 
   try {
-    // 1. Define Search Window (Started between 15m and 120m ago)
     const now = new Date();
     const fifteenAgo = new Date(now.getTime() - 15 * 60 * 1000).toISOString();
     const twoHoursAgo = new Date(now.getTime() - 120 * 60 * 1000).toISOString();
 
-    console.log(`[NO-SHOW] Step 1: Querying shifts starting between ${twoHoursAgo} and ${fifteenAgo}`);
+    console.log(`[NO-SHOW][DETECT] Querying shifts starting between ${twoHoursAgo} and ${fifteenAgo}`);
 
     const { data: shifts, error: shiftErr } = await supabase
       .from('scheduled_shifts')
@@ -75,17 +144,15 @@ exports.handler = async (event, context) => {
 
     if (shiftErr) throw new Error(`Shift Query Failed: ${shiftErr.message}`);
 
-    console.log(`[NO-SHOW] Step 2: Found ${shifts?.length || 0} potential no-shows.`);
+    console.log(`[NO-SHOW][DETECT] Found ${shifts?.length || 0} potential no-shows.`);
 
     if (!shifts || shifts.length === 0) {
-      return json(200, { alerted: 0, status: 'Clear' });
+      return json(200, { alerted: 0, mode: 'detect', status: 'Clear' });
     }
 
     let alertedCount = 0;
 
     for (const shift of shifts) {
-      console.log(`[NO-SHOW] Step 3: Checking staff directory for user_id: ${shift.user_id}`);
-      
       const { data: staffRow, error: staffErr } = await supabase
         .from('staff_directory')
         .select('name, email')
@@ -93,13 +160,11 @@ exports.handler = async (event, context) => {
         .single();
 
       if (staffErr || !staffRow) {
-        console.error(`[NO-SHOW] Skipping shift ${shift.id}: Staff record not found.`);
+        console.error(`[NO-SHOW][DETECT] Skipping shift ${shift.id}: Staff record not found.`);
         continue;
       }
 
-      console.log(`[NO-SHOW] Step 4: Checking time_logs for ${staffRow.email}`);
-
-      // Window for clock-in (30m before shift start to 15m after)
+      // Window for clock-in (30m before shift start → 15m after)
       const windowStart = new Date(new Date(shift.start_time).getTime() - 30 * 60 * 1000).toISOString();
       const windowEnd = new Date(new Date(shift.start_time).getTime() + 15 * 60 * 1000).toISOString();
 
@@ -113,61 +178,59 @@ exports.handler = async (event, context) => {
         .limit(1);
 
       if (logErr) {
-        console.error(`[NO-SHOW] Log check error for ${staffRow.name}:`, logErr.message);
+        console.error(`[NO-SHOW][DETECT] Log check error for ${staffRow.name}:`, logErr.message);
         continue;
       }
 
-      // 2. If NO clock-in found, execute alert
       if (!clockIn || clockIn.length === 0) {
         const startTime = new Date(shift.start_time);
         const latenessMinutes = Math.floor((now - startTime) / 1000 / 60);
-        
-        const isMaldives = latenessMinutes >= 30;
-        const severityEmoji = isMaldives ? '🚨🚨🚨' : '🚨';
-        const severityHeader = isMaldives ? 'URGENT: CRITICAL NO-SHOW' : 'BREWHUB ALERT';
 
         const shiftLocal = startTime.toLocaleTimeString('en-US', {
-          hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York'
+          hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York',
         });
 
-        console.log(`[NO-SHOW] Step 5: Sending SMS for ${staffRow.name}`);
+        const smsBody = buildSmsBody({
+          employeeName: staffRow.name,
+          shiftTime: shiftLocal,
+          latenessMinutes,
+        });
+
+        console.log(`[NO-SHOW][DETECT] Sending SMS for ${staffRow.name}`);
 
         try {
           await twilioClient.messages.create({
-            body: `${severityEmoji} ${severityHeader}: ${staffRow.name} is ${latenessMinutes}m late for their ${shiftLocal} shift.`,
+            body: smsBody,
             from: TWILIO_PHONE_NUMBER,
             to: MANAGER_PHONE,
           });
 
-          console.log(`[NO-SHOW] Step 6: Updating shift status to no_show`);
           await supabase.from('scheduled_shifts').update({ status: 'no_show' }).eq('id', shift.id);
 
-          console.log(`[NO-SHOW] Step 7: Logging to audit trail`);
-          // We wrap this in a try/catch in case the table doesn't exist yet
           try {
             await supabase.from('schedule_audit_logs').insert([{
               changed_by_name: 'SYSTEM_WATCHDOG',
               action_type: 'NO_SHOW',
               employee_name: staffRow.name,
-              details: `Alert sent. Delay: ${latenessMinutes}m.`
+              details: `Alert sent. Delay: ${latenessMinutes}m.`,
             }]);
           } catch (auditErr) {
-            console.error('[NO-SHOW] Audit table missing or error:', auditErr.message);
+            console.error('[NO-SHOW][DETECT] Audit log error:', auditErr.message);
           }
 
           alertedCount++;
         } catch (smsErr) {
-          console.error(`[NO-SHOW] SMS Failed: ${smsErr.message}`);
+          console.error(`[NO-SHOW][DETECT] SMS Failed: ${smsErr.message}`);
         }
       } else {
-        console.log(`[NO-SHOW] Employee ${staffRow.name} is clocked in. No alert needed.`);
+        console.log(`[NO-SHOW][DETECT] ${staffRow.name} is clocked in. No alert needed.`);
       }
     }
 
-    return json(200, { alerted: alertedCount, shifts_checked: shifts.length });
+    return json(200, { alerted: alertedCount, mode: 'detect', shifts_checked: shifts.length });
 
   } catch (err) {
-    console.error('[NO-SHOW] CRASH:', err.message);
+    console.error('[NO-SHOW][DETECT] CRASH:', err.message);
     return json(500, { error: err.message });
   }
 };
