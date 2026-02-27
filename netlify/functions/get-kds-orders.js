@@ -83,14 +83,33 @@ exports.handler = async (event) => {
     process.env.SUPABASE_SERVICE_ROLE_KEY,
   );
 
+  // ── History mode: return last 10 completed/ready orders from past 30 min ──
+  const qs = event.queryStringParameters || {};
+  const isHistory = qs.history === 'true';
+
   try {
-    const { data, error } = await supabase
-      .from('orders')
-      .select('id, customer_name, status, created_at, is_guest_order, total_amount_cents, claimed_by, coffee_orders(id, drink_name, customizations, price, completed_at, completed_by)')
-      .in('status', ['unpaid', 'pending', 'paid', 'preparing', 'ready'])
-      .neq('type', 'merch')
-      .order('created_at', { ascending: true })
-      .limit(200);
+    let query;
+    if (isHistory) {
+      const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      query = supabase
+        .from('orders')
+        .select('id, customer_name, status, created_at, updated_at, is_guest_order, total_amount_cents, claimed_by, coffee_orders(id, drink_name, customizations, price, completed_at, completed_by)')
+        .in('status', ['completed', 'ready'])
+        .neq('type', 'merch')
+        .gte('updated_at', cutoff)
+        .order('updated_at', { ascending: false })
+        .limit(10);
+    } else {
+      query = supabase
+        .from('orders')
+        .select('id, customer_name, status, created_at, is_guest_order, total_amount_cents, claimed_by, coffee_orders(id, drink_name, customizations, price, completed_at, completed_by)')
+        .in('status', ['unpaid', 'pending', 'paid', 'preparing', 'ready'])
+        .neq('type', 'merch')
+        .order('created_at', { ascending: true })
+        .limit(200);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 

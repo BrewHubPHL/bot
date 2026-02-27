@@ -189,7 +189,9 @@ async function sendParcelNotification(payload: any) {
       const authHeader = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)
       const codeSnippet = pickup_code ? ` Your pickup code: ${pickup_code}.` : ''
       const idWarning = (value_tier === 'high_value' || value_tier === 'premium') ? ' Photo ID required for pickup.' : ''
-      const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking_number || 'Parcel'}) is at the Hub.${codeSnippet}${idWarning} 📦 Grab a coffee when you swing by!\n\nReply STOP to opt out.`
+      // Carrier label: omit if "Other" / "Unknown"
+      const carrierLabel = (carrier && carrier !== 'Other' && carrier !== 'Unknown') ? `${carrier} ` : ''
+      const message = `Hi ${recipient_name || 'neighbor'}, your ${carrierLabel}package is ready in the lobby!${codeSnippet}${idWarning} 📦 Grab a coffee when you come down. ☕\n\nReply STOP to opt out.`
 
       const smsRes = await fetch(twilioUrl, {
         method: 'POST',

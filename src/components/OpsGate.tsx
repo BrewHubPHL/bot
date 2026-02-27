@@ -7,6 +7,7 @@ import {
 import { startRegistration, startAuthentication, browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import PinRotationModal from "./PinRotationModal";
 import ManagerChallengeModal from "./ManagerChallengeModal";
+import { StaffShiftProvider, broadcastShiftChange, useStaff as useStaffHook } from "@/context/StaffContext";
 import { supabase } from "@/lib/supabase";
 
 /* ─── Types ────────────────────────────────────────────── */
@@ -72,6 +73,62 @@ function formatTime(date: Date): string {
 }
 
 /* ─── OpsGate Component ──────────────────────────────── */
+
+/**
+ * Small child component that reads from StaffShiftProvider context
+ * to display shift badge + clock buttons in the persistent header.
+ * Must be rendered INSIDE <StaffShiftProvider>.
+ */
+function ShiftControls({
+  clockLoading,
+  onClock,
+}: {
+  clockLoading: boolean;
+  onClock: (action: "in" | "out") => void;
+}) {
+  // Pull from global context — single source of truth
+  const { isClockedIn, refreshShiftStatus } = useStaffHook();
+  return (
+    <>
+      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+        isClockedIn
+          ? "bg-green-900/50 text-green-400"
+          : "bg-zinc-700 text-zinc-400"
+      }`}>
+        {isClockedIn ? "On Shift" : "Off Shift"}
+      </span>
+    </>
+  );
+}
+
+function ClockButtons({
+  clockLoading,
+  onClock,
+}: {
+  clockLoading: boolean;
+  onClock: (action: "in" | "out") => void;
+}) {
+  const { isClockedIn } = useStaffHook();
+  if (clockLoading) {
+    return <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />;
+  }
+  return isClockedIn ? (
+    <button
+      onClick={() => onClock("out")}
+      className="flex items-center gap-1.5 px-3 py-1 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg transition-colors"
+    >
+      <LogOut className="w-3.5 h-3.5" /> Clock Out
+    </button>
+  ) : (
+    <button
+      onClick={() => onClock("in")}
+      className="flex items-center gap-1.5 px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-xs font-medium rounded-lg transition-colors"
+    >
+      <LogIn className="w-3.5 h-3.5" /> Clock In
+    </button>
+  );
+}
+
 export default function OpsGate({ children, requireManager = false }: { children: ReactNode; requireManager?: boolean }) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
@@ -328,6 +385,9 @@ export default function OpsGate({ children, requireManager = false }: { children
         sessionStorage.setItem("ops_session", JSON.stringify(updated));
         return updated;
       });
+
+      // Notify other tabs & trigger global context refresh
+      broadcastShiftChange(session.staff.email);
     } catch {
       setClockMsg("Connection error — try again");
     } finally {
@@ -534,6 +594,11 @@ export default function OpsGate({ children, requireManager = false }: { children
     return (
       <OpsSessionContext.Provider value={session}>
         <ManagerChallengeContext.Provider value={managerChallengeValue}>
+          <StaffShiftProvider
+            staffEmail={session.staff.email}
+            token={session.token}
+            initialIsWorking={session.staff.is_working}
+          >
           {/* Schema 47: PIN Rotation Modal */}
           {showPinRotation && !pinRotationDeferred && (
             <PinRotationModal
@@ -574,13 +639,7 @@ export default function OpsGate({ children, requireManager = false }: { children
             <div className="flex items-center gap-3">
               <User className="w-4 h-4 text-amber-400" />
               <span className="font-medium text-white">{session.staff.name}</span>
-              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                session.staff.is_working
-                  ? "bg-green-900/50 text-green-400"
-                  : "bg-zinc-700 text-zinc-400"
-              }`}>
-                {session.staff.is_working ? "On Shift" : "Off Shift"}
-              </span>
+              <ShiftControls clockLoading={clockLoading} onClock={handleClock} />
               {/* Schema 47: PIN rotation reminder badge */}
               {session.needsPinRotation && pinRotationDeferred && (
                 <button
@@ -594,28 +653,8 @@ export default function OpsGate({ children, requireManager = false }: { children
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Clock In/Out buttons */}
-              {clockLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
-              ) : (
-                <>
-                  {!session.staff.is_working ? (
-                    <button
-                      onClick={() => handleClock("in")}
-                      className="flex items-center gap-1.5 px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-xs font-medium rounded-lg transition-colors"
-                    >
-                      <LogIn className="w-3.5 h-3.5" /> Clock In
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => handleClock("out")}
-                      className="flex items-center gap-1.5 px-3 py-1 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg transition-colors"
-                    >
-                      <LogOut className="w-3.5 h-3.5" /> Clock Out
-                    </button>
-                  )}
-                </>
-              )}
+              {/* Clock In/Out buttons — driven by global StaffContext */}
+              <ClockButtons clockLoading={clockLoading} onClock={handleClock} />
 
               {clockMsg && (
                 <span className="text-xs text-amber-300 max-w-48 truncate">{clockMsg}</span>
@@ -664,6 +703,7 @@ export default function OpsGate({ children, requireManager = false }: { children
 
           {/* Main content offset below header */}
           <div className="pt-10">{children}</div>
+          </StaffShiftProvider>
         </ManagerChallengeContext.Provider>
       </OpsSessionContext.Provider>
     );

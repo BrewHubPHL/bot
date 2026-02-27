@@ -168,11 +168,11 @@ exports.handler = async (event) => {
       pending:   ['paid', 'preparing', 'cancelled'],
       paid:      ['paid', 'preparing', 'cancelled'],
       preparing: ['preparing', 'ready', 'cancelled'],
-      ready:     ['ready', 'completed', 'cancelled'],
+      ready:     ['ready', 'completed', 'preparing', 'cancelled'],
       // Abandoned orders (15-min cron) can be revived by a cash/comp payment
       abandoned: ['preparing', 'cancelled'],
-      // Terminal states — no transitions allowed:
-      completed: [],
+      // Terminal states — undo back to preparing is allowed for KDS corrections
+      completed: ['preparing'],
       cancelled: [],
       refunded:  [],
       amount_mismatch: ['cancelled'],
@@ -378,6 +378,23 @@ exports.handler = async (event) => {
 
     if (rpcError) {
       return await buildPgErrorResponse(rpcError, orderId, auth.user?.email, CORS_HEADERS, currentOrder.status);
+    }
+
+    // ── UNDO TIMESTAMP CLEANUP ─────────────────────────────────
+    // When reverting to 'preparing' (KDS undo), the RPC's COALESCE
+    // preserves the old completed_at.  Explicitly null it out so the
+    // order gets a fresh TTL window if it's re-completed later.
+    // Non-fatal — the status is already updated by the RPC.
+    if (status === 'preparing') {
+      try {
+        const { error: clearErr } = await supabase
+          .from('orders')
+          .update({ completed_at: null })
+          .eq('id', orderId);
+        if (clearErr) throw clearErr;
+      } catch (clearErr) {
+        console.error('[UNDO] Non-fatal completed_at cleanup error:', clearErr?.message);
+      }
     }
 
     // ── BARISTA CLAIM TRACKING ────────────────────────────────

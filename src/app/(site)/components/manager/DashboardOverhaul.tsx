@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
+import { useStaffOptional } from "@/context/StaffContext";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import {
@@ -46,6 +47,7 @@ interface LowStockItem {
   id: string;
   name: string;
   stock_quantity: number;
+  min_threshold: number;
 }
 
 interface NoShow {
@@ -64,6 +66,9 @@ interface NoShow {
 export default function DashboardOverhaul() {
   const session = useOpsSessionOptional();
   const token = session?.token;
+
+  /* ── Global shift context (schema-69 sync) ───────────── */
+  const staffCtx = useStaffOptional();
 
   /* ── Connection / sync status ────────────────────────── */
   const [sync, setSync] = useState<SyncStatus>({
@@ -151,6 +156,9 @@ export default function DashboardOverhaul() {
       setStatsLoading(false);
       pollBackoffRef.current = POLL_MS; // reset on success
       setSync({ ok: true, lastSync: new Date(), message: "Live" });
+
+      // Schema 69: keep global shift context in sync
+      staffCtx?.refreshShiftStatus();
     } catch {
       setSync((prev) => ({
         ok: false,
@@ -327,10 +335,19 @@ export default function DashboardOverhaul() {
           </div>
           <div className="divide-y divide-stone-800">
             {stats.lowStockItems.map((item) => (
-              <div key={item.id} className="flex items-center justify-between px-5 min-h-[56px] py-3">
-                <div className="font-semibold text-sm text-white truncate">{item.name}</div>
-                <div className="text-sm font-bold text-red-400">
-                  {item.stock_quantity} left
+              <div key={item.id} className="flex items-center justify-between px-5 min-h-[56px] py-3 gap-3">
+                <div className="font-semibold text-sm text-white truncate flex-1">{item.name}</div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-sm font-bold text-red-400 tabular-nums">
+                    {item.stock_quantity}&nbsp;/&nbsp;{item.min_threshold}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setToast({ type: 'info', message: `Restock for "${item.name}" — order logic coming soon.` })}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-colors"
+                  >
+                    Quick&nbsp;Restock
+                  </button>
                 </div>
               </div>
             ))}

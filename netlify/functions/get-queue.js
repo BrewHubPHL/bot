@@ -69,7 +69,7 @@ exports.handler = async (event) => {
 
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('id, customer_name, status, created_at, completed_at, coffee_orders(drink_name, customizations)')
+      .select('id, customer_name, status, created_at, updated_at, completed_at, coffee_orders(drink_name, customizations)')
       .in('status', ['pending', 'unpaid', 'paid', 'preparing', 'ready', 'completed'])
       .neq('type', 'merch')
       .gte('created_at', today.toISOString())
@@ -78,13 +78,22 @@ exports.handler = async (event) => {
 
     if (error) throw error;
 
-    // Auto-expire completed orders after 15 minutes so board stays tidy
-    const COMPLETED_TTL_MS = 15 * 60 * 1000;
+    // Auto-expire completed and ready orders after 10 minutes so the board
+    // stays tidy and undone orders (reverted to preparing) disappear promptly.
+    const TERMINAL_TTL_MS = 10 * 60 * 1000;
     const now = Date.now();
     const filtered = (orders || []).filter(o => {
-      if (o.status !== 'completed') return true;
-      const doneAt = o.completed_at ? new Date(o.completed_at).getTime() : new Date(o.created_at).getTime();
-      return (now - doneAt) < COMPLETED_TTL_MS;
+      if (o.status === 'completed') {
+        // Use updated_at so undone-then-re-completed orders get a fresh 10-min lease
+        const doneAt = o.updated_at ? new Date(o.updated_at).getTime() : new Date(o.created_at).getTime();
+        return (now - doneAt) < TERMINAL_TTL_MS;
+      }
+      if (o.status === 'ready') {
+        // Use updated_at as the timestamp for when the order became "ready"
+        const readyAt = o.updated_at ? new Date(o.updated_at).getTime() : new Date(o.created_at).getTime();
+        return (now - readyAt) < TERMINAL_TTL_MS;
+      }
+      return true;
     });
 
     // Sanitize for public display: first name only, no IDs, no payment details

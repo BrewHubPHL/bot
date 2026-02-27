@@ -76,10 +76,9 @@ exports.handler = async (event) => {
         .or(`and(clock_out.is.null,action_type.eq.in),clock_in.gte.${start}`),
       supabase
         .from('merch_products')
-        .select('id, name, stock_quantity')
+        .select('id, name, stock_quantity, min_threshold')
         .eq('is_active', true)
-        .not('stock_quantity', 'is', null)
-        .lt('stock_quantity', 10),
+        .not('stock_quantity', 'is', null),
       supabase
         .from('scheduled_shifts')
         .select('id, user_id, start_time, staff_directory(name)')
@@ -90,7 +89,9 @@ exports.handler = async (event) => {
     const orderData = ordersRes.data || [];
     const staffData = staffRes.data || [];
     const logsData = logsRes.data || [];
-    const lowStockItems = inventoryRes.data || [];
+    const lowStockItems = (inventoryRes.data || [])
+      .filter(i => i.stock_quantity <= (i.min_threshold ?? 10))
+      .map(i => ({ id: i.id, name: i.name, stock_quantity: i.stock_quantity, min_threshold: i.min_threshold ?? 10 }));
 
     // No-show shifts from the last 24 hours
     const noShowData = noShowRes.data || [];

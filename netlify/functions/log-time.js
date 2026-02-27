@@ -129,6 +129,21 @@ exports.handler = async (event) => {
     );
 
     if (rpcError) {
+      // Schema 69: detect the DB-level "single active shift" guard
+      // The trigger raises SQLSTATE P0409 or the unique index returns code 23505
+      const code = rpcError?.code || '';
+      const msg = rpcError?.message || '';
+      const isShiftGuard =
+        code === 'P0409' ||
+        (code === '23505' && msg.includes('uq_one_active_shift_per_employee')) ||
+        msg.includes('Shift already active');
+
+      if (isShiftGuard) {
+        console.warn('[LOG-TIME] DB blocked duplicate clock-in for user:', user.id);
+        const origin = validateOrigin(event.headers || {});
+        return corsWithOrigin(409, { error: 'Shift already active. Clock out before clocking in again.' }, origin);
+      }
+
       console.error('[LOG-TIME] RPC error:', rpcError?.message || 'unknown');
       const origin = validateOrigin(event.headers || {});
       return corsWithOrigin(500, { error: 'Clock operation failed' }, origin);

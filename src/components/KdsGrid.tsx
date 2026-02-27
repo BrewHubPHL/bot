@@ -56,6 +56,12 @@ export interface KdsGridProps {
   /** Authorization token — from useOpsSession or useOpsSessionOptional */
   token: string | null;
   /**
+   * Current barista's staff ID — used to enforce order locking.
+   * When provided, only the barista who tapped "Start Order" can advance it.
+   * Optional so the manager dashboard can omit it.
+   */
+  staffId?: string | null;
+  /**
    * Called whenever orders, source, or error changes.
    * Lets parent pages update their own chrome (header count, error banner, etc.)
    */
@@ -110,11 +116,20 @@ const STATUS_FLOW: Record<string, string> = {
 };
 
 const BUTTON_LABEL: Record<string, string> = {
-  unpaid:    "Prepare (Collect on Pickup)",
-  pending:   "Start Preparing",
-  paid:      "Start Preparing",
+  unpaid:    "Start Order",
+  pending:   "Start Order",
+  paid:      "Start Order",
   preparing: "Mark Ready",
-  ready:     "Complete / Picked Up",
+  ready:     "Complete",
+};
+
+/** Button color classes per status step */
+const BUTTON_STYLE: Record<string, string> = {
+  unpaid:    "bg-amber-600 hover:bg-amber-500 active:bg-amber-400 text-white",
+  pending:   "bg-stone-100 text-stone-900 hover:bg-white active:bg-stone-200",
+  paid:      "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-400 text-white",
+  preparing: "bg-sky-600 hover:bg-sky-500 active:bg-sky-400 text-white",
+  ready:     "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-400 text-white",
 };
 
 /** Status-coloured top-border Tailwind classes, passed as `className` to KdsOrderCard */
@@ -150,7 +165,7 @@ function mapOrder(o: APIOrder): KdsOrder {
 /* Component                                                            */
 /* ------------------------------------------------------------------ */
 
-export function KdsGrid({ token, onStateChange, fetchRef }: KdsGridProps) {
+export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProps) {
   const [orders, setOrders]       = useState<KdsOrder[]>([]);
   const [kdsSource, setKdsSource] = useState<"live" | "cached">("live");
   const [updating, setUpdating]   = useState<string | null>(null);
@@ -405,6 +420,10 @@ export function KdsGrid({ token, onStateChange, fetchRef }: KdsGridProps) {
           const borderTop    = STATUS_BORDER_TOP[status] || "border-t-8 border-t-stone-600";
           const isAwaitingPayment = status === "unpaid" || status === "pending";
 
+          // Locking: If the order is being prepared by another barista, disable controls
+          const isClaimedByOther = !!(staffId && order.claimed_by && order.claimed_by !== staffId);
+          const isLocked = isClaimedByOther && (status === "preparing" || status === "ready");
+
           return (
             <KdsOrderCard
               key={order.id}
@@ -423,14 +442,19 @@ export function KdsGrid({ token, onStateChange, fetchRef }: KdsGridProps) {
                 >
                   {nextStatus && (
                     <button
-                      disabled={updating === order.id || isExiting}
+                      disabled={updating === order.id || isExiting || isLocked}
                       onClick={() => updateStatus(order.id, nextStatus)}
-                      className="w-full min-h-[48px] py-3 text-xs font-bold tracking-[0.3em] uppercase bg-stone-100 text-stone-900 hover:bg-white active:bg-stone-200 transition-colors disabled:opacity-50 disabled:cursor-wait rounded-lg"
+                      title={isLocked ? "Claimed by another barista" : undefined}
+                      className={`w-full min-h-[48px] py-3 text-xs font-bold tracking-[0.3em] uppercase transition-colors disabled:opacity-50 disabled:cursor-wait rounded-lg ${
+                        isLocked
+                          ? "bg-stone-700 text-stone-500 cursor-not-allowed"
+                          : BUTTON_STYLE[status] || "bg-stone-100 text-stone-900 hover:bg-white active:bg-stone-200"
+                      }`}
                     >
-                      {updating === order.id ? "Updating…" : BUTTON_LABEL[status] || "Next"}
+                      {updating === order.id ? "Updating…" : isLocked ? "🔒 Locked" : BUTTON_LABEL[status] || "Next"}
                     </button>
                   )}
-                  {status !== "cancelled" && (
+                  {status !== "cancelled" && !isLocked && (
                     <button
                       disabled={updating === order.id || isExiting}
                       onClick={() => updateStatus(order.id, "cancelled")}

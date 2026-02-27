@@ -13,9 +13,47 @@ import { NextRequest, NextResponse } from "next/server";
 
 const OPS_PATHS = ["/kds", "/pos", "/scanner", "/manager", "/staff-hub", "/admin"];
 
+/** Routes that require manager (or higher) role */
+const MANAGER_ONLY_PATHS = ["/manager", "/admin"];
+
 function isOpsRoute(pathname: string): boolean {
   // Match /kds, /pos, /scanner, /manager (Next.js removes the (ops) group prefix)
   return OPS_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
+
+function isManagerRoute(pathname: string): boolean {
+  return MANAGER_ONLY_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
+
+/** Strict hex validation — rejects non-hex characters instead of silently converting to 0 */
+const HEX_RE = /^[0-9a-f]+$/i;
+
+/**
+ * Derive a device fingerprint from request headers (Edge Runtime compatible).
+ * Must match the derivation in pin-login.js:
+ *   sha256(user-agent + '|' + accept-language + '|' + clientIP).slice(0, 16)
+ *
+ * The client IP is included so a stolen cookie cannot be replayed from
+ * a different network.  When x-forwarded-for contains multiple IPs we
+ * use only the first (left-most) entry — the one set by the edge proxy
+ * — to keep the hash deterministic across hops.
+ */
+async function deriveDeviceFingerprint(request: NextRequest): Promise<string> {
+  const ua = request.headers.get("user-agent") || "";
+  const accept = request.headers.get("accept-language") || "";
+
+  // Resolve the client IP — prefer the Netlify-specific header, then
+  // x-forwarded-for (first entry only), then 'unknown'.
+  const xff = request.headers.get("x-forwarded-for");
+  const clientIp =
+    request.headers.get("x-nf-client-connection-ip")
+    || (xff ? xff.split(",")[0].trim() : null)
+    || "unknown";
+
+  const raw = `${ua}|${accept}|${clientIp}`;
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+  const hex = Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hex.slice(0, 16);
 }
 
 async function verifySessionToken(token: string, secret: string): Promise<{ valid: boolean; expired: boolean; payload?: Record<string, unknown> }> {
@@ -35,7 +73,10 @@ async function verifySessionToken(token: string, secret: string): Promise<{ vali
       "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["verify"]
     );
 
-    // Decode hex signature to bytes
+    // Validate hex format before decoding (prevents NaN→0 silent conversion)
+    if (!HEX_RE.test(signature) || signature.length % 2 !== 0) {
+      return { valid: false, expired: false };
+    }
     const sigBytes = new Uint8Array(signature.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
     const msgBytes = new TextEncoder().encode(payloadStr);
 
@@ -131,11 +172,38 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // Valid session — attach staff info to request headers for downstream use
+  // ── Device fingerprint binding ──────────────────────────────────────
+  // Reject sessions replayed from a different device/browser.
   const payload = result.payload!;
+  if (typeof payload.dfp === "string" && payload.dfp.length > 0) {
+    const currentDfp = await deriveDeviceFingerprint(request);
+    if (payload.dfp !== currentDfp) {
+      console.warn(`[MIDDLEWARE] Device fingerprint mismatch on ${pathname}`);
+      const response = new NextResponse(JSON.stringify({ error: "Session not valid for this device" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+      response.cookies.delete("hub_staff_session");
+      return response;
+    }
+  }
+
+  // ── Role-based route gating (defense-in-depth) ─────────────────────
+  if (isManagerRoute(pathname)) {
+    const role = String(payload.role ?? "").toLowerCase();
+    if (role !== "manager" && role !== "owner" && role !== "admin") {
+      return new NextResponse(JSON.stringify({ error: "Insufficient permissions" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  // Valid session — attach staff info to request headers for downstream use
   const response = NextResponse.next();
   response.headers.set("x-staff-id", String(payload.staffId ?? ""));
   response.headers.set("x-staff-email", String(payload.email ?? ""));
+  response.headers.set("x-staff-role", String(payload.role ?? ""));
   return response;
 }
 

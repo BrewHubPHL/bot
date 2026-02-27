@@ -82,6 +82,8 @@ function OrderCard({ order, prominent }: { order: QueueOrder; prominent?: boolea
     cardType === "completed-unpaid" ? "bg-[#1f0d0d]" :
     status === "completed" && order.isPaid ? "bg-[#0d1f12]" : "bg-stone-900";
 
+  const isUnpaid = status === "unpaid" || (status === "pending" && !order.isPaid);
+
   return (
     <article
       aria-label={`Order for ${order.name}, status: ${badgeLabel}`}
@@ -94,7 +96,10 @@ function OrderCard({ order, prominent }: { order: QueueOrder; prominent?: boolea
           <div className="text-xs font-bold text-stone-600 uppercase tracking-wide">
             {isComplete ? "✅ Ready — grab it!" : `#${order.position} in queue`}
           </div>
-          <div className={`font-black text-white leading-tight ${prominent ? "text-3xl" : "text-2xl"}`}>
+          <div
+            className={`font-black leading-tight ${prominent ? "text-3xl" : "text-2xl"} ${isUnpaid ? "" : "text-white"}`}
+            style={isUnpaid ? { color: "#ef4444" } : undefined}
+          >
             {order.name}
           </div>
           <div className="text-xs font-mono text-stone-500 mt-0.5">{order.tag}</div>

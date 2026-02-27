@@ -193,13 +193,13 @@ const escapeHtml = (s) => String(s || '')
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 async function sendParcelNotification(payload) {
-  const { recipient_name, recipient_email, recipient_phone, tracking_number, carrier, pickup_code, value_tier } = payload;
+  const { recipient_name, recipient_email, recipient_phone, tracking_number, carrier, pickup_code, value_tier, is_guest, invite_url } = payload;
 
   if (!recipient_email && !recipient_phone) {
     throw new Error('No contact info');
   }
 
-  // Build pickup code section for notifications
+  // Build pickup code section for emails (HTML)
   const codeHtml = pickup_code
     ? `<div style="margin: 20px 0; padding: 15px; background: #f8f4e8; border: 2px solid #d4a843; border-radius: 8px; text-align: center;">
         <p style="margin: 0 0 5px 0; font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 2px;">Your Pickup Code</p>
@@ -209,10 +209,28 @@ async function sendParcelNotification(payload) {
       </div>`
     : '';
 
+  // Guest onboarding invite section for emails
+  const inviteHtml = (is_guest && invite_url)
+    ? `<div style="margin: 20px 0; padding: 15px; background: #f0f9ff; border: 2px solid #60a5fa; border-radius: 8px; text-align: center;">
+        <p style="margin: 0 0 8px 0; font-size: 14px; color: #1e3a5f; font-weight: bold;">📱 Track Your Future Deliveries</p>
+        <p style="margin: 0 0 12px 0; font-size: 13px; color: #555;">Sign up once and you'll get live package tracking, coffee rewards, and more — right from your phone.</p>
+        <a href="${escapeHtml(invite_url)}" style="display: inline-block; padding: 10px 24px; background: #1c1917; color: #fff; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">Set Up My Account →</a>
+        <p style="margin: 8px 0 0 0; font-size: 11px; color: #888;">Totally optional — no pressure!</p>
+      </div>`
+    : '';
+
     if (recipient_email) {
       if (!process.env.RESEND_API_KEY) {
         console.warn('[QUEUE-PROCESSOR] RESEND_API_KEY not set; skipping email delivery for', String(recipient_email).slice(0, 64));
       } else {
+        const emailSubject = is_guest
+          ? 'Your Package is at BrewHub! 📦 (+ Set Up Live Tracking)'
+          : 'Your Parcel is Ready at the Hub! 📦☕';
+
+        const greeting = is_guest
+          ? `<p>Hi! A ${escapeHtml(carrier) || 'package'} (${escapeHtml(tracking_number) || 'pickup'}) just arrived for you at <strong>BrewHub PHL</strong>.</p>`
+          : `<p>Hi ${escapeHtml(recipient_name) || 'Neighbor'},</p><p>Your ${escapeHtml(carrier) || 'package'} (${escapeHtml(tracking_number) || 'pickup'}) is at BrewHub PHL!</p>`;
+
         const res = await fetchWithTimeout('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
@@ -222,13 +240,13 @@ async function sendParcelNotification(payload) {
           body: JSON.stringify({
             from: 'BrewHub PHL <info@brewhubphl.com>',
             to: [recipient_email],
-            subject: 'Your Parcel is Ready at the Hub! 📦☕',
+            subject: emailSubject,
             html: `
               <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
                 <h1>Package Arrived!</h1>
-                <p>Hi ${escapeHtml(recipient_name) || 'Neighbor'},</p>
-                <p>Your ${escapeHtml(carrier) || 'package'} (${escapeHtml(tracking_number) || 'pickup'}) is at BrewHub PHL!</p>
+                ${greeting}
                 ${codeHtml}
+                ${inviteHtml}
                 <p>Stop by during cafe hours to pick it up. Fresh coffee waiting!</p>
                 <p>— Thomas & The BrewHub PHL Team</p>
               </div>
@@ -244,11 +262,21 @@ async function sendParcelNotification(payload) {
       }
     }
 
-  // SMS via TCPA-compliant gateway (replaces omitted inline Twilio code)
+  // ── SMS via TCPA-compliant gateway ──────────────────────
+  // Fork the message template: registered residents get the warm "regular" message,
+  // unregistered guests get the magic link invite copy.
   if (recipient_phone) {
     const codeSnippet = pickup_code ? ` Your pickup code: ${pickup_code}.` : '';
     const idWarning = (value_tier === 'high_value' || value_tier === 'premium') ? ' Photo ID required for pickup.' : '';
-    const smsBody = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking_number || 'Parcel'}) is at the Hub.${codeSnippet}${idWarning} 📦 Grab a coffee when you swing by!`;
+
+    let smsBody;
+    if (is_guest && invite_url) {
+      // Scenario B: Unregistered Guest — include magic link invite
+      smsBody = `Hi! Your ${carrier || 'package'} is at the BrewHub lobby. 📦${codeSnippet}${idWarning} If you'd like, you can track all your future deliveries live right from your phone here: ${invite_url} Totally optional—see you soon! ☕`;
+    } else {
+      // Scenario A: Registered Resident — warm & familiar
+      smsBody = `Hi ${recipient_name || 'neighbor'}! Your ${carrier || 'package'} is ready at the BrewHub lobby! 📦${codeSnippet}${idWarning} Grab a coffee when you're down here. ☕ ${process.env.SITE_URL || 'https://brewhubphl.com'}/portal`;
+    }
 
     const smsResult = await sendSMS({
       to: recipient_phone,

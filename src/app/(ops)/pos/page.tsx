@@ -7,7 +7,8 @@ import {
   Coffee, CupSoda, Croissant, ShoppingCart, Plus, X,
   ChevronRight, CheckCircle2, Loader2, CreditCard, Monitor,
   AlertTriangle, RotateCcw, ScanLine, UserCheck, Ticket,
-  Gift, WifiOff, RefreshCw, Package, Printer, Banknote, Truck
+  Gift, WifiOff, RefreshCw, Package, Printer, Banknote, Truck, ShieldCheck,
+  MessageSquare
 } from "lucide-react";
 import SwipeCartItem from "@/components/SwipeCartItem";
 import { useConnection } from "@/lib/useConnection";
@@ -50,6 +51,15 @@ interface LoyaltyCustomer {
   name: string | null;
   points: number;
   vouchers: { id: string; code: string }[];
+}
+
+/** Chat order from chatbot — shown in "Pending Chat Orders" panel */
+interface ChatOrder {
+  id: string;
+  customer_name: string;
+  created_at: string;
+  total_amount_cents: number;
+  items: { drink_name: string; price: number; customizations?: string; product_id?: string }[];
 }
 
 type TicketPhase = "building" | "confirm" | "paying" | "paid" | "error";
@@ -197,6 +207,22 @@ export default function POSPage() {
   const [compModalOpen, setCompModalOpen] = useState(false);
   const [compReason, setCompReason] = useState("");
   const [compSubmitting, setCompSubmitting] = useState(false);
+
+  // Pending Chat Orders (chatbot → POS handoff)
+  const [chatOrdersOpen, setChatOrdersOpen] = useState(false);
+  const [chatOrders, setChatOrders] = useState<ChatOrder[]>([]);
+  const [chatOrdersLoading, setChatOrdersLoading] = useState(false);
+  const linkedChatOrderRef = useRef<string | null>(null);
+
+  // Manager PIN comp authorization
+  const [compPinModalOpen, setCompPinModalOpen] = useState(false);
+  const [compManagerPin, setCompManagerPin] = useState("");
+  const [compPinError, setCompPinError] = useState("");
+  const [compPinVerifying, setCompPinVerifying] = useState(false);
+  const [compAuthorized, setCompAuthorized] = useState(false);
+  const compManagerRef = useRef<{ id: string; name: string; email: string } | null>(null);
+  const compManagerPinRef = useRef<string>(""); // Stored for server-side re-verification at submission
+  const compManagerPinInputRef = useRef<HTMLInputElement | null>(null);
 
   // Guest-action routing: which button opened the guest name modal?
   const [pendingGuestAction, setPendingGuestAction] = useState<"terminal" | "cash" | "comp" | null>(null);
@@ -549,6 +575,85 @@ export default function POSPage() {
     }, 4000);
   }, [cart, offlineSessionId, offlineExposure]);
 
+  /* ─── Pending Chat Orders (chatbot → POS handoff) ────────────── */
+  const fetchChatOrders = useCallback(async () => {
+    setChatOrdersLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("id, customer_name, created_at, total_amount_cents, coffee_orders(drink_name, price, customizations)")
+        .eq("status", "unpaid")
+        .eq("is_guest_order", true)
+        .order("created_at", { ascending: true })
+        .limit(50);
+
+      if (error) throw error;
+
+      const mapped: ChatOrder[] = (data || []).map((o) => ({
+        id: o.id,
+        customer_name: o.customer_name || "Guest",
+        created_at: o.created_at,
+        total_amount_cents: o.total_amount_cents,
+        items: (o.coffee_orders || []).map((ci: { drink_name: string; price: number; customizations?: string }) => ({
+          drink_name: ci.drink_name,
+          price: ci.price,
+          customizations: ci.customizations || undefined,
+        })),
+      }));
+      setChatOrders(mapped);
+    } catch (err) {
+      console.error("[POS] Failed to fetch chat orders:", (err as Error)?.message);
+    } finally {
+      setChatOrdersLoading(false);
+    }
+  }, []);
+
+  // Fetch chat orders when panel opens
+  useEffect(() => {
+    if (chatOrdersOpen) fetchChatOrders();
+  }, [chatOrdersOpen, fetchChatOrders]);
+
+  /** Load a chat order into the cart and link its ID for UPDATE on payment */
+  const loadChatOrder = useCallback((order: ChatOrder) => {
+    // Clear existing cart
+    setCart([]);
+    setTicketPhase("building");
+    setCreatedOrderId(null);
+    setTerminalStatus("");
+    setErrorMsg("");
+    setIsSubmitting(false);
+    setLoyaltyCustomer(null);
+    setVoucherPhase("idle");
+
+    // Populate cart with chat order items
+    const newCart: CartItem[] = order.items.map((item) => ({
+      id: uid(),
+      productId: item.product_id || "",
+      name: item.drink_name,
+      price_cents: Math.round((item.price || 0) * 100),
+      modifiers: item.customizations
+        ? String(item.customizations).split(",").filter(Boolean).map((m) => ({
+            name: m.trim(),
+            price_cents: 0,
+          }))
+        : [],
+      quantity: 1,
+    }));
+    setCart(newCart);
+
+    // Link this order so payment updates the existing row
+    linkedChatOrderRef.current = order.id;
+    setCreatedOrderId(order.id);
+    setTicketPhase("confirm");
+
+    // Set guest name for display
+    setGuestFirstName(order.customer_name);
+
+    // Close the panel
+    setChatOrdersOpen(false);
+    haptic("success");
+  }, []);
+
   /* ─── Derived ────────────────────────────────────────────────── */
   const filteredItems = menuItems.filter((i) => categorize(i.name) === activeCategory);
   const cartTotal = cart.reduce(
@@ -601,6 +706,7 @@ export default function POSPage() {
     setVoucherPhase("idle");
     setVoucherError("");
     setVoucherRetryCode(null);
+    linkedChatOrderRef.current = null;
   }, []);
 
   /* ── Cancel order: delete pending DB row then clear cart ──── */
@@ -942,10 +1048,12 @@ export default function POSPage() {
     }
 
     if (action === "comp") {
-      // Store guest name for the comp reason modal, then open it
+      // Store guest name, then open Manager PIN modal
       tempGuestNameRef.current = name;
-      setCompReason("");
-      setCompModalOpen(true);
+      setCompManagerPin("");
+      setCompPinError("");
+      setCompPinModalOpen(true);
+      setTimeout(() => compManagerPinInputRef.current?.focus(), 0);
       return;
     }
 
@@ -965,6 +1073,13 @@ export default function POSPage() {
      We also add a 15-second timeout with AbortController to detect hangs. */
   const paymentRetryRef = useRef(0);
   const MAX_PAYMENT_RETRIES = 2;
+
+  // ── Square Double-Charge Prevention ───────────────────────────
+  // The idempotency key is generated client-side so that:
+  //  • Automatic network retries reuse the SAME key → Square dedupes
+  //  • Card decline / user-initiated retry regenerates the key → Square
+  //    accepts the new attempt instead of returning a stale result
+  const paymentIdempotencyKeyRef = useRef<string>(crypto.randomUUID());
 
   /* ─── WEBHOOK RESILIENCE: Active Payment Polling ───────────────
      Instead of passively waiting for Square's webhook (which can be delayed
@@ -1093,6 +1208,14 @@ export default function POSPage() {
 
   const handlePayOnTerminal = async () => {
     if (!createdOrderId) return;
+
+    // Fresh user-initiated attempt (not an automatic network retry)?
+    // Generate a new idempotency key so Square accepts this as a new charge
+    // attempt (e.g. after a card decline where the previous key was "used").
+    if (paymentRetryRef.current === 0) {
+      paymentIdempotencyKeyRef.current = crypto.randomUUID();
+    }
+
     setTicketPhase("paying");
     setTerminalStatus("Sending to terminal…");
 
@@ -1109,7 +1232,10 @@ export default function POSPage() {
           Authorization: `Bearer ${token}`,
           "X-BrewHub-Action": "true",
         },
-        body: JSON.stringify({ orderId: createdOrderId }),
+        body: JSON.stringify({
+          orderId: createdOrderId,
+          idempotencyKey: paymentIdempotencyKeyRef.current,
+        }),
         signal: controller.signal,
       });
 
@@ -1250,16 +1376,82 @@ export default function POSPage() {
     }
   };
 
-  /* ─── Comp Order (atomic — single cafe-checkout call with reason) ── */
+  /* ─── Manager PIN verification for comp ─────────────────────── */
+  const handleCompPinVerify = async () => {
+    if (compManagerPin.length !== 6) return;
+    setCompPinVerifying(true);
+    setCompPinError("");
+
+    try {
+      const token = getAccessToken();
+      // Use process-comp with verify_only flag — does NOT create a session/cookie
+      const resp = await fetch("/.netlify/functions/process-comp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+        body: JSON.stringify({ manager_pin: compManagerPin, verify_only: true }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || "PIN verification failed");
+      }
+
+      const result = await resp.json();
+      if (!result.verified || !result.manager) {
+        setCompPinError("PIN verification failed.");
+        setCompManagerPin("");
+        return;
+      }
+
+      const mgr = result.manager;
+      if (mgr.role !== "manager" && mgr.role !== "admin") {
+        setCompPinError("This PIN does not belong to a manager or admin.");
+        setCompManagerPin("");
+        return;
+      }
+
+      // Store manager info + PIN (in ref) for server-side re-verification
+      compManagerRef.current = {
+        id: mgr.id,
+        name: mgr.name || "Manager",
+        email: mgr.email || "",
+      };
+      compManagerPinRef.current = compManagerPin;
+      setCompAuthorized(true);
+      setCompPinModalOpen(false);
+      setCompManagerPin("");
+      haptic("success");
+
+      // Now open the comp reason modal
+      setCompReason("");
+      setCompModalOpen(true);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "PIN verification failed";
+      setCompPinError(msg);
+      setCompManagerPin("");
+    } finally {
+      setCompPinVerifying(false);
+    }
+  };
+
+  /* ─── Comp Order (manager-authorized — calls process-comp endpoint) ── */
   const handleCompOrder = async () => {
     if (cart.length === 0) return;
     const reason = compReason.trim();
     if (!reason || reason.length < 2) return;
+    if (!compAuthorized || !compManagerRef.current) {
+      setErrorMsg("Manager authorization required. Please enter a Manager PIN first.");
+      setTicketPhase("error");
+      return;
+    }
 
     // Resolve customer name: loyalty customer name, temp guest name, or missing
     const customerName = loyaltyCustomer?.name || tempGuestNameRef.current || null;
     if (!customerName) {
-      // Shouldn't reach here — guest modal should have been shown first
       setErrorMsg("Customer name required. Please try again.");
       setTicketPhase("error");
       return;
@@ -1270,32 +1462,34 @@ export default function POSPage() {
 
     try {
       const token = getAccessToken();
-
       const payload = buildCartPayload();
 
-      const checkoutBody: Record<string, unknown> = {
+      // Build comp body — includes manager_pin for server-side re-verification
+      const compBody: Record<string, unknown> = {
+        manager_pin: compManagerPinRef.current,
         items: payload,
-        terminal: true,
-        paymentMethod: "comp",
         reason,
+        customer_name: customerName,
       };
       if (loyaltyCustomer) {
-        checkoutBody.user_id = loyaltyCustomer.id;
-        checkoutBody.customer_email = loyaltyCustomer.email;
-        checkoutBody.customer_name = loyaltyCustomer.name;
+        compBody.user_id = loyaltyCustomer.id;
+        compBody.customer_email = loyaltyCustomer.email;
+        compBody.customer_name = loyaltyCustomer.name;
       }
       if (tempGuestNameRef.current) {
-        checkoutBody.customer_name = tempGuestNameRef.current;
+        compBody.customer_name = tempGuestNameRef.current;
       }
 
-      const resp = await fetch("/.netlify/functions/cafe-checkout", {
+      // Call process-comp endpoint — re-verifies manager PIN, creates comped order,
+      // logs audit trail with manager_id as the authorizing actor.
+      const resp = await fetch("/.netlify/functions/process-comp", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
           "X-BrewHub-Action": "true",
         },
-        body: JSON.stringify(checkoutBody),
+        body: JSON.stringify(compBody),
       });
 
       if (!resp.ok) {
@@ -1309,7 +1503,7 @@ export default function POSPage() {
 
       setCreatedOrderId(orderId);
       setTicketPhase("paid");
-      setTerminalStatus("Comped — order on KDS");
+      setTerminalStatus(`Comped — authorized by ${result.manager_name || compManagerRef.current?.name || "Manager"}`);
       haptic("success");
 
       setTimeout(() => {
@@ -1318,6 +1512,9 @@ export default function POSPage() {
         setCreatedOrderId(null);
         setTerminalStatus("");
         setCompReason("");
+        setCompAuthorized(false);
+        compManagerRef.current = null;
+        compManagerPinRef.current = "";
         tempGuestNameRef.current = null;
       }, 3000);
     } catch (e: unknown) {
@@ -1329,7 +1526,7 @@ export default function POSPage() {
     }
   };
 
-  /* ─── Comp Init (building phase — checks guest name first) ────── */
+  /* ─── Comp Init (building phase — checks guest name, then manager PIN) ── */
   const handleCompInit = () => {
     if (cart.length === 0) return;
     if (!loyaltyCustomer || !loyaltyCustomer.name) {
@@ -1339,11 +1536,23 @@ export default function POSPage() {
       setTimeout(() => guestInputRef.current?.focus(), 0);
       return;
     }
-    // Name already known — go straight to comp reason modal
+    // Name already known — go to Manager PIN verification
     tempGuestNameRef.current = null;
-    setCompReason("");
-    setCompModalOpen(true);
+    setCompManagerPin("");
+    setCompPinError("");
+    setCompPinModalOpen(true);
+    setTimeout(() => compManagerPinInputRef.current?.focus(), 0);
   };
+
+  /* ─── Reset comp authorization when cart changes ──────────────── */
+  useEffect(() => {
+    if (compAuthorized) {
+      setCompAuthorized(false);
+      compManagerRef.current = null;
+      compManagerPinRef.current = "";
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart.length]);
 
   /* ─── Cash Fallback (confirm phase — order already created as pending) ── */
   const handleCashFallback = async () => {
@@ -1575,9 +1784,14 @@ export default function POSPage() {
     setVoucherRetryCode(null);
   };
 
+  /* ─── Tax rate (Philadelphia 8% sales tax) ─────────────────── */
+  const TAX_RATE = 0.08;
+  const taxCents = Math.round(cartTotal * TAX_RATE);
+  const grandTotalCents = cartTotal + taxCents;
+
   /* ─── Render ─────────────────────────────────────────────────── */
   return (
-    <div className="h-screen w-screen flex flex-col md:flex-row bg-stone-950 text-white select-none overflow-hidden">
+    <div className="h-screen w-screen bg-stone-950 text-white select-none overflow-hidden flex flex-col md:grid md:grid-cols-12">
       {/* Skip link for keyboard navigation */}
       <a
         href="#product-grid"
@@ -1599,241 +1813,344 @@ export default function POSPage() {
         } : null}
       />
 
-      {/* ═══════ COL 1 — Categories (iPad sidebar / hidden on mobile) ═══════ */}
-      <aside aria-label="Menu categories" className="hidden md:flex w-[140px] bg-stone-900 flex-col border-r border-stone-800 shrink-0">
-        {/* Logo */}
-        <div className="px-4 py-5 border-b border-stone-800 flex items-center gap-2">
-          <img src="/logo.png" alt="BrewHub" className="w-8 h-8 rounded-full" />
-          <span className="font-bold text-sm tracking-tight">POS</span>
-        </div>
-
-        {/* Category Buttons */}
-        <nav aria-label="Product categories" className="flex-1 py-4 space-y-1 px-2">
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat.key}
-              onClick={() => { setActiveCategory(cat.key); setSelectedItem(null); }}
-              aria-pressed={activeCategory === cat.key}
-              aria-current={activeCategory === cat.key ? "true" : undefined}
-              className={`w-full flex items-center gap-2 px-3 py-3 min-h-[48px] rounded-lg text-xs font-semibold uppercase tracking-wider transition-all
-                ${activeCategory === cat.key
-                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                  : "text-stone-400 hover:bg-stone-800 hover:text-stone-200 border border-transparent"
-                }`}
-            >
-              {cat.icon}
-              <span className="truncate">{cat.label}</span>
-            </button>
-          ))}
-        </nav>
-
-        {/* Clock */}
-        <div className="px-4 py-4 border-t border-stone-800 text-center">
-          <div className="text-lg font-mono font-bold text-stone-300">
-            {clock.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          </div>
-          <div className="text-[10px] text-stone-600 uppercase tracking-widest mt-0.5">
-            {clock.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
-          </div>
-        </div>
-      </aside>
-
-      {/* ═══════ Mobile Category Bar (phone only) ═══════ */}
-      <div className="flex md:hidden bg-stone-900 border-b border-stone-800 overflow-x-auto shrink-0 px-2 py-2 gap-1.5 scrollbar-hide">
-        {CATEGORIES.map((cat) => (
-          <button
-            key={cat.key}
-            onClick={() => { setActiveCategory(cat.key); setSelectedItem(null); }}
-            aria-pressed={activeCategory === cat.key}
-            className={`flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap shrink-0 transition-all
-              ${activeCategory === cat.key
-                ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                : "text-stone-400 bg-stone-800/60 border border-transparent"
-              }`}
-          >
-            {cat.icon}
-            <span>{cat.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* ═══════ COL 2 — Product Builder (Item Grid + Modifier Panel) ═══════ */}
-      <main id="product-grid" aria-label="Product selection" className="flex-1 flex flex-col min-w-0 relative">
-        {/* Top Bar */}
-        <header className="h-14 bg-stone-900/60 backdrop-blur border-b border-stone-800 flex items-center justify-between px-6 shrink-0">
-          <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-stone-400">
-            {CATEGORIES.find((c) => c.key === activeCategory)?.label || "Menu"}
-          </h1>
-          <div className="flex items-center gap-3 text-xs text-stone-500">
-            {isOnline ? (
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                {menuSource === "cached" ? "Cached Menu" : "Connected"}
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-red-400">
-                <WifiOff size={14} />
-                <span className="font-bold uppercase tracking-wider">Offline</span>
-              </span>
-            )}
-            {syncingOrders && (
-              <span className="flex items-center gap-1 text-amber-400">
-                <RefreshCw size={12} className="animate-spin" />
-                Syncing…
-              </span>
-            )}
-          </div>
-        </header>
-
-        {/* Item Grid */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
-          {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="animate-spin text-stone-600" size={32} />
+      {/* ═══════════════════════════════════════════════════════════
+          LEFT PANEL — Categories + Product Grid  (cols 1-8)
+          ═══════════════════════════════════════════════════════════ */}
+      <div className="flex flex-col md:col-span-8 md:h-screen overflow-hidden">
+        {/* ── Category sidebar (desktop) + mobile bar ─────────── */}
+        <div className="flex flex-1 min-h-0">
+          {/* Desktop category rail */}
+          <aside aria-label="Menu categories" className="hidden md:flex w-[140px] bg-stone-900 flex-col border-r border-stone-800 shrink-0">
+            {/* Logo */}
+            <div className="px-4 py-5 border-b border-stone-800 flex items-center gap-2">
+              <img src="/logo.png" alt="BrewHub" className="w-8 h-8 rounded-full" />
+              <span className="font-bold text-sm tracking-tight">POS</span>
             </div>
-          ) : filteredItems.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-stone-600 text-sm">
-              No items in this category
+
+            {/* Pending Chat Orders Toggle */}
+            <div className="px-2 py-2 border-b border-stone-800">
+              <button
+                onClick={() => { setChatOrdersOpen((v) => !v); setSelectedItem(null); }}
+                aria-pressed={chatOrdersOpen}
+                className={`w-full flex items-center gap-2 px-3 py-3 min-h-[48px] rounded-lg text-xs font-semibold uppercase tracking-wider transition-all
+                  ${chatOrdersOpen
+                    ? "bg-orange-500/20 text-orange-400 border border-orange-500/30"
+                    : "text-stone-400 hover:bg-stone-800 hover:text-stone-200 border border-transparent"
+                  }`}
+              >
+                <MessageSquare size={18} />
+                <span className="truncate">Chat Orders</span>
+              </button>
             </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filteredItems.map((item) => (
+
+            {/* Category Buttons */}
+            <nav aria-label="Product categories" className="flex-1 py-4 space-y-1 px-2">
+              {CATEGORIES.map((cat) => (
                 <button
-                  key={item.id}
-                  onClick={() => quickAdd(item)}
-                  disabled={ticketPhase !== "building"}
-                  className="group bg-stone-900 hover:bg-stone-800 border border-stone-800 hover:border-amber-500/40 rounded-xl p-4 md:p-5 text-left transition-all active:scale-[0.97] flex flex-col justify-between min-h-[120px] md:min-h-[140px] disabled:opacity-40 disabled:pointer-events-none"
+                  key={cat.key}
+                  onClick={() => { setActiveCategory(cat.key); setSelectedItem(null); }}
+                  aria-pressed={activeCategory === cat.key}
+                  aria-current={activeCategory === cat.key ? "true" : undefined}
+                  className={`w-full flex items-center gap-2 px-3 py-3 min-h-[48px] rounded-lg text-xs font-semibold uppercase tracking-wider transition-all
+                    ${activeCategory === cat.key
+                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                      : "text-stone-400 hover:bg-stone-800 hover:text-stone-200 border border-transparent"
+                    }`}
                 >
-                  <div>
-                    <h3 className="font-bold text-base text-stone-100 group-hover:text-amber-300 transition-colors">
-                      {item.name}
-                    </h3>
-                    {item.description && (
-                      <p className="text-stone-500 text-xs mt-1 line-clamp-2">{item.description}</p>
-                    )}
-                  </div>
-                  <div className="flex items-end justify-between mt-3">
-                    <span className="text-amber-400 font-bold text-lg">{cents(item.price_cents)}</span>
-                    <Plus size={18} className="text-stone-600 group-hover:text-amber-400 transition-colors" />
-                  </div>
+                  {cat.icon}
+                  <span className="truncate">{cat.label}</span>
+                </button>
+              ))}
+            </nav>
+
+            {/* Clock */}
+            <div className="px-4 py-4 border-t border-stone-800 text-center">
+              <div className="text-lg font-mono font-bold text-stone-300">
+                {clock.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </div>
+              <div className="text-[10px] text-stone-600 uppercase tracking-widest mt-0.5">
+                {clock.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+              </div>
+            </div>
+          </aside>
+
+          {/* ── Main product area ─────────────────────────── */}
+          <main id="product-grid" aria-label="Product selection" className="flex-1 flex flex-col min-w-0 relative">
+            {/* Mobile Category Bar (phone only) */}
+            <div className="flex md:hidden bg-stone-900 border-b border-stone-800 overflow-x-auto shrink-0 px-2 py-2 gap-1.5 scrollbar-hide">
+              <button
+                onClick={() => { setChatOrdersOpen((v) => !v); setSelectedItem(null); }}
+                aria-pressed={chatOrdersOpen}
+                className={`flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap shrink-0 transition-all
+                  ${chatOrdersOpen
+                    ? "bg-orange-500/20 text-orange-400 border border-orange-500/30"
+                    : "text-stone-400 bg-stone-800/60 border border-transparent"
+                  }`}
+              >
+                <MessageSquare size={14} />
+                <span>Chat</span>
+              </button>
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat.key}
+                  onClick={() => { setActiveCategory(cat.key); setSelectedItem(null); }}
+                  aria-pressed={activeCategory === cat.key}
+                  className={`flex items-center gap-1.5 px-3 min-h-[44px] rounded-lg text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap shrink-0 transition-all
+                    ${activeCategory === cat.key
+                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                      : "text-stone-400 bg-stone-800/60 border border-transparent"
+                    }`}
+                >
+                  {cat.icon}
+                  <span>{cat.label}</span>
                 </button>
               ))}
             </div>
-          )}
-        </div>
 
-        {/* ═══════ Builder Panel Overlay ═══════ */}
-        {selectedItem && (
-          <>
-            {/* Backdrop */}
-            <div
-              className="absolute inset-0 bg-black/50 z-10 animate-in fade-in duration-200"
-              onClick={() => setSelectedItem(null)}
-            />
-            {/* Panel */}
-            <div className="absolute inset-y-0 right-0 w-full max-w-md bg-stone-900 border-l border-stone-700 z-20 flex flex-col animate-in slide-in-from-right duration-300">
-              {/* Header */}
-              <div className="p-6 border-b border-stone-800 flex items-start justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">{selectedItem.name}</h2>
-                  <p className="text-amber-400 font-semibold text-lg mt-1">{cents(selectedItem.price_cents)}</p>
-                  {selectedItem.description && (
-                    <p className="text-stone-500 text-sm mt-2">{selectedItem.description}</p>
-                  )}
-                </div>
-                <button
-                  onClick={() => setSelectedItem(null)}
-                  className="p-2 hover:bg-stone-800 rounded-lg transition-colors"
-                >
-                  <X size={20} className="text-stone-400" />
-                </button>
-              </div>
-
-              {/* Modifiers */}
-              <div className="flex-1 overflow-y-auto p-6">
-                <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-stone-500 mb-4">
-                  Customize
-                </h3>
-                <div className="space-y-2">
-                  {DRINK_MODIFIERS.map((mod) => {
-                    const active = pendingMods.some((m) => m.name === mod.name);
-                    return (
-                      <button
-                        key={mod.name}
-                        onClick={() => toggleMod(mod)}
-                        className={`w-full flex items-center justify-between px-4 py-3 min-h-[48px] rounded-lg border transition-all text-sm
-                          ${active
-                            ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
-                            : "bg-stone-800/50 border-stone-700 text-stone-300 hover:border-stone-600"
-                          }`}
-                      >
-                        <span className="font-medium">{mod.name}</span>
-                        <span className="text-xs">
-                          {mod.price_cents > 0 ? `+${cents(mod.price_cents)}` : "Free"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Confirm */}
-              <div className="p-6 border-t border-stone-800">
-                <div className="flex items-center justify-between mb-3 text-sm">
-                  <span className="text-stone-500">Item total</span>
-                  <span className="font-bold text-white text-lg">
-                    {cents(selectedItem.price_cents + pendingMods.reduce((s, m) => s + m.price_cents, 0))}
+            {/* Top Bar */}
+            <header className="h-14 bg-stone-900/60 backdrop-blur border-b border-stone-800 flex items-center justify-between px-6 shrink-0">
+              <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-stone-400">
+                {chatOrdersOpen ? "Pending Chat Orders" : CATEGORIES.find((c) => c.key === activeCategory)?.label || "Menu"}
+              </h1>
+              <div className="flex items-center gap-3 text-xs text-stone-500">
+                {isOnline ? (
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    {menuSource === "cached" ? "Cached Menu" : "Connected"}
                   </span>
-                </div>
-                <button
-                  onClick={confirmBuilder}
-                  className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-sm uppercase tracking-[0.15em] rounded-lg transition-colors active:scale-[0.98]"
-                >
-                  Add to Order
-                </button>
+                ) : (
+                  <span className="flex items-center gap-1 text-red-400">
+                    <WifiOff size={14} />
+                    <span className="font-bold uppercase tracking-wider">Offline</span>
+                  </span>
+                )}
+                {syncingOrders && (
+                  <span className="flex items-center gap-1 text-amber-400">
+                    <RefreshCw size={12} className="animate-spin" />
+                    Syncing…
+                  </span>
+                )}
               </div>
-            </div>
-          </>
-        )}
-      </main>
+            </header>
 
-      {/* ═══════ COL 3 — Live Ticket (desktop sidebar / mobile bottom sheet) ═══════ */}
-      <aside aria-label="Order cart" className={`
-        fixed inset-x-0 bottom-0 z-40 h-[85vh] rounded-t-2xl shadow-2xl
-        transition-transform duration-300 ease-out
-        ${cartDrawerOpen ? "translate-y-0" : "translate-y-full"}
-        md:relative md:inset-auto md:z-auto md:h-auto md:rounded-none md:shadow-none
-        md:translate-y-0 md:w-[340px] md:shrink-0
-        bg-stone-900 border-l border-stone-800 flex flex-col
-      `}>
-        {/* Mobile drawer grab handle */}
-        <div className="md:hidden flex justify-center pt-2 pb-1">
-          <button
-            onClick={() => setCartDrawerOpen(false)}
-            className="w-12 h-1.5 rounded-full bg-stone-700 active:bg-stone-500"
-            aria-label="Close cart"
-          />
+            {/* ═══════ Pending Chat Orders Panel ═══════ */}
+            {chatOrdersOpen && (
+              <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-orange-400 flex items-center gap-2">
+                    <MessageSquare size={16} /> Pending Chat Orders
+                  </h2>
+                  <button
+                    onClick={fetchChatOrders}
+                    disabled={chatOrdersLoading}
+                    className="text-xs text-stone-500 hover:text-stone-300 flex items-center gap-1 transition-colors"
+                  >
+                    <RefreshCw size={12} className={chatOrdersLoading ? "animate-spin" : ""} /> Refresh
+                  </button>
+                </div>
+
+                {chatOrdersLoading ? (
+                  <div className="flex items-center justify-center h-40">
+                    <Loader2 className="animate-spin text-stone-600" size={28} />
+                  </div>
+                ) : chatOrders.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-40 text-stone-600 gap-2">
+                    <MessageSquare size={32} className="opacity-30" />
+                    <p className="text-xs uppercase tracking-widest">No pending chat orders</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {chatOrders.map((co) => {
+                      const minutesAgo = Math.round((Date.now() - new Date(co.created_at).getTime()) / 60000);
+                      return (
+                        <button
+                          key={co.id}
+                          onClick={() => loadChatOrder(co)}
+                          disabled={ticketPhase !== "building"}
+                          className="group bg-stone-900 hover:bg-stone-800 border border-orange-500/30 hover:border-orange-500/60 rounded-xl p-4 text-left transition-all active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none"
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <p className="font-bold text-base text-white group-hover:text-orange-300 transition-colors">
+                                {co.customer_name}
+                              </p>
+                              <p className="text-[11px] text-stone-500 font-mono mt-0.5">
+                                #{co.id.slice(0, 6).toUpperCase()} &middot; {minutesAgo}m ago
+                              </p>
+                            </div>
+                            <span className="text-xs font-bold text-red-400 bg-red-500/15 px-2 py-0.5 rounded">
+                              UNPAID
+                            </span>
+                          </div>
+                          <div className="space-y-1 mt-2">
+                            {co.items.slice(0, 5).map((item, i) => (
+                              <div key={i} className="flex items-baseline justify-between text-sm">
+                                <span className="text-stone-300 truncate">{item.drink_name}</span>
+                                <span className="text-stone-500 text-xs tabular-nums ml-2">{cents(Math.round((item.price || 0) * 100))}</span>
+                              </div>
+                            ))}
+                            {co.items.length > 5 && (
+                              <p className="text-[11px] text-stone-600">+{co.items.length - 5} more</p>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between mt-3 pt-2 border-t border-stone-800">
+                            <span className="text-xs text-stone-500">Total</span>
+                            <span className="font-bold text-orange-400">{cents(co.total_amount_cents)}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Item Grid */}
+            {!chatOrdersOpen && (
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
+              {loading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="animate-spin text-stone-600" size={32} />
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-stone-600 text-sm">
+                  No items in this category
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {filteredItems.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => quickAdd(item)}
+                      disabled={ticketPhase !== "building"}
+                      className="group bg-stone-900 hover:bg-stone-800 border border-stone-800 hover:border-amber-500/40 rounded-xl p-4 md:p-5 text-left transition-all active:scale-[0.97] flex flex-col justify-between min-h-[120px] md:min-h-[140px] disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      <div>
+                        <h3 className="font-bold text-base text-stone-100 group-hover:text-amber-300 transition-colors">
+                          {item.name}
+                        </h3>
+                        {item.description && (
+                          <p className="text-stone-500 text-xs mt-1 line-clamp-2">{item.description}</p>
+                        )}
+                      </div>
+                      <div className="flex items-end justify-between mt-3">
+                        <span className="text-amber-400 font-bold text-lg">{cents(item.price_cents)}</span>
+                        <Plus size={18} className="text-stone-600 group-hover:text-amber-400 transition-colors" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            )}
+
+            {/* ═══════ Builder Panel Overlay ═══════ */}
+            {selectedItem && (
+              <>
+                {/* Backdrop */}
+                <div
+                  className="absolute inset-0 bg-black/50 z-10 animate-in fade-in duration-200"
+                  onClick={() => setSelectedItem(null)}
+                />
+                {/* Panel */}
+                <div className="absolute inset-y-0 right-0 w-full max-w-md bg-stone-900 border-l border-stone-700 z-20 flex flex-col animate-in slide-in-from-right duration-300">
+                  {/* Header */}
+                  <div className="p-6 border-b border-stone-800 flex items-start justify-between">
+                    <div>
+                      <h2 className="text-2xl font-bold text-white">{selectedItem.name}</h2>
+                      <p className="text-amber-400 font-semibold text-lg mt-1">{cents(selectedItem.price_cents)}</p>
+                      {selectedItem.description && (
+                        <p className="text-stone-500 text-sm mt-2">{selectedItem.description}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setSelectedItem(null)}
+                      className="p-2 hover:bg-stone-800 rounded-lg transition-colors"
+                    >
+                      <X size={20} className="text-stone-400" />
+                    </button>
+                  </div>
+
+                  {/* Modifiers */}
+                  <div className="flex-1 overflow-y-auto p-6">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-stone-500 mb-4">
+                      Customize
+                    </h3>
+                    <div className="space-y-2">
+                      {DRINK_MODIFIERS.map((mod) => {
+                        const active = pendingMods.some((m) => m.name === mod.name);
+                        return (
+                          <button
+                            key={mod.name}
+                            onClick={() => toggleMod(mod)}
+                            className={`w-full flex items-center justify-between px-4 py-3 min-h-[48px] rounded-lg border transition-all text-sm
+                              ${active
+                                ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                                : "bg-stone-800/50 border-stone-700 text-stone-300 hover:border-stone-600"
+                              }`}
+                          >
+                            <span className="font-medium">{mod.name}</span>
+                            <span className="text-xs">
+                              {mod.price_cents > 0 ? `+${cents(mod.price_cents)}` : "Free"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Confirm */}
+                  <div className="p-6 border-t border-stone-800">
+                    <div className="flex items-center justify-between mb-3 text-sm">
+                      <span className="text-stone-500">Item total</span>
+                      <span className="font-bold text-white text-lg">
+                        {cents(selectedItem.price_cents + pendingMods.reduce((s, m) => s + m.price_cents, 0))}
+                      </span>
+                    </div>
+                    <button
+                      onClick={confirmBuilder}
+                      className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-sm uppercase tracking-[0.15em] rounded-lg transition-colors active:scale-[0.98]"
+                    >
+                      Add to Order
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </main>
         </div>
-        {/* Ticket Header */}
-        <div className="px-5 py-4 border-b border-stone-800 flex items-center justify-between">
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════
+          RIGHT PANEL — Big Order Sidebar  (cols 9-12, desktop)
+          Mobile: bottom-sheet drawer (same data, different layout)
+          ═══════════════════════════════════════════════════════════ */}
+
+      {/* ── Desktop Order Sidebar (hidden on mobile) ─────────── */}
+      <aside
+        aria-label="Order sidebar"
+        className="hidden md:flex md:col-span-4 md:h-screen flex-col bg-stone-900 border-l border-stone-800"
+      >
+        {/* ── Sidebar Header ─────────────────────────────────── */}
+        <div className="px-5 py-4 border-b border-stone-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <ShoppingCart size={16} className="text-stone-500" />
-            <h2 className="font-bold text-sm uppercase tracking-widest text-stone-400">
+            <ShoppingCart size={18} className="text-amber-400" />
+            <h2 className="font-bold text-sm uppercase tracking-widest text-stone-300">
               {ticketPhase === "building" ? "Current Order" :
                ticketPhase === "confirm" ? "Confirm & Pay" :
                ticketPhase === "paying" ? "Processing…" :
                ticketPhase === "paid" ? "Complete" : "Error"}
             </h2>
           </div>
-          {cart.length > 0 && ticketPhase === "building" && (
-            <button onClick={clearCart} className="text-xs text-stone-600 hover:text-red-400 transition-colors">
-              Clear
-            </button>
+          {cartCount > 0 && (
+            <span className="text-xs font-bold rounded-full px-2.5 py-0.5 bg-amber-500/20 text-amber-400 tabular-nums">
+              {cartCount}
+            </span>
           )}
         </div>
 
-        {/* ── Loyalty Badge / Scan Button ── */}
-        <div className="px-5 py-3 border-b border-stone-800/60">
+        {/* ── Loyalty Badge / Scan Button ──────────────────── */}
+        <div className="px-5 py-3 border-b border-stone-800/60 shrink-0">
           {loyaltyCustomer ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -1872,221 +2189,189 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto">
+        {/* ── Cart Item List (scrollable middle) ──────────── */}
+        <div className="flex-1 overflow-y-auto min-h-0">
           {cart.length === 0 && ticketPhase === "building" ? (
-            <div className="flex flex-col items-center justify-center h-full text-stone-700 gap-2">
-              <ShoppingCart size={32} />
-              <p className="text-xs uppercase tracking-widest">No items yet</p>
+            <div className="flex flex-col items-center justify-center h-full text-stone-700 gap-2 py-12">
+              <ShoppingCart size={40} className="opacity-30" />
+              <p className="text-xs uppercase tracking-widest">Tap a menu item to start</p>
             </div>
           ) : (
             <div className="divide-y divide-stone-800/50" role="list">
-              {cart.map((ci) => (
-                <SwipeCartItem
-                  key={ci.id}
-                  item={ci}
-                  disabled={ticketPhase !== "building"}
-                  onUpdateQty={updateQty}
-                  onRemove={removeItem}
-                  formatCents={cents}
-                />
-              ))}
+              {cart.map((ci) => {
+                const lineTotal = (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0)) * ci.quantity;
+                return (
+                  <div key={ci.id} className="px-4 py-3 flex items-start gap-3 group">
+                    {/* Item info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{ci.name}</p>
+                      {ci.modifiers.length > 0 && (
+                        <p className="text-[11px] text-stone-500 truncate mt-0.5">
+                          {ci.modifiers.map(m => m.name).join(", ")}
+                        </p>
+                      )}
+                      <p className="text-xs font-bold text-amber-400 mt-1 tabular-nums">{cents(lineTotal)}</p>
+                    </div>
+                    {/* Qty controls + delete */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => updateQty(ci.id, -1)}
+                        disabled={ticketPhase !== "building"}
+                        className="w-7 h-7 flex items-center justify-center rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm font-bold transition-colors disabled:opacity-30"
+                        aria-label={`Decrease ${ci.name} quantity`}
+                      >
+                        −
+                      </button>
+                      <span className="w-6 text-center text-sm font-bold tabular-nums text-white">{ci.quantity}</span>
+                      <button
+                        onClick={() => updateQty(ci.id, 1)}
+                        disabled={ticketPhase !== "building"}
+                        className="w-7 h-7 flex items-center justify-center rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 text-sm font-bold transition-colors disabled:opacity-30"
+                        aria-label={`Increase ${ci.name} quantity`}
+                      >
+                        +
+                      </button>
+                      <button
+                        onClick={() => removeItem(ci.id)}
+                        disabled={ticketPhase !== "building"}
+                        className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-500/20 text-stone-600 hover:text-red-400 transition-colors disabled:opacity-30 ml-1"
+                        aria-label={`Remove ${ci.name}`}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* ═══════ Ticket Footer — phase-dependent ═══════ */}
-        <div className="border-t border-stone-800 p-5 space-y-3">
-          {/* Total (always visible when cart has items) */}
+        {/* ── Clear Order + Comp Order Buttons (middle divider) ── */}
+        {cart.length > 0 && ticketPhase === "building" && (
+          <div className="px-5 py-2 border-t border-stone-800 shrink-0 space-y-1">
+            <button
+              onClick={handleCompInit}
+              disabled={isSubmitting}
+              className="w-full py-2 text-xs font-semibold text-amber-500 hover:text-amber-400 disabled:text-stone-600 uppercase tracking-widest transition-colors flex items-center justify-center gap-1.5"
+            >
+              <ShieldCheck size={12} /> Comp Order (Manager PIN)
+            </button>
+            <button
+              onClick={clearCart}
+              className="w-full py-2 text-xs font-semibold text-stone-500 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center justify-center gap-1.5"
+            >
+              <X size={12} /> Clear Order
+            </button>
+          </div>
+        )}
+
+        {/* ── Totals + Payment (pinned bottom) ────────────── */}
+        <div className="border-t border-stone-700 bg-stone-900 p-5 space-y-3 shrink-0">
+          {/* Subtotals */}
           {cartCount > 0 && (
-            <div className="flex items-end justify-between">
-              <div>
-                <span className="text-[10px] text-stone-600 uppercase tracking-widest block">
-                  {cartCount} {cartCount === 1 ? "item" : "items"}
-                </span>
-                <span className="text-xs text-stone-500 uppercase tracking-widest">Total</span>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-stone-500">Subtotal ({cartCount} {cartCount === 1 ? "item" : "items"})</span>
+                <span className="font-semibold text-stone-300 tabular-nums">{cents(cartTotal)}</span>
               </div>
-              <span className="text-3xl font-bold text-white font-mono">{cents(cartTotal)}</span>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-stone-500">Tax (8%)</span>
+                <span className="font-semibold text-stone-300 tabular-nums">{cents(taxCents)}</span>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-stone-800">
+                <span className="text-sm font-bold text-white uppercase tracking-wider">Total</span>
+                <span className="text-3xl font-bold text-white font-mono tabular-nums">{cents(grandTotalCents)}</span>
+              </div>
             </div>
           )}
 
-          {/* Phase: BUILDING — Send to KDS or Offline Queue */}
+          {/* Phase: BUILDING — payment buttons */}
           {ticketPhase === "building" && (
             <>
               {isOnline ? (
                 <>
-                  <button
-                    disabled={cart.length === 0 || isSubmitting}
-                    onClick={handleSendToKDS}
-                    className="w-full min-h-[48px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                  >
-                    {isSubmitting ? (
-                      <><Loader2 size={16} className="animate-spin" /> Processing…</>
-                    ) : (
-                      <><Monitor size={16} /> Pay on Terminal</>
-                    )}
-                  </button>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      disabled={cart.length === 0 || isSubmitting}
-                      onClick={() => handleMarkPaid()}
-                      className="min-h-[44px] py-3 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
-                    >
-                      <Banknote size={14} /> Cash
-                    </button>
-                    <button
-                      disabled={cart.length === 0 || isSubmitting}
-                      onClick={handleCompInit}
-                      className="min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
-                    >
-                      <Gift size={14} /> Comp
-                    </button>
-                  </div>
+                  {compAuthorized ? (
+                    /* ── COMP AUTHORIZED: Show PROCESS COMP button ── */
+                    <>
+                      <div className="flex items-center gap-2 bg-amber-500/15 border border-amber-500/30 rounded-lg px-3 py-2 mb-1">
+                        <ShieldCheck size={14} className="text-amber-400" />
+                        <span className="text-amber-300 text-xs font-bold">
+                          Comp authorized by {compManagerRef.current?.name || "Manager"}
+                        </span>
+                      </div>
+                      <button
+                        disabled={cart.length === 0 || compSubmitting}
+                        onClick={() => {
+                          // Need guest name if not already available
+                          const customerName = loyaltyCustomer?.name || tempGuestNameRef.current;
+                          if (!customerName) {
+                            setPendingGuestAction("comp");
+                            setGuestFirstName("");
+                            setGuestModalOpen(true);
+                            return;
+                          }
+                          setCompReason("");
+                          setCompModalOpen(true);
+                        }}
+                        className="w-full min-h-[56px] py-4 bg-amber-600 hover:bg-amber-500 active:bg-amber-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-base uppercase tracking-[0.2em] rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-amber-600/20"
+                      >
+                        {compSubmitting ? (
+                          <><Loader2 size={18} className="animate-spin" /> Processing Comp…</>
+                        ) : (
+                          <><ShieldCheck size={18} /> Process Comp</>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => { setCompAuthorized(false); compManagerRef.current = null; }}
+                        className="w-full py-2 text-xs font-semibold text-stone-500 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center justify-center gap-1.5 mt-1"
+                      >
+                        <X size={12} /> Cancel Comp
+                      </button>
+                    </>
+                  ) : (
+                    /* ── NORMAL: Payment buttons ── */
+                    <>
+                      <button
+                        disabled={cart.length === 0 || isSubmitting}
+                        onClick={handleSendToKDS}
+                        className="w-full min-h-[56px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-base uppercase tracking-[0.2em] rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
+                      >
+                        {isSubmitting ? (
+                          <><Loader2 size={18} className="animate-spin" /> Processing…</>
+                        ) : (
+                          <><CreditCard size={18} /> Collect Payment</>
+                        )}
+                      </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          disabled={cart.length === 0 || isSubmitting}
+                          onClick={() => handleMarkPaid()}
+                          className="min-h-[44px] py-3 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                        >
+                          <Banknote size={14} /> Cash
+                        </button>
+                        <button
+                          disabled={cart.length === 0 || isSubmitting}
+                          onClick={handleCompInit}
+                          className="min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                        >
+                          <Gift size={14} /> Comp
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
                 <button
                   disabled={cart.length === 0 || offlineCapBlocked}
                   onClick={handleOfflineOrder}
-                  className="w-full min-h-[48px] py-4 bg-red-700 hover:bg-red-600 active:bg-red-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 animate-pulse"
+                  className="w-full min-h-[56px] py-4 bg-red-700 hover:bg-red-600 active:bg-red-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 animate-pulse"
                 >
                   <WifiOff size={16} /> {offlineCapBlocked ? 'Cap Reached — Manager Override Needed' : 'Queue Order (Cash Only)'}
                 </button>
               )}
             </>
-          )}
-
-          {/* Guest name modal (first-name only) */}
-          {guestModalOpen && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="guest-modal-title"
-              onKeyDown={(e) => {
-                // Simple focus trap: keep focus on the input; Escape closes modal
-                if (e.key === "Escape") {
-                  setGuestModalOpen(false);
-                }
-                if (e.key === "Tab") {
-                  e.preventDefault();
-                  guestInputRef.current?.focus();
-                }
-              }}
-            >
-              <div className="w-full max-w-md bg-stone-900 border border-stone-800 rounded-lg p-6">
-                <h3 id="guest-modal-title" className="text-lg font-bold mb-2">Enter customer first name</h3>
-                <p className="text-sm text-stone-400 mb-4">This will appear on the KDS as the customer's first name.</p>
-                <input
-                  ref={guestInputRef}
-                  autoFocus
-                  name="guestFirstName"
-                  aria-label="Customer first name"
-                  value={guestFirstName}
-                  onChange={(e) => setGuestFirstName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmGuestAndSend(); } }}
-                  maxLength={100}
-                  inputMode="text"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder="First name"
-                  readOnly={showOnscreenKeyboard}
-                  onFocus={() => { if (!showOnscreenKeyboard) guestInputRef.current?.focus(); }}
-                  className="w-full p-3 bg-stone-800 border border-stone-700 rounded-lg mb-2 outline-none"
-                />
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm text-stone-400">Max 100 chars</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => { setShowOnscreenKeyboard((s) => !s); guestInputRef.current?.focus(); }}
-                      type="button"
-                      className="px-3 py-1 bg-stone-700 rounded-lg text-sm"
-                    >{showOnscreenKeyboard ? 'Hide Keyboard' : 'Use On-screen Keyboard'}</button>
-                    <button onClick={() => setGuestModalOpen(false)} className="px-4 py-2 bg-stone-700 rounded-lg">Cancel</button>
-                    <button onClick={confirmGuestAndSend} className="px-4 py-2 bg-emerald-600 rounded-lg">
-                      {pendingGuestAction === "cash" ? "Pay Cash" : pendingGuestAction === "comp" ? "Next" : "Send to KDS"}
-                    </button>
-                  </div>
-                </div>
-
-                {showOnscreenKeyboard && (
-                  <div className="mt-2">
-                    <OnscreenKeyboard
-                      onKey={(k) => {
-                        // Append character, enforce maxLength
-                        setGuestFirstName((prev) => (prev + k).slice(0, 100));
-                        haptic('tap');
-                      }}
-                      onBackspace={() => { setGuestFirstName((prev) => prev.slice(0, -1)); haptic('tap'); }}
-                      onEnter={() => { confirmGuestAndSend(); haptic('success'); }}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Open-price modal (shipping / TBD items) */}
-          {openPriceModalOpen && openPriceItem && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="open-price-modal-title"
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setOpenPriceModalOpen(false);
-                if (e.key === "Tab") { e.preventDefault(); openPriceInputRef.current?.focus(); }
-              }}
-            >
-              <div className="w-full max-w-md bg-stone-900 border border-stone-800 rounded-lg p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/20">
-                    <Truck className="h-5 w-5 text-amber-400" />
-                  </div>
-                  <div>
-                    <h3 id="open-price-modal-title" className="text-lg font-bold">{openPriceItem.name}</h3>
-                    <p className="text-sm text-stone-400">Enter the quoted shipping price</p>
-                  </div>
-                </div>
-                <div className="relative mb-4">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-lg font-bold">$</span>
-                  <input
-                    ref={openPriceInputRef}
-                    autoFocus
-                    name="openPrice"
-                    aria-label="Shipping price in dollars"
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    max="999.99"
-                    value={openPriceValue}
-                    onChange={(e) => setOpenPriceValue(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmOpenPrice(); } }}
-                    placeholder="0.00"
-                    inputMode="decimal"
-                    className="w-full p-3 pl-8 bg-stone-800 border border-stone-700 rounded-lg outline-none text-xl font-mono tabular-nums"
-                  />
-                </div>
-                <p className="text-xs text-stone-500 mb-4">
-                  Enter the FedEx/UPS quoted rate. This will be charged to the customer at checkout.
-                  Price is locked once added to cart.
-                </p>
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={() => { setOpenPriceModalOpen(false); setOpenPriceItem(null); }}
-                    className="px-4 py-2.5 bg-stone-700 rounded-lg text-sm"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={confirmOpenPrice}
-                    disabled={!openPriceValue || parseFloat(openPriceValue) <= 0}
-                    className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-bold"
-                  >
-                    Add to Cart
-                  </button>
-                </div>
-              </div>
-            </div>
           )}
 
           {/* Phase: CONFIRM — Pay on Terminal / Mark Paid */}
@@ -2097,13 +2382,21 @@ export default function POSPage() {
                   Order #{createdOrderId.slice(0, 6).toUpperCase()} on KDS
                 </p>
               )}
+              {linkedChatOrderRef.current && (
+                <div className="flex items-center justify-center gap-2 bg-orange-500/15 border border-orange-500/30 rounded-lg px-3 py-2 mb-1">
+                  <MessageSquare size={14} className="text-orange-400" />
+                  <span className="text-xs font-bold uppercase tracking-widest text-orange-400">
+                    Chat Order — Collect Payment
+                  </span>
+                </div>
+              )}
 
               {isOnline ? (
                 <button
                   onClick={handlePayOnTerminal}
-                  className="w-full min-h-[48px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                  className="w-full min-h-[56px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white font-bold text-base uppercase tracking-[0.2em] rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
                 >
-                  <Monitor size={16} /> Pay on Terminal
+                  <Monitor size={18} /> Pay on Terminal
                 </button>
               ) : (
                 <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
@@ -2112,17 +2405,15 @@ export default function POSPage() {
                 </div>
               )}
 
-              {/* Use Free Drink Voucher — shown when loyalty customer has unredeemed vouchers */}
               {loyaltyCustomer && loyaltyCustomer.vouchers.length > 0 && voucherPhase === "idle" && (
                 <button
                   onClick={() => handleUseVoucher()}
-                  className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                  className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2"
                 >
                   <Gift size={16} /> Use Free Drink
                 </button>
               )}
 
-              {/* Voucher redeeming spinner */}
               {voucherPhase === "redeeming" && (
                 <div className="flex items-center justify-center gap-2 py-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
                   <Loader2 size={16} className="animate-spin text-amber-400" />
@@ -2130,7 +2421,6 @@ export default function POSPage() {
                 </div>
               )}
 
-              {/* Voucher network error — retry safe (idempotent by hash) */}
               {voucherPhase === "network-error" && (
                 <div className="space-y-2">
                   <div className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
@@ -2152,7 +2442,6 @@ export default function POSPage() {
                 </div>
               )}
 
-              {/* Voucher non-network error (daily limit, not found, etc.) */}
               {voucherPhase === "error" && (
                 <div className="space-y-2">
                   <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
@@ -2232,6 +2521,280 @@ export default function POSPage() {
         </div>
       </aside>
 
+      {/* ═══════════════════════════════════════════════════════════
+          MOBILE — Bottom-sheet cart drawer (unchanged pattern)
+          ═══════════════════════════════════════════════════════════ */}
+      <aside aria-label="Order cart" className={`
+        md:hidden fixed inset-x-0 bottom-0 z-40 h-[85vh] rounded-t-2xl shadow-2xl
+        transition-transform duration-300 ease-out
+        ${cartDrawerOpen ? "translate-y-0" : "translate-y-full"}
+        bg-stone-900 border-l border-stone-800 flex flex-col
+      `}>
+        {/* Mobile drawer grab handle */}
+        <div className="flex justify-center pt-2 pb-1">
+          <button
+            onClick={() => setCartDrawerOpen(false)}
+            className="w-12 h-1.5 rounded-full bg-stone-700 active:bg-stone-500"
+            aria-label="Close cart"
+          />
+        </div>
+        {/* Ticket Header */}
+        <div className="px-5 py-4 border-b border-stone-800 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShoppingCart size={16} className="text-stone-500" />
+            <h2 className="font-bold text-sm uppercase tracking-widest text-stone-400">
+              {ticketPhase === "building" ? "Current Order" :
+               ticketPhase === "confirm" ? "Confirm & Pay" :
+               ticketPhase === "paying" ? "Processing…" :
+               ticketPhase === "paid" ? "Complete" : "Error"}
+            </h2>
+          </div>
+          {cart.length > 0 && ticketPhase === "building" && (
+            <button onClick={clearCart} className="text-xs text-stone-600 hover:text-red-400 transition-colors">
+              Clear
+            </button>
+          )}
+        </div>
+
+        {/* ── Mobile Loyalty Badge / Scan Button ── */}
+        <div className="px-5 py-3 border-b border-stone-800/60">
+          {loyaltyCustomer ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold">
+                  <UserCheck size={14} />
+                  <span>👤 Linked: {loyaltyCustomer.name ?? loyaltyCustomer.email}</span>
+                </div>
+                <button
+                  onClick={() => setLoyaltyCustomer(null)}
+                  className="text-stone-600 hover:text-red-400 transition-colors"
+                  title="Unlink customer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <p className="text-[11px] text-stone-500">
+                {loyaltyCustomer.points} pts
+              </p>
+              {loyaltyCustomer.vouchers.length > 0 && (
+                <div className="flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/30 rounded-lg px-3 py-2">
+                  <Ticket size={14} className="text-amber-400" />
+                  <span className="text-amber-300 text-xs font-bold">
+                    🎟️ Free Drink Available!
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={openLoyaltyScanner}
+              disabled={ticketPhase !== "building"}
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-stone-800 hover:bg-stone-700 disabled:opacity-40 disabled:pointer-events-none border border-stone-700 rounded-lg text-xs font-semibold text-stone-300 uppercase tracking-[0.1em] transition-all"
+            >
+              <ScanLine size={14} /> Scan Loyalty
+            </button>
+          )}
+        </div>
+
+        {/* Mobile Cart Items */}
+        <div className="flex-1 overflow-y-auto">
+          {cart.length === 0 && ticketPhase === "building" ? (
+            <div className="flex flex-col items-center justify-center h-full text-stone-700 gap-2">
+              <ShoppingCart size={32} />
+              <p className="text-xs uppercase tracking-widest">No items yet</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-stone-800/50" role="list">
+              {cart.map((ci) => (
+                <SwipeCartItem
+                  key={ci.id}
+                  item={ci}
+                  disabled={ticketPhase !== "building"}
+                  onUpdateQty={updateQty}
+                  onRemove={removeItem}
+                  formatCents={cents}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ═══════ Mobile Ticket Footer — phase-dependent ═══════ */}
+        <div className="border-t border-stone-800 p-5 space-y-3">
+          {cartCount > 0 && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-stone-500">Subtotal</span>
+                <span className="text-stone-300 tabular-nums">{cents(cartTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-stone-500">Tax</span>
+                <span className="text-stone-300 tabular-nums">{cents(taxCents)}</span>
+              </div>
+              <div className="flex items-end justify-between pt-1.5 border-t border-stone-800">
+                <span className="text-xs text-stone-500 uppercase tracking-widest">Total</span>
+                <span className="text-3xl font-bold text-white font-mono">{cents(grandTotalCents)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Phase: BUILDING */}
+          {ticketPhase === "building" && (
+            <>
+              {isOnline ? (
+                <>
+                  <button
+                    disabled={cart.length === 0 || isSubmitting}
+                    onClick={handleSendToKDS}
+                    className="w-full min-h-[48px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                  >
+                    {isSubmitting ? (
+                      <><Loader2 size={16} className="animate-spin" /> Processing…</>
+                    ) : (
+                      <><CreditCard size={16} /> Collect Payment</>
+                    )}
+                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      disabled={cart.length === 0 || isSubmitting}
+                      onClick={() => handleMarkPaid()}
+                      className="min-h-[44px] py-3 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                    >
+                      <Banknote size={14} /> Cash
+                    </button>
+                    <button
+                      disabled={cart.length === 0 || isSubmitting}
+                      onClick={handleCompInit}
+                      className="min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                    >
+                      <Gift size={14} /> Comp
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  disabled={cart.length === 0 || offlineCapBlocked}
+                  onClick={handleOfflineOrder}
+                  className="w-full min-h-[48px] py-4 bg-red-700 hover:bg-red-600 active:bg-red-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 animate-pulse"
+                >
+                  <WifiOff size={16} /> {offlineCapBlocked ? 'Cap Reached — Manager Override Needed' : 'Queue Order (Cash Only)'}
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Phase: CONFIRM */}
+          {ticketPhase === "confirm" && (
+            <div className="space-y-2">
+              {createdOrderId && (
+                <p className="text-xs text-emerald-400 font-mono text-center mb-2">
+                  Order #{createdOrderId.slice(0, 6).toUpperCase()} on KDS
+                </p>
+              )}
+              {linkedChatOrderRef.current && (
+                <div className="flex items-center justify-center gap-2 bg-orange-500/15 border border-orange-500/30 rounded-lg px-3 py-2 mb-1">
+                  <MessageSquare size={14} className="text-orange-400" />
+                  <span className="text-xs font-bold uppercase tracking-widest text-orange-400">
+                    Chat Order — Collect Payment
+                  </span>
+                </div>
+              )}
+              {isOnline ? (
+                <button
+                  onClick={handlePayOnTerminal}
+                  className="w-full min-h-[48px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  <Monitor size={16} /> Pay on Terminal
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <WifiOff size={14} className="text-red-400 shrink-0" />
+                  <p className="text-xs text-red-300">Terminal unavailable offline — collect cash</p>
+                </div>
+              )}
+              {loyaltyCustomer && loyaltyCustomer.vouchers.length > 0 && voucherPhase === "idle" && (
+                <button
+                  onClick={() => handleUseVoucher()}
+                  className="w-full py-4 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                >
+                  <Gift size={16} /> Use Free Drink
+                </button>
+              )}
+              {voucherPhase === "redeeming" && (
+                <div className="flex items-center justify-center gap-2 py-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                  <Loader2 size={16} className="animate-spin text-amber-400" />
+                  <span className="text-amber-300 text-xs font-semibold">Applying free drink…</span>
+                </div>
+              )}
+              {voucherPhase === "network-error" && (
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                    <WifiOff size={14} className="text-orange-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-orange-300">{voucherError}</p>
+                  </div>
+                  <button onClick={handleVoucherRetry} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2">
+                    <RefreshCw size={14} /> Retry Free Drink
+                  </button>
+                  <button onClick={dismissVoucherError} className="w-full py-2 text-xs text-stone-600 hover:text-stone-400 transition-colors text-center">Skip — pay another way</button>
+                </div>
+              )}
+              {voucherPhase === "error" && (
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                    <AlertTriangle size={14} className="text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-300">{voucherError}</p>
+                  </div>
+                  <button onClick={dismissVoucherError} className="w-full py-2 text-xs text-stone-600 hover:text-stone-400 transition-colors text-center">Dismiss</button>
+                </div>
+              )}
+              <button onClick={handleCashFallback} className="w-full min-h-[48px] py-3 bg-stone-800 hover:bg-stone-700 active:bg-stone-600 text-stone-300 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2">
+                <Banknote size={14} /> Switch to Cash
+              </button>
+              <button onClick={handleCancelOrder} className="w-full min-h-[48px] py-2 text-xs text-stone-600 hover:text-red-400 active:text-red-300 transition-colors text-center rounded-lg">
+                Cancel Order
+              </button>
+            </div>
+          )}
+
+          {/* Phase: PAYING */}
+          {ticketPhase === "paying" && (
+            <div className="flex flex-col items-center gap-3 py-4">
+              <Loader2 size={28} className="animate-spin text-blue-400" />
+              <p className="text-sm text-blue-300 font-semibold">{terminalStatus}</p>
+              <p className="text-[10px] text-stone-600 uppercase tracking-widest">Waiting for Square Terminal</p>
+            </div>
+          )}
+
+          {/* Phase: PAID */}
+          {ticketPhase === "paid" && (
+            <div className="flex flex-col items-center gap-3 py-4">
+              <CheckCircle2 size={28} className="text-emerald-400" />
+              <p className="text-sm text-emerald-300 font-semibold">{terminalStatus}</p>
+              <p className="text-[10px] text-stone-600 uppercase tracking-widest">Starting next order…</p>
+              {createdOrderId && (
+                <button onClick={handleReprintReceipt} disabled={reprintLoading} className="mt-1 flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-300 transition-colors disabled:opacity-40">
+                  {reprintLoading ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}
+                  Reprint Receipt
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Phase: ERROR */}
+          {ticketPhase === "error" && (
+            <div className="space-y-3">
+              <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                <AlertTriangle size={16} className="text-red-400 shrink-0 mt-0.5" />
+                <p className="text-xs text-red-300">{errorMsg}</p>
+              </div>
+              <button onClick={handleRetry} className="w-full py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2">
+                <RotateCcw size={14} /> Try Again
+              </button>
+            </div>
+          )}
+        </div>
+      </aside>
+
       {/* ═══════ Mobile: Backdrop when drawer is open ═══════ */}
       {cartDrawerOpen && (
         <div
@@ -2255,11 +2818,140 @@ export default function POSPage() {
             </div>
             <div className="flex items-center gap-2">
               {cartTotal > 0 && (
-                <span className="text-lg font-bold text-amber-400 font-mono">{cents(cartTotal)}</span>
+                <span className="text-lg font-bold text-amber-400 font-mono">{cents(grandTotalCents)}</span>
               )}
               <ChevronRight size={16} className="text-stone-500 rotate-[-90deg]" />
             </div>
           </button>
+        </div>
+      )}
+
+      {/* ═══════ Modals (shared between desktop + mobile) ═══════ */}
+
+      {/* Guest name modal */}
+      {guestModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="guest-modal-title"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { setGuestModalOpen(false); }
+            if (e.key === "Tab") { e.preventDefault(); guestInputRef.current?.focus(); }
+          }}
+        >
+          <div className="w-full max-w-md bg-stone-900 border border-stone-800 rounded-lg p-6">
+            <h3 id="guest-modal-title" className="text-lg font-bold mb-2">Enter customer first name</h3>
+            <p className="text-sm text-stone-400 mb-4">This will appear on the KDS as the customer&apos;s first name.</p>
+            <input
+              ref={guestInputRef}
+              autoFocus
+              name="guestFirstName"
+              aria-label="Customer first name"
+              value={guestFirstName}
+              onChange={(e) => setGuestFirstName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmGuestAndSend(); } }}
+              maxLength={100}
+              inputMode="text"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="First name"
+              readOnly={showOnscreenKeyboard}
+              onFocus={() => { if (!showOnscreenKeyboard) guestInputRef.current?.focus(); }}
+              className="w-full p-3 bg-stone-800 border border-stone-700 rounded-lg mb-2 outline-none"
+            />
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm text-stone-400">Max 100 chars</div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setShowOnscreenKeyboard((s) => !s); guestInputRef.current?.focus(); }}
+                  type="button"
+                  className="px-3 py-1 bg-stone-700 rounded-lg text-sm"
+                >{showOnscreenKeyboard ? 'Hide Keyboard' : 'Use On-screen Keyboard'}</button>
+                <button onClick={() => setGuestModalOpen(false)} className="px-4 py-2 bg-stone-700 rounded-lg">Cancel</button>
+                <button onClick={confirmGuestAndSend} className="px-4 py-2 bg-emerald-600 rounded-lg">
+                  {pendingGuestAction === "cash" ? "Pay Cash" : pendingGuestAction === "comp" ? "Next" : "Send to KDS"}
+                </button>
+              </div>
+            </div>
+
+            {showOnscreenKeyboard && (
+              <div className="mt-2">
+                <OnscreenKeyboard
+                  onKey={(k) => {
+                    setGuestFirstName((prev) => (prev + k).slice(0, 100));
+                    haptic('tap');
+                  }}
+                  onBackspace={() => { setGuestFirstName((prev) => prev.slice(0, -1)); haptic('tap'); }}
+                  onEnter={() => { confirmGuestAndSend(); haptic('success'); }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Open-price modal (shipping / TBD items) */}
+      {openPriceModalOpen && openPriceItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="open-price-modal-title"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpenPriceModalOpen(false);
+            if (e.key === "Tab") { e.preventDefault(); openPriceInputRef.current?.focus(); }
+          }}
+        >
+          <div className="w-full max-w-md bg-stone-900 border border-stone-800 rounded-lg p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/20">
+                <Truck className="h-5 w-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 id="open-price-modal-title" className="text-lg font-bold">{openPriceItem.name}</h3>
+                <p className="text-sm text-stone-400">Enter the quoted shipping price</p>
+              </div>
+            </div>
+            <div className="relative mb-4">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-lg font-bold">$</span>
+              <input
+                ref={openPriceInputRef}
+                autoFocus
+                name="openPrice"
+                aria-label="Shipping price in dollars"
+                type="number"
+                step="0.01"
+                min="0.01"
+                max="999.99"
+                value={openPriceValue}
+                onChange={(e) => setOpenPriceValue(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmOpenPrice(); } }}
+                placeholder="0.00"
+                inputMode="decimal"
+                className="w-full p-3 pl-8 bg-stone-800 border border-stone-700 rounded-lg outline-none text-xl font-mono tabular-nums"
+              />
+            </div>
+            <p className="text-xs text-stone-500 mb-4">
+              Enter the FedEx/UPS quoted rate. This will be charged to the customer at checkout.
+              Price is locked once added to cart.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => { setOpenPriceModalOpen(false); setOpenPriceItem(null); }}
+                className="px-4 py-2.5 bg-stone-700 rounded-lg text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmOpenPrice}
+                disabled={!openPriceValue || parseFloat(openPriceValue) <= 0}
+                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-bold"
+              >
+                Add to Cart
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2304,13 +2996,64 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* ═══════ Manager PIN Modal ═══════ */}
+      {compPinModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 animate-in fade-in duration-200">
+          <div className="bg-stone-900 border border-stone-700 rounded-2xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
+            <div className="px-5 py-4 border-b border-stone-800">
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={16} className="text-amber-400" />
+                <h3 className="font-bold text-sm uppercase tracking-[0.15em] text-stone-300">Manager Authorization</h3>
+              </div>
+              <p className="text-xs text-stone-500 mt-1">Enter a 6-digit Manager PIN to authorize this comp</p>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <input
+                ref={compManagerPinInputRef}
+                type="password"
+                inputMode="numeric"
+                autoFocus
+                maxLength={6}
+                placeholder="000000"
+                value={compManagerPin}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, "").slice(0, 6);
+                  setCompManagerPin(v);
+                  setCompPinError("");
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter" && compManagerPin.length === 6) handleCompPinVerify(); }}
+                className="w-full px-4 py-3 bg-stone-800 border border-stone-700 rounded-lg text-center text-2xl font-mono text-white placeholder-stone-600 tracking-[0.5em] focus:outline-none focus:border-amber-500/50"
+              />
+              {compPinError && (
+                <p className="text-xs text-red-400 text-center">{compPinError}</p>
+              )}
+              <div className="flex items-center gap-2 justify-end">
+                <button
+                  onClick={() => { setCompPinModalOpen(false); setCompManagerPin(""); setCompPinError(""); }}
+                  className="px-4 py-2 bg-stone-700 rounded-lg text-sm text-stone-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCompPinVerify}
+                  disabled={compManagerPin.length !== 6 || compPinVerifying}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {compPinVerifying ? <><Loader2 size={14} className="animate-spin" /> Verifying…</> : "Verify PIN"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══════ Comp Reason Modal ═══════ */}
       {compModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 animate-in fade-in duration-200">
           <div className="bg-stone-900 border border-stone-700 rounded-2xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
             <div className="px-5 py-4 border-b border-stone-800">
               <h3 className="font-bold text-sm uppercase tracking-[0.15em] text-stone-300">Comp Reason</h3>
-              <p className="text-xs text-stone-500 mt-1">Required — logged for audit</p>
+              <p className="text-xs text-stone-500 mt-1">Required — logged for audit (authorized by {compManagerRef.current?.name || "Manager"})</p>
             </div>
             <div className="px-5 py-4 space-y-3">
               <input
@@ -2366,7 +3109,6 @@ export default function POSPage() {
                 playsInline
                 muted
               />
-              {/* Scan overlay crosshair */}
               {loyaltyScanning && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="w-48 h-48 border-2 border-amber-400/60 rounded-2xl" />
@@ -2379,7 +3121,6 @@ export default function POSPage() {
               )}
             </div>
 
-            {/* Error / Status */}
             {loyaltyCamError && (
               <div className="px-5 py-3 bg-red-500/10 border-t border-red-500/30">
                 <div className="flex items-start gap-2">
@@ -2389,7 +3130,6 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* Footer hint */}
             <div className="px-5 py-3 border-t border-stone-800 text-center">
               <p className="text-[11px] text-stone-500">
                 Point camera at the customer&apos;s QR code in the BrewHub app

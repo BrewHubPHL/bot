@@ -56,7 +56,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { recipient_name, phone, email, tracking, pickup_code, value_tier } = JSON.parse(event.body || '{}');
+    const { recipient_name, phone, email, tracking, pickup_code, value_tier, is_guest, invite_url } = JSON.parse(event.body || '{}');
 
     if (!phone && !email) {
       return json(400, { error: 'Missing phone or email' });
@@ -64,7 +64,16 @@ exports.handler = async (event) => {
 
     const codeSnippet = pickup_code ? ` Your pickup code: ${pickup_code}.` : '';
     const idWarning = (value_tier === 'high_value' || value_tier === 'premium') ? ' Photo ID required for pickup.' : '';
-    const message = `Yo ${recipient_name || 'neighbor'}! Your package (${tracking || 'Parcel'}) is at the Hub.${codeSnippet}${idWarning} 📦 Grab a coffee when you swing by! Reply STOP to opt out.`;
+
+    // Fork SMS message based on guest status
+    let message;
+    if (is_guest && invite_url) {
+      // Scenario B: Unregistered Guest — magic link invite
+      message = `Hi! Your ${tracking || 'package'} is at the BrewHub lobby. 📦${codeSnippet}${idWarning} If you'd like, you can track all your future deliveries live right from your phone here: ${invite_url} Totally optional—see you soon! ☕`;
+    } else {
+      // Scenario A: Registered Resident — warm familiar message
+      message = `Hi ${recipient_name || 'neighbor'}! Your ${tracking || 'package'} is ready at the BrewHub lobby! 📦${codeSnippet}${idWarning} Grab a coffee when you're down here. ☕ ${process.env.SITE_URL || 'https://brewhubphl.com'}/portal`;
+    }
     let smsSuccess = false;
     let emailSuccess = false;
     let smsSid = null;
@@ -96,6 +105,18 @@ exports.handler = async (event) => {
     if (email && (!smsSuccess || !phone)) {
       const resendKey = process.env.RESEND_API_KEY;
       if (resendKey) {
+        const inviteBlock = (is_guest && invite_url)
+          ? `<div style="margin: 20px 0; padding: 15px; background: #f0f9ff; border: 2px solid #60a5fa; border-radius: 8px; text-align: center;">
+              <p style="margin: 0 0 8px 0; font-size: 14px; color: #1e3a5f; font-weight: bold;">📱 Track Your Future Deliveries</p>
+              <p style="margin: 0 0 12px 0; font-size: 13px; color: #555;">Sign up once and you'll get live package tracking, coffee rewards, and more.</p>
+              <a href="${escapeHtml(invite_url)}" style="display: inline-block; padding: 10px 24px; background: #1c1917; color: #fff; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">Set Up My Account →</a>
+            </div>`
+          : '';
+
+        const emailSubject = is_guest
+          ? 'Your Package is at BrewHub! 📦 (+ Set Up Live Tracking)'
+          : 'Your Parcel is Ready at the Hub! 📦☕';
+
         const emailRes = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
@@ -105,7 +126,7 @@ exports.handler = async (event) => {
           body: JSON.stringify({
             from: 'BrewHub PHL <info@brewhubphl.com>',
             to: [email],
-            subject: 'Your Parcel is Ready at the Hub! 📦☕',
+            subject: emailSubject,
             html: `
               <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px;">
                 <h1>Package Arrived!</h1>
@@ -118,6 +139,7 @@ exports.handler = async (event) => {
                   <p style="margin: 8px 0 0 0; font-size: 11px; color: #888;">Show this code to the barista when you pick up your package.</p>
                   ${(value_tier === 'high_value' || value_tier === 'premium') ? '<p style="margin: 8px 0 0 0; font-size: 11px; color: #c0392b; font-weight: bold;">⚠️ Government-issued photo ID required for high-value pickup.</p>' : ''}
                 </div>` : ''}
+                ${inviteBlock}
                 <p>Stop by during cafe hours to pick it up. Fresh coffee waiting!</p>
                 <p>— Thomas & The BrewHub PHL Team</p>
               </div>

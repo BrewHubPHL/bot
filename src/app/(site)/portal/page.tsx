@@ -6,7 +6,7 @@ import type { User as SupaUser } from "@supabase/supabase-js";
 import QRCode from "qrcode";
 import {
   LogOut, Package, Coffee, QrCode, Mail, Lock, User, Phone,
-  ShoppingBag, Clock, ChevronRight, Truck,
+  ShoppingBag, Clock, ChevronRight, Truck, Zap,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -17,6 +17,7 @@ const MAX_PHONE = 20;
 const MAX_PASSWORD = 128;
 const MAX_AUTH_ATTEMPTS = 5;
 const AUTH_COOLDOWN_MS = 30_000; // 30 seconds
+const COFFEE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 /* ─── Types ──────────────────────────────────────────────── */
 interface ParcelRow {
@@ -26,6 +27,21 @@ interface ParcelRow {
   status: string;
   received_at: string | null;
   unit_number: string | null;
+}
+
+interface CoffeeItem {
+  id: string;
+  drink_name: string;
+  customizations: string | null;
+  completed_at: string | null;
+}
+
+interface CoffeeQueueOrder {
+  id: string;
+  status: string;
+  created_at: string;
+  customer_name: string | null;
+  coffee_orders: CoffeeItem[];
 }
 
 interface OrderRow {
@@ -40,8 +56,17 @@ function fmtDate(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+function fmtTime(iso: string | null) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
 function fmtCents(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
+}
+
+/** Filter orders older than COFFEE_TTL_MS */
+function isWithinTTL(createdAt: string): boolean {
+  return Date.now() - new Date(createdAt).getTime() < COFFEE_TTL_MS;
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -95,6 +120,20 @@ function CardSkeleton() {
   );
 }
 
+/* ─── 80s Phosphor Scanline overlay ──────────────────────── */
+function PhosphorOverlay() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-10"
+      style={{
+        background:
+          "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px)",
+      }}
+    />
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════ */
@@ -117,17 +156,23 @@ export default function ResidentPortal() {
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
   /* Dashboard state */
+  const [unitNumber, setUnitNumber] = useState<string | null>(null);
   const [parcels, setParcels] = useState<ParcelRow[]>([]);
+  const [coffeeQueue, setCoffeeQueue] = useState<CoffeeQueueOrder[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loyalty, setLoyalty] = useState({ points: 0 });
   const [qrError, setQrError] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [pickupQrUrl, setPickupQrUrl] = useState<string | null>(null);
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+  const [parcelPop, setParcelPop] = useState<string | null>(null); // id of freshly arrived parcel
 
   /* ── Client-side QR generation (H6: UUID never leaves browser) ── */
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
+
+    // Loyalty QR
     QRCode.toDataURL(`brewhub-loyalty:${user.id}`, {
       width: 180,
       margin: 1,
@@ -135,6 +180,16 @@ export default function ResidentPortal() {
     })
       .then((url: string) => { if (!cancelled) setQrDataUrl(url); })
       .catch(() => { if (!cancelled) setQrError(true); });
+
+    // Pickup QR — staff scans this to clear parcels / complete handoff
+    QRCode.toDataURL(`brewhub-pickup:${user.id}`, {
+      width: 200,
+      margin: 1,
+      color: { dark: "#F59E0B", light: "#0C0A09" },
+    })
+      .then((url: string) => { if (!cancelled) setPickupQrUrl(url); })
+      .catch(() => { /* non-critical */ });
+
     return () => { cancelled = true; };
   }, [user?.id]);
 
@@ -226,21 +281,54 @@ export default function ResidentPortal() {
     return () => subscription.unsubscribe();
   }, []);
 
-  /* ── Realtime subscriptions for orders & parcels ───────── */
+  /* ── Realtime subscriptions: parcels (by unit), orders, coffee ── */
   useEffect(() => {
-    if (!user?.id || !user?.email) return;
+    if (!user?.id) return;
 
     const userId = user.id;
-    const userEmail = String(user.email);
 
-    // Subscribe to order changes for this user
+    // ── 1. Parcels channel — filter by unit_number ─────────────
+    // We subscribe on the parcels table. When a new parcel is scanned in
+    // the back, it "pops" onto the resident's screen instantly.
+    let parcelsChannel: ReturnType<typeof supabase.channel> | null = null;
+    if (unitNumber) {
+      parcelsChannel = supabase
+        .channel(`portal-parcels-unit-${unitNumber}`)
+        .on(
+          "postgres_changes" as never,
+          { event: "*", schema: "public", table: "parcels", filter: `unit_number=eq.${unitNumber}` },
+          (payload: { new?: ParcelRow; eventType?: string }) => {
+            // Re-fetch parcels on any change
+            supabase
+              .from("parcels")
+              .select("id, tracking_number, carrier, status, received_at, unit_number")
+              .eq("unit_number", unitNumber)
+              .in("status", ["arrived", "pending_notification"])
+              .order("received_at", { ascending: false })
+              .then(({ data }) => {
+                if (data) {
+                  setParcels(data);
+                  // "Pop" animation for INSERT events
+                  if (payload.eventType === "INSERT" && payload.new?.id) {
+                    setParcelPop(payload.new.id);
+                    setTimeout(() => setParcelPop(null), 1500);
+                  }
+                }
+              });
+          },
+        )
+        .subscribe();
+    }
+
+    // ── 2. Orders channel — re-check coffee queue on status change ──
     const ordersChannel = supabase
       .channel(`portal-orders-${userId}`)
       .on(
         "postgres_changes" as never,
         { event: "*", schema: "public", table: "orders", filter: `user_id=eq.${userId}` },
         () => {
-          // Re-fetch the latest 5 orders on any change
+          // Refresh coffee queue + recent orders
+          fetchCoffeeQueue(userId);
           supabase
             .from("orders")
             .select("id, status, total_amount_cents, created_at")
@@ -254,44 +342,83 @@ export default function ResidentPortal() {
       )
       .subscribe();
 
-    // Subscribe to parcel changes for this user's email
-    const parcelsChannel = supabase
-      .channel(`portal-parcels-${userId}`)
+    // ── 3. Coffee orders channel — item-level completion from KDS ──
+    const coffeeChannel = supabase
+      .channel(`portal-coffee-${userId}`)
       .on(
         "postgres_changes" as never,
-        { event: "*", schema: "public", table: "parcels", filter: `recipient_email=eq.${userEmail}` },
+        { event: "UPDATE", schema: "public", table: "coffee_orders" },
         () => {
-          // Re-fetch active parcels on any change — only show 'arrived' to residents
-          supabase
-            .from("parcels")
-            .select("id, tracking_number, carrier, status, received_at, unit_number")
-            .eq("recipient_email", userEmail)
-            .eq("status", "arrived")
-            .order("received_at", { ascending: false })
-            .then(({ data }) => {
-              if (data) setParcels(data);
-            });
+          // Re-fetch coffee queue to pick up item-level completion
+          fetchCoffeeQueue(userId);
         },
       )
       .subscribe();
 
     return () => {
+      if (parcelsChannel) supabase.removeChannel(parcelsChannel);
       supabase.removeChannel(ordersChannel);
-      supabase.removeChannel(parcelsChannel);
+      supabase.removeChannel(coffeeChannel);
     };
-  }, [user?.id, user?.email]);
+  }, [user?.id, unitNumber]);
+
+  /* ── Coffee queue TTL cleanup interval ─────────────────── */
+  useEffect(() => {
+    if (coffeeQueue.length === 0) return;
+    const interval = setInterval(() => {
+      setCoffeeQueue((prev) => prev.filter((o) => isWithinTTL(o.created_at)));
+    }, 30_000); // check every 30s
+    return () => clearInterval(interval);
+  }, [coffeeQueue.length]);
+
+  /* ── Coffee queue fetcher ──────────────────────────────── */
+  async function fetchCoffeeQueue(userId: string) {
+    const { data, error } = await supabase
+      .from("orders")
+      .select("id, status, created_at, customer_name, coffee_orders(id, drink_name, customizations, completed_at)")
+      .eq("user_id", userId)
+      .in("status", ["preparing", "ready"])
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("Coffee queue fetch error:", error.message);
+      return;
+    }
+    // Apply 10-minute TTL filter
+    const fresh = (data ?? []).filter((o: CoffeeQueueOrder) => isWithinTTL(o.created_at));
+    setCoffeeQueue(fresh);
+  }
 
   /* ── Data loader ───────────────────────────────────────── */
   async function loadData(userId: string, userEmail: string) {
     setDataLoading(true);
     try {
-      const [parcelRes, orderRes, loyaltyRes] = await Promise.all([
-        supabase
-          .from("parcels")
-          .select("id, tracking_number, carrier, status, received_at, unit_number")
-          .eq("recipient_email", userEmail)
-          .eq("status", "arrived")
-          .order("received_at", { ascending: false }),
+      // Step 1: Resolve resident's unit_number from the residents table
+      const { data: residentData, error: residentErr } = await supabase
+        .from("residents")
+        .select("unit_number")
+        .eq("email", userEmail)
+        .maybeSingle();
+
+      if (residentErr) {
+        console.error("Resident lookup error:", residentErr.message);
+      }
+
+      const resolvedUnit = residentData?.unit_number ?? null;
+      setUnitNumber(resolvedUnit);
+
+      // Step 2: Parallel fetch — parcels (by unit), orders, coffee queue, loyalty
+      const parcelPromise = resolvedUnit
+        ? supabase
+            .from("parcels")
+            .select("id, tracking_number, carrier, status, received_at, unit_number")
+            .eq("unit_number", resolvedUnit)
+            .in("status", ["arrived", "pending_notification"])
+            .order("received_at", { ascending: false })
+        : Promise.resolve({ data: [] as ParcelRow[], error: null });
+
+      const [parcelRes, orderRes, coffeeRes, loyaltyRes] = await Promise.all([
+        parcelPromise,
         supabase
           .from("orders")
           .select("id, status, total_amount_cents, created_at")
@@ -299,22 +426,32 @@ export default function ResidentPortal() {
           .order("created_at", { ascending: false })
           .limit(5),
         supabase
+          .from("orders")
+          .select("id, status, created_at, customer_name, coffee_orders(id, drink_name, customizations, completed_at)")
+          .eq("user_id", userId)
+          .in("status", ["preparing", "ready"])
+          .order("created_at", { ascending: true }),
+        supabase
           .from("customers")
           .select("loyalty_points")
           .eq("email", userEmail)
           .maybeSingle(),
       ]);
 
-      // If any query returned an error, surface maintenance mode
-      if (parcelRes.error || orderRes.error || loyaltyRes.error) {
+      // If critical queries failed, surface maintenance mode
+      if (orderRes.error || loyaltyRes.error) {
         console.error("Portal data load errors:", parcelRes.error?.message, orderRes.error?.message, loyaltyRes.error?.message);
         setIsMaintenanceMode(true);
         setDataLoading(false);
         return;
       }
 
-      if (parcelRes.data) setParcels(parcelRes.data);
+      if (parcelRes.data) setParcels(parcelRes.data as ParcelRow[]);
       if (orderRes.data) setOrders(orderRes.data);
+      if (coffeeRes.data) {
+        const fresh = (coffeeRes.data as CoffeeQueueOrder[]).filter((o) => isWithinTTL(o.created_at));
+        setCoffeeQueue(fresh);
+      }
       if (loyaltyRes.data) setLoyalty({ points: loyaltyRes.data.loyalty_points });
     } catch (err: unknown) {
       console.error("Portal data load failed:", (err as Error)?.message);
@@ -565,7 +702,7 @@ export default function ResidentPortal() {
   /* ═══════════════════════════════════════════════════════════
      RENDER — Authenticated Dashboard
      ═══════════════════════════════════════════════════════════ */
-  const waitingParcels = parcels.length;
+  const unitLabel = unitNumber ? ` — Unit ${unitNumber}` : "";
 
   return (
     <div className="min-h-screen bg-stone-950 pt-24 pb-16">
@@ -575,7 +712,7 @@ export default function ResidentPortal() {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="font-playfair text-3xl text-white">Welcome Home.</h1>
-            <p className="text-stone-500 text-sm mt-1">{user.email}</p>
+            <p className="text-stone-500 text-sm mt-1">{user.email}{unitLabel}</p>
           </div>
           <button
             onClick={() => supabase.auth.signOut().then(() => window.location.reload())}
@@ -648,58 +785,191 @@ export default function ResidentPortal() {
           <QrCode className="absolute -right-6 -bottom-6 opacity-[0.03] text-white" size={160} />
         </div>
 
-        {/* ── Your Packages ──────────────────────────────── */}
+        {/* ── Your Packages — 80s Phosphor Monitor ────────── */}
         {dataLoading ? (
           <CardSkeleton />
         ) : (
+          <div className="relative overflow-hidden rounded-xl border border-amber-500/30 bg-black shadow-[0_0_30px_rgba(245,158,11,0.08)]">
+            <PhosphorOverlay />
+            <div className="relative z-20 p-6">
+              {/* Monitor header bar */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Package size={16} className="text-amber-400" />
+                  <h2 className="font-mono text-sm font-bold uppercase tracking-[0.2em] text-amber-400">
+                    My Packages
+                  </h2>
+                  {unitNumber && (
+                    <span className="ml-2 font-mono text-[10px] text-amber-600">
+                      UNIT {unitNumber}
+                    </span>
+                  )}
+                </div>
+                {parcels.length > 0 && (
+                  <span className="flex items-center gap-1.5 font-mono text-xs font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-amber-400" />
+                    {parcels.length} WAITING
+                  </span>
+                )}
+              </div>
+
+              {parcels.length === 0 ? (
+                <div className="text-center py-8">
+                  <Truck className="mx-auto text-amber-900 mb-3" size={32} />
+                  <p className="font-mono text-amber-700 text-sm">NO PACKAGES IN QUEUE</p>
+                  <p className="font-mono text-amber-900 text-[10px] mt-1">SYS IDLE...</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {parcels.map((p) => (
+                    <div
+                      key={p.id}
+                      className={`flex items-center gap-4 border rounded-lg p-4 transition-all duration-300 ${
+                        parcelPop === p.id
+                          ? "border-amber-400 bg-amber-500/10 scale-[1.02] shadow-[0_0_20px_rgba(245,158,11,0.3)]"
+                          : "border-amber-500/20 bg-amber-500/5 hover:border-amber-500/40"
+                      }`}
+                    >
+                      {/* Carrier icon */}
+                      <div className="flex-shrink-0 w-10 h-10 rounded-full bg-black border border-amber-500/30 flex items-center justify-center">
+                        <Package size={16} className="text-amber-400" />
+                      </div>
+
+                      {/* Detail */}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-mono text-amber-300 text-sm font-semibold truncate">
+                          {p.carrier?.toUpperCase() || "UNKNOWN CARRIER"}
+                        </p>
+                        <p className="font-mono text-amber-600 text-xs">
+                          TRK ...{p.tracking_number?.slice(-8)} &middot; {fmtDate(p.received_at)}
+                        </p>
+                      </div>
+
+                      {/* Status badge */}
+                      <span className="flex-shrink-0 font-mono text-[10px] uppercase font-bold px-3 py-1 rounded border border-amber-500/40 bg-amber-500/15 text-amber-400">
+                        📥 ARRIVED
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* CRT power LED */}
+              <div className="flex items-center gap-2 mt-4 pt-3 border-t border-amber-500/10">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.8)]" />
+                <span className="font-mono text-[9px] text-amber-700 uppercase tracking-widest">
+                  Parcel Monitor v2.0 — Live
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Coffee Queue — KDS Sync ────────────────────── */}
+        {dataLoading ? (
+          <CardSkeleton />
+        ) : coffeeQueue.length > 0 ? (
           <div className="bg-stone-900 border border-stone-800 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-stone-400">
-                <Package size={16} />
-                <h2 className="font-playfair text-lg text-white">Your Packages</h2>
+                <Coffee size={16} />
+                <h2 className="font-playfair text-lg text-white">Coffee Queue</h2>
               </div>
-              {waitingParcels > 0 && (
-                <span className="flex items-center gap-1.5 text-xs font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-full animate-pulse">
-                  <span className="w-2 h-2 rounded-full bg-amber-400" />
-                  {waitingParcels} waiting
-                </span>
-              )}
+              <span className="flex items-center gap-1.5 text-xs font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-full">
+                <Zap size={10} className="text-amber-400" />
+                LIVE
+              </span>
             </div>
 
-            {parcels.length === 0 ? (
-              <div className="text-center py-8">
-                <Truck className="mx-auto text-stone-700 mb-3" size={32} />
-                <p className="text-stone-600 text-sm">No packages currently waiting.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {parcels.map((p) => (
+            <div className="space-y-3">
+              {coffeeQueue.map((order) => {
+                const isPreparing = order.status === "preparing";
+                const isReady = order.status === "ready";
+                return (
                   <div
-                    key={p.id}
-                    className="flex items-center gap-4 bg-stone-800/50 border border-stone-700/50 rounded-lg p-4 hover:border-stone-600 transition-colors"
+                    key={order.id}
+                    className={`rounded-lg border p-4 transition-all ${
+                      isReady
+                        ? "border-green-500/40 bg-green-500/5 shadow-[0_0_15px_rgba(34,197,94,0.1)]"
+                        : "border-amber-500/30 bg-amber-500/5"
+                    }`}
                   >
-                    {/* Carrier icon */}
-                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-stone-800 border border-stone-700 flex items-center justify-center">
-                      <Package size={16} className="text-stone-400" />
+                    {/* Status banner */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        {isPreparing ? (
+                          <>
+                            <Coffee size={14} className="text-amber-400 animate-pulse" />
+                            <span className="font-mono text-sm font-bold text-amber-400 animate-pulse">
+                              Brewing...
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap size={14} className="text-green-400" />
+                            <span className="font-mono text-sm font-bold text-green-400">
+                              Ready for Pickup!
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <span className="font-mono text-[10px] text-stone-600">
+                        {fmtTime(order.created_at)}
+                      </span>
                     </div>
 
-                    {/* Detail */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white text-sm font-semibold truncate">
-                        {p.carrier || "Unknown Carrier"}
-                      </p>
-                      <p className="text-stone-500 text-xs">
-                        ...{p.tracking_number?.slice(-8)} &middot; {fmtDate(p.received_at)}
-                      </p>
+                    {/* Drink items */}
+                    <div className="space-y-1.5">
+                      {order.coffee_orders.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          <span className={item.completed_at ? "text-stone-600 line-through" : "text-white"}>
+                            {item.drink_name}
+                          </span>
+                          {item.customizations && (
+                            <span className="text-stone-500 text-xs">
+                              ({typeof item.customizations === "string"
+                                ? item.customizations
+                                : JSON.stringify(item.customizations)})
+                            </span>
+                          )}
+                          {item.completed_at && (
+                            <span className="text-green-500 text-xs">✓</span>
+                          )}
+                        </div>
+                      ))}
                     </div>
-
-                    {/* Status badge */}
-                    <span className={`flex-shrink-0 text-[10px] uppercase font-bold px-3 py-1 rounded-full border ${badgeClass(p.status)}`}>
-                      {friendlyStatus(p.status)}
-                    </span>
                   </div>
-                ))}
-              </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── Pickup QR Code ─────────────────────────────── */}
+        {!dataLoading && (parcels.length > 0 || coffeeQueue.some((o) => o.status === "ready")) && (
+          <div className="bg-stone-900 border border-stone-800 rounded-xl p-6 text-center">
+            <div className="flex items-center justify-center gap-2 mb-4 text-stone-500">
+              <QrCode size={16} />
+              <span className="uppercase tracking-[0.2em] text-[10px] font-bold">Pick-up QR</span>
+            </div>
+            {pickupQrUrl ? (
+              <>
+                <img
+                  src={pickupQrUrl}
+                  alt="Pick-up QR — show to staff to collect your items"
+                  className="mx-auto rounded-lg border border-amber-500/20"
+                  width={180}
+                  height={180}
+                />
+                <p className="text-amber-500/80 text-xs mt-3 font-mono">
+                  Show this to staff to pick up packages or orders
+                </p>
+              </>
+            ) : (
+              <Skeleton className="mx-auto h-[180px] w-[180px] rounded-lg" />
             )}
           </div>
         )}
