@@ -1,6 +1,5 @@
 "use client";
 
-import { forceOpsLogout } from "@/lib/authz";
 import {
   createContext,
   useCallback,
@@ -10,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { fetchOps } from "@/utils/ops-api";
 
 /* ================================================================== */
 /*  StaffContext — Global shift-status source of truth                 */
@@ -22,11 +22,6 @@ import {
 /*    const { isClockedIn, activeShiftId, refreshShiftStatus } =      */
 /*      useStaff();                                                    */
 /* ================================================================== */
-
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
 
 /* ─── Types ────────────────────────────────────────────── */
 interface ActiveShift {
@@ -107,16 +102,11 @@ export function StaffShiftProvider({
     fetchingRef.current = true;
 
     try {
-      const res = await fetch(`${API_BASE}/get-shift-status`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
-      });
+      const res = await fetchOps("/get-shift-status");
 
       if (!res.ok) {
-        // 401 = session expired or invalidated → force re-login
-        if (res.status === 401) { forceOpsLogout(); return; }
+        // 401 = session expired → fetchOps already triggers forceOpsLogout
+        if (res.status === 401) return;
         // Other errors: non-fatal, keep last known state
         return;
       }

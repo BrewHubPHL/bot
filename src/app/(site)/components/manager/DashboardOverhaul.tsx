@@ -4,7 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { useStaffOptional } from "@/context/StaffContext";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
-import { getErrorInfoFromResponse, forceOpsLogout, type AuthzErrorState } from "@/lib/authz";
+import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
+import { fetchOps } from "@/utils/ops-api";
 import {
   RefreshCw,
   CheckCircle,
@@ -14,15 +15,9 @@ import {
   Monitor,
   Package,
   AlertTriangle,
+  Smartphone,
+  Tablet,
 } from "lucide-react";
-
-/* ================================================================== */
-/*  Constants                                                          */
-/* ================================================================== */
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
 
 const POLL_MS = 60_000; // auto-refresh every 60 s
 const MAX_BACKOFF_MS = 300_000; // max 5-minute backoff on 429
@@ -124,16 +119,14 @@ export default function DashboardOverhaul() {
   const fetchStats = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/get-manager-stats`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchOps("/get-manager-stats");
+      if (res.status === 401) return; // fetchOps already triggers forceOpsLogout
       if (res.status === 429) {
         pollBackoffRef.current = Math.min(pollBackoffRef.current * 2, MAX_BACKOFF_MS);
         setSync((prev) => ({ ...prev, ok: false, message: "Rate limited — backing off" }));
         return;
       }
       if (!res.ok) {
-        if (res.status === 401) { forceOpsLogout(); return; }
         const info = await getErrorInfoFromResponse(res, "Unable to load dashboard stats");
         setAuthzState(info.authz);
         setSync((prev) => ({
@@ -470,21 +463,14 @@ export default function DashboardOverhaul() {
                       const reason = prompt("Reason for excusing this no-show:");
                       if (!reason) return;
                       try {
-                        const res = await fetch(
-                          `${API_BASE}/resolve-no-show`,
-                          {
-                            method: "POST",
-                            headers: {
-                              "Content-Type": "application/json",
-                              Authorization: `Bearer ${token}`,
-                              "X-BrewHub-Action": "true",
-                            },
-                            body: JSON.stringify({
-                              shiftId: ns.shiftId,
-                              reason,
-                            }),
-                          }
-                        );
+                        const res = await fetchOps("/resolve-no-show", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            shiftId: ns.shiftId,
+                            reason,
+                          }),
+                        });
                         if (!res.ok) {
                           const err = await res.json().catch(() => ({}));
                           showToast("error", err.error || "Failed to resolve no-show");
@@ -533,7 +519,7 @@ export default function DashboardOverhaul() {
             <Monitor size={20} aria-hidden="true" />
             <div>
               <div>Cafe Order Queue</div>
-              <div className="text-xs font-normal text-amber-400/60">Customer-facing drink status board</div>
+              <div className="text-xs font-normal text-amber-400/60">Customer-facing monitor · drink status board</div>
             </div>
           </a>
           <a
@@ -549,7 +535,39 @@ export default function DashboardOverhaul() {
             <Package size={20} aria-hidden="true" />
             <div>
               <div>Parcel Departure Board</div>
-              <div className="text-xs font-normal text-purple-400/60">80s airport-style parcel monitor</div>
+              <div className="text-xs font-normal text-purple-400/60">35–40″ lobby monitor · airport-style display</div>
+            </div>
+          </a>
+          <a
+            href="/parcels/mobile-scan"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 min-h-[56px] rounded-xl px-5
+                       bg-blue-500/10 border border-blue-500/30
+                       hover:bg-blue-500/20 hover:border-blue-500/50
+                       text-blue-300 text-sm font-semibold
+                       active:scale-[0.98] transition-all"
+          >
+            <Smartphone size={20} aria-hidden="true" />
+            <div>
+              <div>iPhone Parcel Scanner</div>
+              <div className="text-xs font-normal text-blue-400/60">Camera-based tracking &amp; unit scan</div>
+            </div>
+          </a>
+          <a
+            href="/parcels/dashboard"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 min-h-[56px] rounded-xl px-5
+                       bg-emerald-500/10 border border-emerald-500/30
+                       hover:bg-emerald-500/20 hover:border-emerald-500/50
+                       text-emerald-300 text-sm font-semibold
+                       active:scale-[0.98] transition-all"
+          >
+            <Tablet size={20} aria-hidden="true" />
+            <div>
+              <div>iPad Parcel POS</div>
+              <div className="text-xs font-normal text-emerald-400/60">Intake dashboard with resident lookup</div>
             </div>
           </a>
         </div>

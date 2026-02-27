@@ -3,13 +3,9 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
-import { getErrorInfoFromResponse, forceOpsLogout, type AuthzErrorState } from "@/lib/authz";
+import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
+import { fetchOps } from "@/utils/ops-api";
 import { RefreshCw } from "lucide-react";
-
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
 
 const MAX_RECEIPTS = 10;
 const POLL_INTERVAL_MS = 30_000; // poll every 30 s
@@ -63,16 +59,14 @@ export default function ReceiptRoll() {
   const loadReceipts = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/get-receipts?limit=10`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchOps("/get-receipts?limit=10");
+      if (res.status === 401) return; // fetchOps already triggers forceOpsLogout
       if (res.status === 429) {
         backoffRef.current = Math.min(backoffRef.current * 2, 120_000);
         setRateLimited(true);
         return;
       }
       if (!res.ok) {
-        if (res.status === 401) { forceOpsLogout(); return; }
         const info = await getErrorInfoFromResponse(res, "Failed to load receipts");
         setAuthzState(info.authz);
         if (info.authz) setReceipts([]);

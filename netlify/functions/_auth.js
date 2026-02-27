@@ -29,12 +29,22 @@ function getJwtIat(token) {
 }
 
 /**
- * Derive device fingerprint from request headers (must match pin-login.js logic)
+ * Derive device fingerprint from request headers.
+ * MUST match the derivation in pin-login.js AND middleware.ts:
+ *   sha256(user-agent + '|' + accept-language + '|' + clientIP).slice(0, 16)
+ *
+ * When x-forwarded-for contains multiple IPs we use only the first
+ * (left-most) entry to keep the hash deterministic.
  */
 function deriveDeviceFingerprint(event) {
   const ua = event.headers?.['user-agent'] || '';
   const accept = event.headers?.['accept-language'] || '';
-  const raw = `${ua}|${accept}`;
+  const xff = event.headers?.['x-forwarded-for'];
+  const clientIp =
+    event.headers?.['x-nf-client-connection-ip']
+    || (xff ? xff.split(',')[0].trim() : null)
+    || 'unknown';
+  const raw = `${ua}|${accept}|${clientIp}`;
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
 }
 

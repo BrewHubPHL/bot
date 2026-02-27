@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
-import { forceOpsLogout } from "@/lib/authz";
+import { fetchOps } from "@/utils/ops-api";
 import { Users } from "lucide-react";
 
 /* ================================================================== */
@@ -14,11 +14,6 @@ import { Users } from "lucide-react";
 /*                                                                     */
 /*  Doomsday Scenario 6: THE LATE NIGHT BAKER                         */
 /* ================================================================== */
-
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -40,13 +35,9 @@ export default function LiveStaffPulse() {
   const fetchActiveStaff = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/get-manager-stats`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        if (res.status === 401) { forceOpsLogout(); return; }
-        return;
-      }
+      const res = await fetchOps("/get-manager-stats");
+      if (res.status === 401) return; // fetchOps already triggers forceOpsLogout
+      if (!res.ok) return;
       const data = await res.json();
       setStaff(data.activeShifts ?? []);
     } catch {
