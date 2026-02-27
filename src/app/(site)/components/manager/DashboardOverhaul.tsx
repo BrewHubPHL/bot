@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { useStaffOptional } from "@/context/StaffContext";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
-import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
+import { getErrorInfoFromResponse, forceOpsLogout, type AuthzErrorState } from "@/lib/authz";
 import {
   RefreshCw,
   CheckCircle,
@@ -133,6 +133,7 @@ export default function DashboardOverhaul() {
         return;
       }
       if (!res.ok) {
+        if (res.status === 401) { forceOpsLogout(); return; }
         const info = await getErrorInfoFromResponse(res, "Unable to load dashboard stats");
         setAuthzState(info.authz);
         setSync((prev) => ({

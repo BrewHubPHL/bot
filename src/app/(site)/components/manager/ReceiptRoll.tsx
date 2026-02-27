@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
-import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
+import { getErrorInfoFromResponse, forceOpsLogout, type AuthzErrorState } from "@/lib/authz";
 import { RefreshCw } from "lucide-react";
 
 const API_BASE =
@@ -72,6 +72,7 @@ export default function ReceiptRoll() {
         return;
       }
       if (!res.ok) {
+        if (res.status === 401) { forceOpsLogout(); return; }
         const info = await getErrorInfoFromResponse(res, "Failed to load receipts");
         setAuthzState(info.authz);
         if (info.authz) setReceipts([]);

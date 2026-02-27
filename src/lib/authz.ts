@@ -71,3 +71,19 @@ export async function getErrorInfoFromResponse(
     message: toUserSafeMessage(backendMessage, fallbackMessage),
   };
 }
+
+/* ─── Global force-logout for expired/invalid PIN sessions ──────── */
+let _logoutFired = false;
+/**
+ * Immediately clear the OpsGate session and reload the page so the
+ * user lands on the PIN entry screen. Debounced: if multiple polling
+ * loops detect 401 simultaneously, only the first one triggers a reload.
+ */
+export function forceOpsLogout(): void {
+  if (_logoutFired) return;
+  _logoutFired = true;
+  try {
+    sessionStorage.removeItem("ops_session");
+  } catch { /* SSR guard */ }
+  window.location.reload();
+}

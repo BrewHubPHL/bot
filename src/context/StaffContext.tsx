@@ -1,5 +1,6 @@
 "use client";
 
+import { forceOpsLogout } from "@/lib/authz";
 import {
   createContext,
   useCallback,
@@ -114,8 +115,9 @@ export function StaffShiftProvider({
       });
 
       if (!res.ok) {
-        // Non-fatal: keep last known state; the header buttons
-        // still work even if the poll fails.
+        // 401 = session expired or invalidated → force re-login
+        if (res.status === 401) { forceOpsLogout(); return; }
+        // Other errors: non-fatal, keep last known state
         return;
       }
 

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
+import { forceOpsLogout } from "@/lib/authz";
 import { Users } from "lucide-react";
 
 /* ================================================================== */
@@ -42,7 +43,10 @@ export default function LiveStaffPulse() {
       const res = await fetch(`${API_BASE}/get-manager-stats`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (res.status === 401) { forceOpsLogout(); return; }
+        return;
+      }
       const data = await res.json();
       setStaff(data.activeShifts ?? []);
     } catch {
