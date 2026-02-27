@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import PinRotationModal from "./PinRotationModal";
 import ManagerChallengeModal from "./ManagerChallengeModal";
+import { supabase } from "@/lib/supabase";
 
 /* ─── Types ────────────────────────────────────────────── */
 interface StaffInfo {
@@ -319,6 +320,15 @@ export default function OpsGate({ children, requireManager = false }: { children
     fetch(`${API_BASE}/pin-logout`, { method: "POST", headers: { "X-BrewHub-Action": "true" }, credentials: "include" }).catch(() => {});
   }, []);
 
+  const handleFullSignOut = useCallback(async () => {
+    // 1. Clear OpsGate PIN session
+    handleLogout();
+    // 2. Sign out of Supabase (clears JWT from localStorage)
+    await supabase.auth.signOut();
+    // 3. Redirect to login page
+    window.location.href = "/login";
+  }, [handleLogout]);
+
   // ═══════════════════════════════════════════════════════════════
   // Schema 47: Manager Challenge — prompts TOTP verification
   // for sensitive actions. Returns a Promise that resolves with
@@ -472,6 +482,14 @@ export default function OpsGate({ children, requireManager = false }: { children
                 title="Lock screen"
               >
                 <Lock className="w-3.5 h-3.5" /> Lock
+              </button>
+
+              <button
+                onClick={handleFullSignOut}
+                className="flex items-center gap-1 px-2 py-1 text-red-400 hover:text-red-300 text-xs transition-colors"
+                title="Sign out completely"
+              >
+                <LogOut className="w-3.5 h-3.5" /> Sign Out
               </button>
             </div>
           </div>
