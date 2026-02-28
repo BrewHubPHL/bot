@@ -10,6 +10,8 @@
  *   if (!result.allowed) return { statusCode: 429, ... };
  */
 
+const MAX_BUCKET_SIZE = 5000;
+
 function createTokenBucket({ capacity, refillRate, refillIntervalMs = 1000 }) {
   const buckets = new Map();
 
@@ -37,6 +39,11 @@ function createTokenBucket({ capacity, refillRate, refillIntervalMs = 1000 }) {
   function getOrCreate(key) {
     let state = buckets.get(key);
     if (!state) {
+      // Evict oldest entry if at capacity to prevent OOM from distributed attacks
+      if (buckets.size >= MAX_BUCKET_SIZE) {
+        const oldestKey = buckets.keys().next().value;
+        buckets.delete(oldestKey);
+      }
       state = { tokens: capacity, lastRefill: Date.now() };
       buckets.set(key, state);
     }

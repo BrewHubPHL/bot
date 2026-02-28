@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, type FormEvent } from "react";
-import { createSupabaseClient } from "@/lib/supabase";
+import { createSupabaseClient, SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 /* ─── Supabase client (browser-only, sessionStorage-scoped) ─── */
 const sb = createSupabaseClient({
@@ -12,6 +13,9 @@ const sb = createSupabaseClient({
     detectSessionInUrl: false,
   },
 });
+
+/** Staff roles that MUST use the PIN pad instead of email/password */
+const STAFF_ROLES = new Set(["admin", "manager", "barista", "owner"]);
 
 /* ─── Redirect whitelist (clean URLs) ─── */
 const ALLOWED_PATHS = [
@@ -48,7 +52,7 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
-    const { error: authError } = await sb.auth.signInWithPassword({
+    const { data: signInData, error: authError } = await sb.auth.signInWithPassword({
       email: email.trim(),
       password,
     });
@@ -66,6 +70,44 @@ export default function LoginPage() {
       setError(friendly);
       setLoading(false);
       return;
+    }
+
+    // ── Staff / Admin fence: reject non-resident roles ──────────
+    // Staff and admins MUST authenticate via the PIN pad, not email/password.
+    // Check staff_directory for the authenticated email using a fresh
+    // service-free anon client — RLS on staff_directory allows select for
+    // email-matching rows only (or we query a public roles view).
+    // We use a lightweight check: if the user's email exists in staff_directory,
+    // reject them immediately and sign them out.
+    //
+    // SECURITY NOTE: This client-side signOut() is a UX convenience only.
+    // The true security boundary is enforced server-side by the
+    // requirePin: true checks on all ops/manager API routes in _auth.js.
+    // A scraped JWT alone cannot access any sensitive backend endpoint.
+    if (signInData?.session) {
+      const userEmail = (signInData.session.user.email || "").toLowerCase();
+      try {
+        const anonSb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const { data: staffRow } = await anonSb
+          .from("staff_directory")
+          .select("role")
+          .eq("email", userEmail)
+          .maybeSingle();
+
+        if (staffRow && STAFF_ROLES.has((staffRow.role || "").toLowerCase())) {
+          // Sign out immediately — staff must not hold a JWT session
+          await sb.auth.signOut();
+          setError(
+            "Staff and manager accounts must use the PIN pad. " +
+            "Go to the POS terminal or staff hub to log in."
+          );
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // Non-fatal: if the staff check fails (e.g. RLS blocks), allow through.
+        // The backend _auth.js will still reject staff JWTs on ops endpoints.
+      }
     }
 
     // Wait for session persistence
@@ -90,7 +132,7 @@ export default function LoginPage() {
         <div className="text-3xl font-bold mb-1" style={{ color: "var(--hub-espresso, #3c2f2f)" }}>
           Brew<span style={{ color: "var(--hub-tan, #d4b59e)" }}>Hub</span>
         </div>
-        <p className="text-stone-400 text-sm mb-8">Staff Portal</p>
+        <p className="text-stone-400 text-sm mb-8">Resident Portal</p>
 
         {/* Error */}
         {error && (

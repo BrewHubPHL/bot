@@ -45,7 +45,7 @@ exports.handler = async (event) => {
 
   // GET = staff-level (dashboard visibility); writes = manager-only
   const isRead = event.httpMethod === 'GET';
-  const auth = await authorize(event, { requireManager: !isRead });
+  const auth = await authorize(event, { requirePin: true, requireManager: !isRead });
   if (!auth.ok) return auth.response;
 
   try {

@@ -172,9 +172,25 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  // ── Payload shape validation (defense-in-depth) ────────────────────
+  // Ensure the token contains the fields downstream code relies on.
+  const payload = result.payload!;
+  if (
+    typeof payload.role !== "string" || !payload.role ||
+    typeof payload.email !== "string" || !payload.email ||
+    (payload.staffId === undefined && payload.staffId !== null)
+  ) {
+    console.warn(`[MIDDLEWARE] Malformed session payload on ${pathname}: missing role/email/staffId`);
+    const badPayloadResp = new NextResponse(JSON.stringify({ error: "Invalid session payload" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+    badPayloadResp.cookies.delete("hub_staff_session");
+    return badPayloadResp;
+  }
+
   // ── Device fingerprint binding ──────────────────────────────────────
   // Reject sessions replayed from a different device/browser.
-  const payload = result.payload!;
   if (typeof payload.dfp === "string" && payload.dfp.length > 0) {
     const currentDfp = await deriveDeviceFingerprint(request);
     if (payload.dfp !== currentDfp) {

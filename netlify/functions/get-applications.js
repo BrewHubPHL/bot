@@ -22,7 +22,7 @@ exports.handler = async (event) => {
 
   // Require manager-level auth — applicant PII (name, email, phone, resume)
   // must not be accessible to non-manager staff (API-H2 fix).
-  const auth = await authorize(event, { requireManager: true });
+  const auth = await authorize(event, { requireManager: true, requirePin: true });
   if (!auth.ok) return auth.response;
 
   try {

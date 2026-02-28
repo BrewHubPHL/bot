@@ -54,7 +54,7 @@ exports.handler = async (event, context) => {
   if (event.httpMethod !== 'GET') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 
   // Always require manager auth — no header-based bypass
-  const auth = await authorize(event, { requireManager: true });
+  const auth = await authorize(event, { requireManager: true, requirePin: true });
   if (!auth.ok) return Object.assign({}, auth.response, { headers: Object.assign({}, auth.response.headers || {}, headers) });
 
   // Rate limit per-manager + IP

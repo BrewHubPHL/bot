@@ -207,8 +207,8 @@ exports.handler = async (event) => {
     return jsonResponse(405, { error: 'Method not allowed' }, origin);
   }
 
-  // Manager-only
-  const auth = await authorize(event, { requireManager: true });
+  // Manager-only — requirePin blocks raw JWTs scraped from the resident portal
+  const auth = await authorize(event, { requireManager: true, requirePin: true });
   if (!auth.ok) return auth.response;
 
   // Fail-closed env guard

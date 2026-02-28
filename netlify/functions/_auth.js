@@ -2,7 +2,19 @@ const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const { redactIP } = require('./_ip-hash');
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+// Lazy-initialized Supabase client — avoids module-scope crash when env vars
+// are missing (which turns every function that imports _auth into a 502).
+let _supabase = null;
+function getSupabase() {
+  if (_supabase) return _supabase;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error('[_auth] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set');
+  }
+  _supabase = createClient(url, key);
+  return _supabase;
+}
 
 const json = (code, data) => ({ statusCode: code, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
 
@@ -124,7 +136,34 @@ async function authorize(event, options = {}) {
       }
 
       const email = (payload.email || '').toLowerCase();
-      const { data: staff, error } = await supabase.from('staff_directory').select('role, version_updated_at').eq('email', email).single();
+
+      // ═══════════════════════════════════════════════════════════
+      // Admin god mode — tokens issued with role:'admin' via the
+      // ADMIN_PIN env-var bypass skip the staff_directory lookup
+      // entirely.  The admin may or may not have a row in
+      // staff_directory; we don't gate on that.
+      //
+      // Device fingerprint is still enforced to prevent token
+      // theft/replay from a different device.
+      // ═══════════════════════════════════════════════════════════
+      if (payload.role === 'admin') {
+        if (payload.dfp) {
+          const currentFp = deriveDeviceFingerprint(event);
+          if (payload.dfp !== currentFp) {
+            console.warn(`[AUTH BLOCKED] Device fingerprint mismatch for admin token: token=${payload.dfp} current=${currentFp}`);
+            return { ok: false, response: json(401, { error: 'Session bound to a different device. Please log in again.', code: 'DEVICE_MISMATCH' }) };
+          }
+        }
+        return {
+          ok: true,
+          via: 'pin',
+          user: { email, id: payload.staffId || null },
+          role: 'admin',
+          deviceFingerprint: payload.dfp,
+        };
+      }
+
+      const { data: staff, error } = await getSupabase().from('staff_directory').select('role, version_updated_at').eq('email', email).single();
       if (error || !staff) return { ok: false, response: json(403, { error: 'Staff not found' }) };
 
       if (staff.version_updated_at && payload.iat) {
@@ -172,7 +211,7 @@ async function authorize(event, options = {}) {
         }
         // Verify + consume the nonce atomically
         try {
-          const { data: nonceResult } = await supabase.rpc('consume_challenge_nonce', {
+          const { data: nonceResult } = await getSupabase().rpc('consume_challenge_nonce', {
             p_nonce: challengeNonce,
             p_staff_email: email,
           });
@@ -205,10 +244,16 @@ async function authorize(event, options = {}) {
       return { ok: false, response: json(403, { error: 'PIN authentication required' }) };
     }
 
-    const { data, error } = await supabase.auth.getUser(token);
+    const { data, error } = await getSupabase().auth.getUser(token);
     if (error || !data?.user) return { ok: false, response: json(401, { error: 'Unauthorized' }) };
 
-    const { data: revoked } = await supabase.from('revoked_users').select('revoked_at').eq('user_id', data.user.id).single();
+    const { data: revoked, error: revokedErr } = await getSupabase().from('revoked_users').select('revoked_at').eq('user_id', data.user.id).single();
+    // Fail closed: if the revocation check itself errors (network/DB), deny access.
+    // PGRST116 ("not found") is expected when the user is NOT revoked — allow through.
+    if (revokedErr && revokedErr.code !== 'PGRST116') {
+      console.error(`[AUTH] Revocation check failed for ${data.user.email}: ${revokedErr.message}`);
+      return { ok: false, response: json(500, { error: 'Unable to verify account status' }) };
+    }
     if (revoked?.revoked_at) {
       const iat = getJwtIat(token);
       const revokedAt = new Date(revoked.revoked_at).getTime();
@@ -229,7 +274,7 @@ async function authorize(event, options = {}) {
     }
 
     const email = (data.user.email || '').toLowerCase();
-    const { data: staff, error: staffErr } = await supabase.from('staff_directory').select('role, version_updated_at').eq('email', email).single();
+    const { data: staff, error: staffErr } = await getSupabase().from('staff_directory').select('role, version_updated_at').eq('email', email).single();
     if (staffErr || !staff) {
       console.error(`[AUTH BLOCKED] Not in staff directory: ${email}`);
       return { ok: false, response: json(403, { error: 'Forbidden' }) };

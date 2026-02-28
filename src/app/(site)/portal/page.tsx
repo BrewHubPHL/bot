@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
-import type { User as SupaUser } from "@supabase/supabase-js";
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase";
+import { createClient, type User as SupaUser } from "@supabase/supabase-js";
+
+/** Staff roles that MUST use the PIN pad instead of email/password */
+const STAFF_ROLES = new Set(["admin", "manager", "barista", "owner"]);
 import QRCode from "qrcode";
 import {
   LogOut, Package, Coffee, QrCode, Mail, Lock, User, Phone,
@@ -493,8 +496,35 @@ export default function ResidentPortal() {
         setSignupDone(true);
         authAttemptsRef.current = 0; // reset on success
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email: safeEmail, password: safePassword });
+        const { data: signInData, error } = await supabase.auth.signInWithPassword({ email: safeEmail, password: safePassword });
         if (error) throw error;
+
+        // ── Staff / Admin fence: reject non-resident roles ──────────
+        // Staff and admins MUST authenticate via the PIN pad.
+        if (signInData?.session) {
+          const userEmail = (signInData.session.user.email || "").toLowerCase();
+          try {
+            const anonSb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            const { data: staffRow } = await anonSb
+              .from("staff_directory")
+              .select("role")
+              .eq("email", userEmail)
+              .maybeSingle();
+
+            if (staffRow && STAFF_ROLES.has((staffRow.role || "").toLowerCase())) {
+              await supabase.auth.signOut();
+              setAuthError(
+                "Staff and manager accounts must use the PIN pad. " +
+                "Go to the POS terminal or staff hub to log in."
+              );
+              setAuthLoading(false);
+              return;
+            }
+          } catch {
+            // Non-fatal: backend _auth.js still rejects staff JWTs on ops endpoints
+          }
+        }
+
         authAttemptsRef.current = 0; // reset on success
       }
     } catch (err: unknown) {

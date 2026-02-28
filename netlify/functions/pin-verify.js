@@ -41,7 +41,7 @@ exports.handler = async (event) => {
   const clientIp = event.headers['x-nf-client-connection-ip']
     || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
     || 'unknown';
-  const sessionRole = (auth.user.role || '').toLowerCase();
+  const sessionRole = (auth.role || '').toLowerCase();
 
   if (sessionRole === 'manager' || sessionRole === 'barista') {
     const { data: settings, error: settingsError } = await supabase

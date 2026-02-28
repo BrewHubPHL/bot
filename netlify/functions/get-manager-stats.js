@@ -37,7 +37,7 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'GET') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 
-  const auth = await authorize(event, { requireManager: true });
+  const auth = await authorize(event, { requireManager: true, requirePin: true });
   if (!auth.ok) return Object.assign({}, auth.response, { headers: Object.assign({}, auth.response.headers || {}, headers) });
 
   // Rate limit per-manager + IP to prevent abusive scraping

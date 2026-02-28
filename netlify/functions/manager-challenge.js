@@ -33,6 +33,7 @@ const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { sanitizeInput } = require('./_sanitize');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -134,7 +135,8 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}');
-    const { action_type, mode } = body;
+    const action_type = sanitizeInput(body.action_type);
+    const mode = sanitizeInput(body.mode);
 
     // ── ISSUE mode: Generate a TOTP challenge ─────────────
     if (!mode || mode === 'issue') {
@@ -213,7 +215,8 @@ exports.handler = async (event) => {
 
     // ── VERIFY mode: Check a TOTP code and return the nonce ─
     if (mode === 'verify') {
-      const { code, nonce: challengeNonce } = body;
+      const code = sanitizeInput(body.code);
+      const challengeNonce = sanitizeInput(body.nonce);
 
       if (!code || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
         return cors(400, { error: 'Code must be exactly 6 digits' });

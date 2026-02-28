@@ -58,8 +58,8 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  // Manager-only: only managers can upload menu images
-  const auth = await authorize(event, { requireManager: true });
+  // Manager-only + PIN-only: only managers authenticated via PIN can upload menu images
+  const auth = await authorize(event, { requireManager: true, requirePin: true });
   if (!auth.ok) return auth.response;
 
   try {

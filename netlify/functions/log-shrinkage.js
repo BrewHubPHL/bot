@@ -39,8 +39,13 @@ exports.handler = async (event) => {
     return corsJson(405, { error: 'Method not allowed. Use POST.' });
   }
 
-  // Manager-only: shrinkage reporting is a privileged operation
-  const auth = await authorize(event, { requireManager: true });
+  // Manager-only + PIN-only + Manager Challenge: shrinkage is a privileged, auditable operation
+  const auth = await authorize(event, {
+    requireManager: true,
+    requirePin: true,
+    requireManagerChallenge: true,
+    challengeActionType: 'log_shrinkage',
+  });
   if (!auth.ok) return auth.response;
 
   // CSRF protection

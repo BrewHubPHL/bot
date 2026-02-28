@@ -42,12 +42,18 @@ const respond = (code, data, extraHeaders = {}) => ({
 });
 
 /**
- * Derive device fingerprint (must match pin-login.js logic)
+ * Derive device fingerprint — MUST match pin-login.js / _auth.js / middleware.ts:
+ *   sha256(user-agent + '|' + accept-language + '|' + clientIP).slice(0, 16)
  */
 function deriveDeviceFingerprint(event) {
   const ua = event.headers['user-agent'] || '';
   const accept = event.headers['accept-language'] || '';
-  const raw = `${ua}|${accept}`;
+  const xff = event.headers['x-forwarded-for'];
+  const clientIp =
+    event.headers['x-nf-client-connection-ip']
+    || (xff ? xff.split(',')[0].trim() : null)
+    || 'unknown';
+  const raw = `${ua}|${accept}|${clientIp}`;
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
 }
 
@@ -224,6 +230,7 @@ async function handleVerifyAuth(sb, body, event) {
     sid: sessionId,
     staffId: staffRow.id,
     email: staffRow.email,
+    role: staffRow.role,
     dfp: deviceFp,
     iat: Date.now(),
     exp: expiresAt,

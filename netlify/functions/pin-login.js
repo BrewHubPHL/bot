@@ -64,9 +64,23 @@ exports.handler = async (event) => {
       console.log('[PIN-LOGIN] Admin login detected. Bypassing network security.');
       const adminEmail = process.env.ADMIN_EMAIL || '';
       const token = signToken({ role: 'admin', email: adminEmail, status: 'active', dfp });
+
+      // Set HttpOnly session cookie so middleware recognizes the session
+      const isProduction = !['localhost', '127.0.0.1'].includes(
+        (event.headers?.host || '').split(':')[0]
+      );
+      const cookieFlags = [
+        `hub_staff_session=${token}`,
+        'HttpOnly',
+        'SameSite=Strict',
+        'Path=/',
+        `Max-Age=${8 * 60 * 60}`,
+        isProduction ? 'Secure' : '',
+      ].filter(Boolean).join('; ');
+
       return {
         statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookieFlags },
         body: JSON.stringify({
           token,
           role: 'admin',
@@ -81,17 +95,28 @@ exports.handler = async (event) => {
 
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-    // 🕵️ 2. Lookup Staff Member
-    const { data: staff, error: staffError } = await supabase
-      .from('staff_directory')
-      .select('id, name, role, email, is_active, is_working')
-      .eq('pin', pin)
-      .eq('is_active', true)
-      .single();
+    // 🕵️ 2. Verify PIN via bcrypt RPC (schema 47/66)
+    // Uses verify_staff_pin() which does bcrypt comparison on pin_hash,
+    // rejects inactive staff, and returns rotation status.
+    const { data: rpcRows, error: rpcError } = await supabase.rpc('verify_staff_pin', { p_pin: pin });
 
-    if (staffError || !staff) {
+    if (rpcError) {
+      console.error('[PIN-LOGIN] verify_staff_pin RPC error:', rpcError.message);
+      return { statusCode: 500, body: JSON.stringify({ error: 'Server error. Please try again.' }) };
+    }
+
+    const staff = rpcRows?.[0] || null;
+    if (!staff) {
       return { statusCode: 401, body: JSON.stringify({ error: 'Invalid PIN.' }) };
     }
+
+    // Map RPC column names to the shape the rest of the function expects
+    const staffId = staff.staff_id;
+    const staffName = staff.staff_name || staff.full_name || 'Staff';
+    const staffEmail = staff.staff_email;
+    const staffRole = staff.staff_role;
+    const isWorking = staff.is_working ?? false;
+    const needsPinRotation = staff.needs_pin_rotation ?? false;
 
     // 🌐 3. Network Check for Staff
     const { data: settings, error: settingsError } = await supabase
@@ -108,12 +133,12 @@ exports.handler = async (event) => {
 
     if (!isNetworkValid) {
       // Baristas are strictly gated to the shop network
-      if (staff.role === 'barista') {
+      if (staffRole === 'barista') {
         return { statusCode: 403, body: JSON.stringify({ error: 'OFFSITE', message: 'Please connect to BrewHub Wi-Fi.' }) };
       }
 
       // Managers can bypass with a TOTP code
-      if (staff.role === 'manager') {
+      if (staffRole === 'manager') {
         if (!totpCode) {
           return { statusCode: 403, body: JSON.stringify({ error: 'TOTP_REQUIRED' }) };
         }
@@ -126,26 +151,40 @@ exports.handler = async (event) => {
 
     // ✅ 4. Issue Staff Token (with device fingerprint for session binding)
     const token = signToken({
-      role: staff.role,
-      staffId: staff.id,
-      name: staff.name,
-      email: staff.email,
+      role: staffRole,
+      staffId,
+      name: staffName,
+      email: staffEmail,
       status: 'active',
       dfp,
     });
 
+    // Set HttpOnly session cookie so middleware recognizes the session
+    const isProduction = !['localhost', '127.0.0.1'].includes(
+      (event.headers?.host || '').split(':')[0]
+    );
+    const cookieFlags = [
+      `hub_staff_session=${token}`,
+      'HttpOnly',
+      'SameSite=Strict',
+      'Path=/',
+      `Max-Age=${8 * 60 * 60}`,
+      isProduction ? 'Secure' : '',
+    ].filter(Boolean).join('; ');
+
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookieFlags },
       body: JSON.stringify({
         token,
-        role: staff.role,
+        role: staffRole,
+        needsPinRotation,
         staff: {
-          id: staff.id,
-          name: staff.name,
-          email: staff.email,
-          role: staff.role,
-          is_working: staff.is_working ?? false,
+          id: staffId,
+          name: staffName,
+          email: staffEmail,
+          role: staffRole,
+          is_working: isWorking,
         },
       }),
     };

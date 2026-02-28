@@ -24,7 +24,7 @@ exports.handler = async (event) => {
   // ── Centralized auth: require manager role ──────────────────
   // This enforces: staff_directory lookup, role check, revoked_users,
   // token version (fired-is-fired), and IP guard — all atomically.
-  const auth = await authorize(event, { requireManager: true });
+  const auth = await authorize(event, { requireManager: true, requirePin: true });
   if (!auth.ok) return auth.response;
   const user = auth.user;
 
