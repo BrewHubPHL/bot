@@ -224,6 +224,21 @@
   - Deny-all RLS policy (`USING (false)`) — accessible only via service_role.
   - Columns: `id`, `access_token`, `refresh_token`, `merchant_id`, `updated_at`.
 
+### Advanced Tracking & Triggers (Schemas 54–60)
+- **Schema-54** (`guest-order-ip`): Hashes guest IPs for abuse tracking without storing raw PII.
+- **Schema-55/56** (`guest-order-denylist` / `auto-ban`): Auto-bans IPs that spam guest orders (5+ in 24 hours).
+- **Schema-57** (`outbound-parcels`): Adds FedEx/UPS drop-off flows for residents to the departure board.
+- **Schema-58** (`kds-item-sync`): Item-level syncing (`completed_at`) and barista claiming (`claimed_by`) for the KDS.
+- **Schema-59** (`inventory-shrinkage-log`): IRS-compliant audit trail for retail write-offs (breakage/theft).
+- **Schema-60** (`system-errors`): Dead-letter queue for orphan payments and webhook failures.
+
+### Automated Accountability & Security (Schemas 61–68)
+- **Schema-61/62/63** (`scheduled-shifts`): Adds the calendar system, RLS, and overlapping shift guards.
+- **Schema-64** (`no-show-alert`): Database cron job to catch late staff and trigger the Twilio SMS watchdog.
+- **Schema-65** (`shift-audit-log` / `webauthn-credentials`): Immutable black-box recorder for schedule changes, plus biometric passkey setup.
+- **Schema-66** (`staff-deactivation` / `receipt-leak-fix`): Revokes anon access to receipts (closing the PII leak) and adds one-click staff deactivation that nukes PINs and Passkeys.
+- **Schema-67** (`waitlist-lockdown`): Drops anon insert policies on the waitlist, routing all signups through the server-side bot fortress.
+- **Schema-68** (`receipt-claim`): Adds atomic `FOR UPDATE SKIP LOCKED` claims so concurrent iPads do not print duplicate receipts.
 ---
 
 ## Part 6: Known Architecture Gaps
@@ -245,7 +260,7 @@
 | Receipt PII | `receipt_queue` anon SELECT exposed all historical receipt text | HIGH | ✅ Fixed (schema-51, 30-min time window) |
 | Views | `daily_sales_report` and `v_payroll_summary` readable by anon | HIGH | ✅ Fixed (schema-51, REVOKE) |
 | KDS | Case-sensitive status keys — silent mismatches | HIGH | ✅ Fixed (`ns()` normalizer in kds/page.tsx) |
-| CSRF | `redeem-voucher.js`, `register-tracking.js`, `update-application-status.js` missing CSRF | HIGH | Open |
+| CSRF | `redeem-voucher.js`, `register-tracking.js`, `update-application-status.js` missing CSRF | HIGH | ✅ Fixed (Audit #13, #10, #9) |
 | Rate Limits | 6 public endpoints with zero rate limiting (`get-menu`, `get-merch`, `get-queue`, `health`, `shop-data`, `public-config`) | HIGH | Open |
 | POS | Double-tap guard uses `setState` — ultra-fast race still possible, should use `useRef` | MEDIUM | Open |
 | Tests | <5% function test coverage; zero payment/frontend/edge function tests | HIGH | Open |
