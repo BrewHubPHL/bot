@@ -284,4 +284,22 @@ function verifyServiceSecret(event) {
   return { valid: true };
 }
 
-module.exports = { authorize, json, sanitizedError, verifyServiceSecret };
+/**
+ * Create a signed PIN session token (HMAC, not JWT)
+ * @param {Object} payload - Staff/session info
+ * @returns {string} token
+ */
+function signToken(payload) {
+  const secret = process.env.INTERNAL_SYNC_SECRET;
+  if (!secret) throw new Error('INTERNAL_SYNC_SECRET not configured');
+  // Add expiration and issued-at
+  const now = Date.now();
+  const exp = now + 8 * 60 * 60 * 1000; // 8 hours
+  const fullPayload = { ...payload, iat: now, exp };
+  const payloadStr = JSON.stringify(fullPayload);
+  const payloadB64 = Buffer.from(payloadStr, 'utf8').toString('base64');
+  const signature = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
+  return `${payloadB64}.${signature}`;
+}
+
+module.exports = { authorize, json, sanitizedError, verifyServiceSecret, signToken };

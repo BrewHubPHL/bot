@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { authenticator } from 'otplib'; 
-import { signToken } from './_auth.js';
+const { signToken } = require('./_auth.js');
 
 export const handler = async (event) => {
   if (event.httpMethod !== 'POST') {
