@@ -1,12 +1,14 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { redactIP } = require('./_ip-hash');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 /**
  * PIN Verify — Lightweight session check for OpsGate
- * Verifies the PIN token is still valid and returns current is_working status
+ * Verifies the PIN token is still valid, enforces role-based IP gating,
+ * and returns current is_working status.
  */
 exports.handler = async (event) => {
   const ALLOWED_ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
@@ -32,6 +34,33 @@ exports.handler = async (event) => {
   const auth = await authorize(event, { requirePin: true });
   if (!auth.ok) {
     return { ...auth.response, headers: { ...auth.response.headers, ...corsHeaders } };
+  }
+
+
+  // DB-backed shop_ip_address check for manager/barista
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const sessionRole = (auth.user.role || '').toLowerCase();
+
+  if (sessionRole === 'manager' || sessionRole === 'barista') {
+    const { data: settings, error: settingsError } = await supabase
+      .from('store_settings')
+      .select('shop_ip_address')
+      .limit(1)
+      .single();
+    if (settingsError || !settings) {
+      return { statusCode: 503, headers: corsHeaders, body: JSON.stringify({ error: 'Shop IP unavailable' }) };
+    }
+    const shopIp = (settings.shop_ip_address || '').trim();
+    if (clientIp !== shopIp) {
+      if (sessionRole === 'barista') {
+        return { statusCode: 403, headers: corsHeaders, body: JSON.stringify({ error: 'Off-site access denied. Connect to shop Wi-Fi.' }) };
+      }
+      if (sessionRole === 'manager') {
+        return { statusCode: 403, headers: corsHeaders, body: JSON.stringify({ error: 'TOTP_REQUIRED', message: 'Unrecognized network. Enter Manager Authenticator code.' }) };
+      }
+    }
   }
 
   try {

@@ -10,8 +10,8 @@
  * - Scanner page (shows offline notice)
  */
 
-const CACHE_NAME = 'brewhub-v2';
-const API_CACHE = 'brewhub-api-v2';
+const CACHE_NAME = 'brewhub-v3';
+const API_CACHE = 'brewhub-api-v3';
 
 // App shell: public routes safe to pre-cache (no auth required)
 const APP_SHELL = [
@@ -23,7 +23,7 @@ const APP_SHELL = [
 
 // Protected ops routes — behind OpsGate, never pre-cached by SW.
 // The app's middleware handles auth; the SW must not intercept these.
-const PROTECTED_ROUTES = ['/pos', '/kds', '/scanner', '/staff-hub'];
+const PROTECTED_ROUTES = ['/pos', '/kds', '/kds-legacy', '/scanner', '/staff-hub', '/manager', '/parcels-pickup'];
 
 // ── Install: Pre-cache app shell ────────────────────────────────
 self.addEventListener('install', (event) => {
@@ -121,6 +121,8 @@ async function networkFirstWithCache(request) {
 }
 
 // ── Strategy: Cache-first (immutable hashed assets) ─────────────
+// If a chunk 404s, the build changed — tell the client to hard-reload
+// so it picks up fresh HTML with correct chunk references.
 async function cacheFirst(request) {
   const cached = await caches.match(request);
   if (cached) return cached;
@@ -130,6 +132,20 @@ async function cacheFirst(request) {
     if (response.ok) {
       const cache = await caches.open(CACHE_NAME);
       cache.put(request, response.clone());
+      return response;
+    }
+
+    // Chunk 404 → deployment changed. Purge stale cache & notify clients.
+    if (response.status === 404 && request.url.includes('/_next/static/chunks/')) {
+      console.warn('[SW] Stale chunk detected, triggering reload:', request.url);
+      const allClients = await self.clients.matchAll({ type: 'window' });
+      allClients.forEach((client) => client.postMessage({ type: 'CHUNK_STALE' }));
+      // Clear cached pages so reload fetches fresh HTML
+      const cache = await caches.open(CACHE_NAME);
+      const keys = await cache.keys();
+      await Promise.all(
+        keys.filter((k) => !k.url.includes('/_next/static/')).map((k) => cache.delete(k))
+      );
     }
     return response;
   } catch {

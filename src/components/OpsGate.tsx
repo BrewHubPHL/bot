@@ -2,13 +2,12 @@
 
 import { useState, useCallback, useEffect, createContext, useContext, type ReactNode } from "react";
 import {
-  Lock, LogIn, LogOut, Loader2, Clock, AlertCircle, User, CheckCircle2, Delete, Shield, ScanFace, Fingerprint
+  Lock, LogIn, LogOut, Loader2, Clock, AlertCircle, User, CheckCircle2, Delete, Shield, ScanFace, Fingerprint, WifiOff
 } from "lucide-react";
 import { startRegistration, startAuthentication, browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import PinRotationModal from "./PinRotationModal";
 import ManagerChallengeModal from "./ManagerChallengeModal";
 import { StaffShiftProvider, broadcastShiftChange, useStaff as useStaffHook } from "@/context/StaffContext";
-import { supabase } from "@/lib/supabase";
 
 /* ─── Types ────────────────────────────────────────────── */
 interface StaffInfo {
@@ -130,6 +129,7 @@ function ClockButtons({
 }
 
 export default function OpsGate({ children, requireManager = false }: { children: ReactNode; requireManager?: boolean }) {
+
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -137,6 +137,10 @@ export default function OpsGate({ children, requireManager = false }: { children
   const [verifying, setVerifying] = useState(false);
   const [clockLoading, setClockLoading] = useState(false);
   const [clockMsg, setClockMsg] = useState("");
+
+  // TOTP fallback state
+  const [isTotpMode, setIsTotpMode] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
 
   // Schema 47: PIN rotation + manager challenge state
   const [showPinRotation, setShowPinRotation] = useState(false);
@@ -296,9 +300,14 @@ export default function OpsGate({ children, requireManager = false }: { children
     setError("");
   }, []);
 
+
   const handleSubmit = useCallback(async () => {
-    if (pin.length !== 6) {
+    if (!isTotpMode && pin.length !== 6) {
       setError("Enter your 6-digit PIN");
+      return;
+    }
+    if (isTotpMode && totpCode.length !== 6) {
+      setError("Enter your 6-digit Authenticator code");
       return;
     }
 
@@ -306,18 +315,29 @@ export default function OpsGate({ children, requireManager = false }: { children
     setError("");
 
     try {
+      const body = isTotpMode
+        ? { pin, totpCode }
+        : { pin };
       const res = await fetch(`${API_BASE}/pin-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-BrewHub-Action": "true" },
         credentials: "include",
-        body: JSON.stringify({ pin }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
+        if (data.error === "TOTP_REQUIRED") {
+          setIsTotpMode(true);
+          setError(data.message || "Authenticator code required.");
+          setTotpCode("");
+          return;
+        }
         setError(data.error || "Login failed");
         setPin("");
+        setTotpCode("");
+        setIsTotpMode(false);
         return;
       }
 
@@ -329,6 +349,8 @@ export default function OpsGate({ children, requireManager = false }: { children
       setSession(newSession);
       sessionStorage.setItem("ops_session", JSON.stringify(newSession));
       setPin("");
+      setTotpCode("");
+      setIsTotpMode(false);
 
       // Schema 47: Prompt PIN rotation if needed
       if (data.needsPinRotation) {
@@ -337,17 +359,23 @@ export default function OpsGate({ children, requireManager = false }: { children
     } catch {
       setError("Connection error — try again");
       setPin("");
+      setTotpCode("");
+      setIsTotpMode(false);
     } finally {
       setLoading(false);
     }
-  }, [pin]);
+  }, [pin, totpCode, isTotpMode]);
+
 
   // Auto-submit when 6 digits entered
   useEffect(() => {
-    if (pin.length === 6 && !loading) {
+    if (!isTotpMode && pin.length === 6 && !loading) {
       handleSubmit();
     }
-  }, [pin, loading, handleSubmit]);
+    if (isTotpMode && totpCode.length === 6 && !loading) {
+      handleSubmit();
+    }
+  }, [pin, totpCode, loading, handleSubmit, isTotpMode]);
 
   const handleClock = useCallback(async (action: "in" | "out") => {
     if (!session) return;
@@ -413,15 +441,6 @@ export default function OpsGate({ children, requireManager = false }: { children
     // Clear the HttpOnly session cookie via a logout endpoint
     fetch(`${API_BASE}/pin-logout`, { method: "POST", headers: { "X-BrewHub-Action": "true" }, credentials: "include" }).catch(() => {});
   }, []);
-
-  const handleFullSignOut = useCallback(async () => {
-    // 1. Clear OpsGate PIN session
-    handleLogout();
-    // 2. Sign out of Supabase (clears JWT from localStorage)
-    await supabase.auth.signOut();
-    // 3. Redirect to login page
-    window.location.href = "/login";
-  }, [handleLogout]);
 
   // ═══════════════════════════════════════════════════════════════
   // WebAuthn: Passkey Login (Face ID / Touch ID / Windows Hello)
@@ -690,14 +709,6 @@ export default function OpsGate({ children, requireManager = false }: { children
               >
                 <Lock className="w-3.5 h-3.5" /> Lock
               </button>
-
-              <button
-                onClick={handleFullSignOut}
-                className="flex items-center gap-1 px-2 py-1 text-red-400 hover:text-red-300 text-xs transition-colors"
-                title="Sign out completely"
-              >
-                <LogOut className="w-3.5 h-3.5" /> Sign Out
-              </button>
             </div>
           </div>
 
@@ -709,7 +720,8 @@ export default function OpsGate({ children, requireManager = false }: { children
     );
   }
 
-  /* ─── PIN Entry Screen ─── */
+
+  /* ─── PIN Entry & TOTP Fallback Screen ─── */
   return (
     <div className="min-h-screen bg-black flex flex-col items-center justify-center px-4 select-none">
       {/* Logo / Header */}
@@ -724,73 +736,110 @@ export default function OpsGate({ children, requireManager = false }: { children
         </p>
       </div>
 
-      {/* PIN dots */}
-      <div className="flex gap-3 mb-6">
-        {[0, 1, 2, 3, 4, 5].map(i => (
-          <div
-            key={i}
-            className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${
-              i < pin.length
-                ? "bg-amber-400 border-amber-400 scale-110"
-                : "border-zinc-600 bg-transparent"
-            }`}
-          />
-        ))}
-      </div>
-
-      {/* Loading indicator */}
-      {loading && (
-        <div className="flex items-center gap-2 mb-4 text-amber-400 text-sm">
-          <Loader2 className="w-4 h-4 animate-spin" /> Verifying…
-        </div>
-      )}
-
-      {/* Error message */}
+      {/* Error message — prominent banner for off-site / IP-gate errors */}
       {error && !loading && (
-        <div className="flex items-center gap-2 mb-4 text-red-400 text-sm">
-          <AlertCircle className="w-4 h-4" /> {error}
-        </div>
+        error.toLowerCase().includes("off-site") || error.toLowerCase().includes("wi-fi") ? (
+          <div className="flex items-center gap-3 mb-6 px-5 py-3 rounded-xl bg-amber-900/40 border border-amber-600/60 text-amber-200 text-sm max-w-xs w-full">
+            <WifiOff className="w-5 h-5 text-amber-400 shrink-0" />
+            <span>{error}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 mb-4 text-red-400 text-sm">
+            <AlertCircle className="w-4 h-4" /> {error}
+          </div>
+        )
       )}
 
-      {/* Numeric keypad */}
-      <div className="grid grid-cols-3 gap-3 max-w-xs w-full">
-        {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(d => (
-          <button
-            key={d}
-            onClick={() => handleDigit(d)}
+      {/* TOTP Fallback UI */}
+      {isTotpMode ? (
+        <div className="mb-6 text-center">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-600/20 flex items-center justify-center">
+            <Lock className="w-8 h-8 text-amber-400" />
+          </div>
+          <h1 className="text-xl font-bold text-amber-300 mb-2">Manager Authenticator</h1>
+          <p className="text-amber-200 text-sm mb-2">Enter your 6-digit Authenticator code</p>
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            value={totpCode}
+            onChange={e => setTotpCode(e.target.value.replace(/\D/g, ""))}
+            className="w-full px-4 py-3 border border-amber-400 rounded-xl text-base outline-none text-center font-mono tracking-widest bg-black text-amber-200"
+            autoFocus
             disabled={loading}
-            className="h-16 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 text-white text-2xl font-medium transition-colors disabled:opacity-50 touch-manipulation"
+          />
+          <button
+            onClick={handleSubmit}
+            disabled={loading || totpCode.length !== 6}
+            className="mt-4 px-6 py-3 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold transition-all disabled:opacity-50"
           >
-            {d}
+            {loading ? "Verifying…" : "Submit"}
           </button>
-        ))}
-        <button
-          onClick={handleClear}
-          disabled={loading}
-          className="h-16 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-500 text-sm font-medium transition-colors disabled:opacity-50 touch-manipulation"
-        >
-          Clear
-        </button>
-        <button
-          onClick={() => handleDigit("0")}
-          disabled={loading}
-          className="h-16 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 text-white text-2xl font-medium transition-colors disabled:opacity-50 touch-manipulation"
-        >
-          0
-        </button>
-        <button
-          onClick={handleDelete}
-          disabled={loading}
-          className="h-16 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-500 transition-colors disabled:opacity-50 flex items-center justify-center touch-manipulation"
-        >
-          <Delete className="w-6 h-6" />
-        </button>
-      </div>
+        </div>
+      ) : (
+        <>
+          {/* PIN dots */}
+          <div className="flex gap-3 mb-6">
+            {[0, 1, 2, 3, 4, 5].map(i => (
+              <div
+                key={i}
+                className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${
+                  i < pin.length
+                    ? "bg-amber-400 border-amber-400 scale-110"
+                    : "border-zinc-600 bg-transparent"
+                }`}
+              />
+            ))}
+          </div>
 
-      <p className="mt-8 text-zinc-600 text-xs">Enter your 6-digit staff PIN</p>
+          {/* Loading indicator */}
+          {loading && (
+            <div className="flex items-center gap-2 mb-4 text-amber-400 text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" /> Verifying…
+            </div>
+          )}
+
+          {/* Numeric keypad */}
+          <div className="grid grid-cols-3 gap-3 max-w-xs w-full">
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(d => (
+              <button
+                key={d}
+                onClick={() => handleDigit(d)}
+                disabled={loading}
+                className="h-16 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 text-white text-2xl font-medium transition-colors disabled:opacity-50 touch-manipulation"
+              >
+                {d}
+              </button>
+            ))}
+            <button
+              onClick={handleClear}
+              disabled={loading}
+              className="h-16 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-500 text-sm font-medium transition-colors disabled:opacity-50 touch-manipulation"
+            >
+              Clear
+            </button>
+            <button
+              onClick={() => handleDigit("0")}
+              disabled={loading}
+              className="h-16 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 text-white text-2xl font-medium transition-colors disabled:opacity-50 touch-manipulation"
+            >
+              0
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={loading}
+              className="h-16 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-500 transition-colors disabled:opacity-50 flex items-center justify-center touch-manipulation"
+            >
+              <Delete className="w-6 h-6" />
+            </button>
+          </div>
+
+          <p className="mt-8 text-zinc-600 text-xs">Enter your 6-digit staff PIN</p>
+        </>
+      )}
 
       {/* Passkey / Face ID login — hidden in POS/terminal mode */}
-      {passkeyAvailable && !terminalMode && (
+      {passkeyAvailable && !terminalMode && !isTotpMode && (
         <button
           onClick={handlePasskeyLogin}
           disabled={passkeyLoading || loading}

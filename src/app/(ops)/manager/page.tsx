@@ -80,6 +80,15 @@ export default function ManagerDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <LiveStaffPulse />
+            <a 
+              href="https://bungeezoo.com" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center justify-center p-2 text-stone-400 hover:text-stone-100 hover:bg-stone-800 rounded-lg transition-colors group"
+              title="Launch Screensaver"
+            >
+              <MonitorPlay size={20} className="group-hover:scale-110 transition-transform" />
+            </a>
             <span className="text-xs text-stone-400 hidden sm:block">
               {new Date().toLocaleDateString("en-US", {
                 weekday: "long",

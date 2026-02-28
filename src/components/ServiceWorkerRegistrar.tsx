@@ -12,6 +12,15 @@ export default function ServiceWorkerRegistrar() {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
 
+    // Listen for stale-chunk signals from the SW and hard-reload
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === "CHUNK_STALE") {
+        console.warn("[SW] Build changed — reloading for fresh chunks");
+        window.location.reload();
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+
     navigator.serviceWorker
       .register("/sw.js", { scope: "/" })
       .then((reg) => {
@@ -32,6 +41,10 @@ export default function ServiceWorkerRegistrar() {
       .catch((err) => {
         console.warn("[SW] Registration failed:", (err as Error)?.message);
       });
+
+    return () => {
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+    };
   }, []);
 
   return null;

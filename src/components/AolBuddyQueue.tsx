@@ -639,32 +639,48 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
           </div>
         </div>
       </div>
-      {/* ── Ready/Completed popups (AIM Instant Message windows) ── */}
-      <div style={{ position: "fixed", right: 24, bottom: 24, zIndex: 99999, display: "flex", flexDirection: "column-reverse", gap: 10, maxHeight: "40vh", overflow: "hidden", width: "20vw", minWidth: 280 }}>
-        {popups.map((pb, i) => (
-          <div
-            key={pb.id + "-popup-" + pb.status + "-" + i}
-            className="aim-window"
-            style={{
-              width: "100%",
-              background: "#c0c0c0",
-              border: "2px solid",
-              borderColor: "#fff #808080 #808080 #fff",
-              boxShadow: "2px 2px 0 1px #000",
-              animation: "aimBounce 0.4s ease-out",
-            }}
-            aria-live="polite"
-          >
-            {/* IM title bar */}
-            <div style={{ background: pb.status === "completed" ? "#800080" : "#000080", padding: "5px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div className="flex items-center gap-2">
-                <img src="/aol.png" alt="" width={16} height={16} style={{ imageRendering: "pixelated" }} />
-                <span style={{ color: "#fff", fontSize: 14, fontWeight: "bold" }}>
-                  {pb.handle} - Instant Message
-                </span>
-              </div>
+      {/* ── Persistent "Ready Orders" AIM IM window ── */}
+      <div
+        className="aim-window"
+        style={{
+          position: "fixed",
+          right: 24,
+          bottom: 24,
+          zIndex: 99999,
+          width: "22vw",
+          minWidth: 300,
+          maxHeight: "50vh",
+          background: "#c0c0c0",
+          border: "2px solid",
+          borderColor: "#fff #808080 #808080 #fff",
+          boxShadow: "2px 2px 0 1px #000",
+          display: "flex",
+          flexDirection: "column",
+        }}
+        aria-live="polite"
+      >
+        {/* IM title bar */}
+        <div
+          style={{
+            background: "#000080",
+            padding: "5px 10px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexShrink: 0,
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <img src="/aol.png" alt="" width={16} height={16} style={{ imageRendering: "pixelated" }} />
+            <span style={{ color: "#fff", fontSize: 15, fontWeight: "bold" }}>
+              ☕ Ready Orders - Instant Message
+            </span>
+          </div>
+          <div className="flex gap-1">
+            {["_", "□"].map((label) => (
               <button
-                onClick={() => setPopups((p) => p.filter((_, idx) => idx !== i))}
+                key={label}
+                aria-label={label}
                 style={{
                   background: "#c0c0c0",
                   border: "2px solid",
@@ -673,36 +689,106 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
                   cursor: "default", padding: 0,
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
-                aria-label="Close"
               >
-                ✕
+                {label}
               </button>
+            ))}
+          </div>
+        </div>
+
+        {/* IM message area — scrollable list of ready names */}
+        <div
+          className="win-inset"
+          style={{
+            margin: 6,
+            background: "#fff",
+            padding: 10,
+            flex: 1,
+            overflowY: "auto",
+            minHeight: 80,
+            maxHeight: "calc(50vh - 90px)",
+          }}
+        >
+          {popups.length === 0 ? (
+            <div style={{ color: "#808080", fontSize: 15, fontStyle: "italic", textAlign: "center", padding: "12px 0" }}>
+              Waiting for orders…
             </div>
-            {/* IM body */}
-            <div className="win-inset" style={{ margin: 6, background: "#fff", padding: 10 }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                <img src="/aol.png" alt="AIM" width={28} height={28} style={{ imageRendering: "pixelated", flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontWeight: "bold", fontSize: 15, color: pb.status === "completed" ? "#800080" : "#000080" }}>
-                    {pb.handle}:
+          ) : (
+            popups.map((pb, i) => (
+              <div
+                key={pb.id + "-msg-" + pb.status + "-" + i}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  padding: "5px 0",
+                  borderBottom: i < popups.length - 1 ? "1px solid #e0e0e0" : "none",
+                  animation: freshReadyIds.has(pb.id) ? "aimBounce 0.4s ease-out" : undefined,
+                }}
+              >
+                <img src="/aol.png" alt="" width={18} height={18} style={{ imageRendering: "pixelated", flexShrink: 0, marginTop: 1 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6 }}>
+                    <span style={{ fontWeight: "bold", fontSize: 15, color: pb.status === "completed" ? "#800080" : "#000080" }}>
+                      {pb.handle}
+                    </span>
+                    <span style={{ fontSize: 11, color: "#808080", whiteSpace: "nowrap" }}>
+                      {new Date(pb.when).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                    </span>
                   </div>
-                  <div style={{ fontSize: 15, marginTop: 3 }}>
+                  <div style={{ fontSize: 14, marginTop: 1, color: "#333" }}>
                     {pb.status === "completed"
-                      ? "Order picked up! 🎉 Goodbye!"
-                      : "Your order is READY! Come grab it! ☕"}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#808080", marginTop: 4 }}>
-                    {new Date(pb.when).toLocaleTimeString()}
+                      ? "Picked up! 🎉"
+                      : "Order READY ☕"}
                   </div>
                 </div>
+                <button
+                  onClick={() => setPopups((p) => p.filter((_, idx) => idx !== i))}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    fontSize: 13,
+                    color: "#808080",
+                    cursor: "default",
+                    padding: "0 2px",
+                    lineHeight: 1,
+                    flexShrink: 0,
+                  }}
+                  aria-label={`Dismiss ${pb.handle}`}
+                >
+                  ✕
+                </button>
               </div>
-            </div>
-            {/* IM status bar */}
-            <div style={{ padding: "4px 10px 6px", fontSize: 12, color: "#404040", borderTop: "1px solid #808080" }}>
-              {pb.status === "completed" ? "☑ Buddy has signed off" : "☕ Buddy is ready for pickup"}
-            </div>
-          </div>
-        ))}
+            ))
+          )}
+        </div>
+
+        {/* IM status bar */}
+        <div
+          style={{
+            padding: "4px 10px 6px",
+            fontSize: 12,
+            color: "#404040",
+            borderTop: "1px solid #808080",
+            flexShrink: 0,
+            display: "flex",
+            justifyContent: "space-between",
+          }}
+        >
+          <span>
+            {popups.length > 0
+              ? `☕ ${popups.filter((p) => p.status === "ready").length} ready for pickup`
+              : "No orders ready"}
+          </span>
+          {popups.length > 0 && (
+            <button
+              onClick={() => setPopups([])}
+              style={{ background: "transparent", border: "none", fontSize: 12, color: "#808080", cursor: "default", textDecoration: "underline" }}
+            >
+              Clear All
+            </button>
+          )}
+        </div>
       </div>
     </>
   )
