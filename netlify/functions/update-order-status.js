@@ -3,6 +3,13 @@ const { authorize, json } = require('./_auth');
 const { generateReceiptString, queueReceipt } = require('./_receipt');
 const { requireCsrfHeader } = require('./_csrf');
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 // Initialize with Service Role Key (Bypasses RLS)
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -160,6 +167,22 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Invalid order ID format' }) };
     }
 
+    let cachedOrderPayload = null;
+    const fetchPayloadOnce = async () => {
+      if (cachedOrderPayload) return cachedOrderPayload;
+      const payloadQuery = withSourceComment(
+        supabase
+          .from('orders')
+          .select('*, coffee_orders(drink_name, price)')
+          .eq('id', orderId),
+        'op-order-payload-once'
+      );
+      const { data: fullOrder, error: payloadErr } = await payloadQuery.single();
+      if (payloadErr) throw payloadErr;
+      cachedOrderPayload = fullOrder;
+      return cachedOrderPayload;
+    };
+
     // ── STATUS TRANSITION STATE MACHINE ──────────────────────
     // Enforce valid transitions to prevent going backwards or from terminal states.
     // Self-transitions (e.g. ready→ready) are idempotent — handled below.
@@ -215,12 +238,10 @@ exports.handler = async (event) => {
           const { data: existingReceipt } = await supabase
             .from('receipt_queue').select('id').eq('order_id', orderId).limit(1).single();
           if (!existingReceipt) {
-            const { data: fullOrder } = await supabase
-              .from('orders').select('*').eq('id', orderId).single();
-            const { data: lineItems } = await supabase
-              .from('coffee_orders').select('drink_name, price').eq('order_id', orderId);
+            const fullOrder = await fetchPayloadOnce();
             if (fullOrder) {
-              const receiptText = generateReceiptString(fullOrder, lineItems || []);
+              const { coffee_orders: lineItems = [], ...orderPayload } = fullOrder;
+              const receiptText = generateReceiptString(orderPayload, lineItems);
               await queueReceipt(supabase, orderId, receiptText);
             }
           }
@@ -253,12 +274,10 @@ exports.handler = async (event) => {
         const { data: existingReceipt } = await supabase
           .from('receipt_queue').select('id').eq('order_id', orderId).limit(1).single();
         if (!existingReceipt) {
-          const { data: fullOrder } = await supabase
-            .from('orders').select('*').eq('id', orderId).single();
-          const { data: lineItems } = await supabase
-            .from('coffee_orders').select('drink_name, price').eq('order_id', orderId);
+          const fullOrder = await fetchPayloadOnce();
           if (fullOrder) {
-            const receiptText = generateReceiptString(fullOrder, lineItems || []);
+            const { coffee_orders: lineItems = [], ...orderPayload } = fullOrder;
+            const receiptText = generateReceiptString(orderPayload, lineItems);
             await queueReceipt(supabase, orderId, receiptText);
           }
         }
@@ -366,15 +385,19 @@ exports.handler = async (event) => {
     // ── UPDATE VIA RPC: sets app.voucher_bypass GUC inside a transaction ──
     // This prevents prevent_order_amount_tampering from rejecting vouchered
     // ($0.00) orders when handle_order_completion modifies the row.
-    const { data: rpcResult, error: rpcError } = await supabase.rpc(
-      'safe_update_order_status',
-      {
-        p_order_id:     orderId,
-        p_status:       status,
-        p_completed_at: status === 'completed' ? new Date().toISOString() : null,
-        p_payment_id:   updatePayload.payment_id || null,
-      }
+    const rpcQuery = withSourceComment(
+      supabase.rpc(
+        'safe_update_order_status',
+        {
+          p_order_id:     orderId,
+          p_status:       status,
+          p_completed_at: status === 'completed' ? new Date().toISOString() : null,
+          p_payment_id:   updatePayload.payment_id || null,
+        }
+      ),
+      'op-order-mutation'
     );
+    const { data: rpcResult, error: rpcError } = await rpcQuery;
 
     if (rpcError) {
       return await buildPgErrorResponse(rpcError, orderId, auth.user?.email, CORS_HEADERS, currentOrder.status);
@@ -451,13 +474,13 @@ exports.handler = async (event) => {
     // Generate receipt for cash/comp payments (Square receipts handled by webhook)
     if (paymentMethod && ['cash', 'comp'].includes(paymentMethod) && data[0]) {
       try {
-        const { data: lineItems } = await supabase
-          .from('coffee_orders')
-          .select('drink_name, price')
-          .eq('order_id', orderId);
+        const fullOrder = await fetchPayloadOnce();
 
-        const receiptText = generateReceiptString(data[0], lineItems || []);
-        await queueReceipt(supabase, orderId, receiptText);
+        if (fullOrder) {
+          const { coffee_orders: lineItems = [], ...orderPayload } = fullOrder;
+          const receiptText = generateReceiptString(orderPayload, lineItems);
+          await queueReceipt(supabase, orderId, receiptText);
+        }
       } catch (receiptErr) {
         console.error('[RECEIPT] Non-fatal receipt error:', receiptErr.message);
       }

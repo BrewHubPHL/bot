@@ -6,6 +6,13 @@ const { sanitizeInput } = require('./_sanitize');
 const { staffBucket } = require('./_token-bucket');
 const { redactIP } = require('./_ip-hash');
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 // Device fingerprint derivation — must match _auth.js and middleware.ts:
 //   sha256(user-agent + '|' + accept-language + '|' + clientIP).slice(0, 16)
 function deriveDeviceFingerprint(event) {
@@ -101,11 +108,15 @@ exports.handler = async (event) => {
       // Resolve admin's staff_directory row so the token carries a real staffId.
       // Without this, clock-in/out and any RPC keyed on staff_directory.id fails.
       const adminSupabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-      const { data: adminRow, error: adminLookupErr } = await adminSupabase
-        .from('staff_directory')
-        .select('id, name, full_name, is_working')
-        .eq('email', adminEmail)
-        .single();
+      // Schema 77: read from v_staff_status which computes is_working from time_logs
+      const adminLookupQuery = withSourceComment(
+        adminSupabase
+        .from('v_staff_status')
+        .select('id, name, full_name, email, role, is_working, is_active')
+        .eq('email', adminEmail),
+        'auth-staff-status-lookup'
+      );
+      const { data: adminRow, error: adminLookupErr } = await adminLookupQuery.single();
 
       if (adminLookupErr || !adminRow) {
         console.error('[PIN-LOGIN] Admin email not found in staff_directory:', adminLookupErr?.message);

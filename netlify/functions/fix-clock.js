@@ -154,10 +154,12 @@ exports.handler = async (event) => {
       console.error('[FIX-CLOCK] Audit trail warning (non-fatal):', auditErr.message);
     }
 
-    // Update staff is_working flag
+    // Update staff is_working_legacy flag (schema 77: column renamed)
+    // The canonical is_working is now computed from time_logs via v_staff_status,
+    // but we keep the legacy column in sync for backward compatibility.
     await supabase
       .from('staff_directory')
-      .update({ is_working: false })
+      .update({ is_working_legacy: false })
       .eq('email', employee_email.toLowerCase().trim());
 
     console.log(`[FIX-CLOCK] Manager ${managerEmail} fixed clock-out for ${employee_email} → ${clockOutDate.toISOString()} (log ${openLog.id}, reason: ${reason.trim()})`);

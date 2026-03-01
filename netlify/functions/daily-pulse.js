@@ -1,6 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import twilio from 'twilio';
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 export default async function (req, context) {
   if (process.env.ENABLE_DAILY_PULSE !== 'true') return new Response('Disabled');
 
@@ -12,13 +19,13 @@ export default async function (req, context) {
     const startTime = new Date(endTime.getTime() - (24 * 60 * 60 * 1000));
 
     const [orders, parcelsIn, parcelsOut, residents] = await Promise.all([
-      supabase.from('orders').select('*').gte('created_at', startTime.toISOString()),
-      supabase.from('parcels').select('*', { count: 'exact', head: true }).eq('status', 'logged').gte('logged_at', startTime.toISOString()),
-      supabase.from('parcels').select('*', { count: 'exact', head: true }).eq('status', 'picked_up').gte('picked_up_at', startTime.toISOString()),
+      withSourceComment(supabase.from('orders').select('status, total_amount_cents').gte('created_at', startTime.toISOString()), 'pulse-orders'),
+      withSourceComment(supabase.from('parcels').select('id', { count: 'exact', head: true }).eq('status', 'logged').gte('logged_at', startTime.toISOString()), 'pulse-parcels-inbound'),
+      withSourceComment(supabase.from('parcels').select('id', { count: 'exact', head: true }).eq('status', 'picked_up').gte('picked_up_at', startTime.toISOString()), 'pulse-parcels-outbound'),
       supabase.from('residents').select('*', { count: 'exact', head: true }).gte('created_at', startTime.toISOString())
     ]);
 
-    const rev = orders.data?.reduce((acc, o) => acc + (o.status === 'completed' ? o.total_cents : 0), 0) || 0;
+    const rev = orders.data?.reduce((acc, o) => acc + (o.status === 'completed' ? o.total_amount_cents : 0), 0) || 0;
 
     const message = `
 ☕ BrewHub Pulse

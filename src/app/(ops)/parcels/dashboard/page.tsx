@@ -234,63 +234,6 @@ export default function ParcelDashboardPage() {
   const [guestSaving, setGuestSaving] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* ─── Resident directory cache ───────────────────────────────── */
-  const directoryRef = useRef<ResidentInfo[] | null>(null);
-  const directoryLoadingRef = useRef(false);
-
-  const loadDirectory = useCallback(async (): Promise<ResidentInfo[]> => {
-    if (directoryRef.current) return directoryRef.current;
-    if (directoryLoadingRef.current) {
-      // Wait for in-flight load
-      await new Promise<void>((resolve) => {
-        const check = setInterval(() => {
-          if (directoryRef.current) { clearInterval(check); resolve(); }
-        }, 100);
-      });
-      return directoryRef.current!;
-    }
-
-    directoryLoadingRef.current = true;
-    const prefixes = "abcdefghijklmnopqrstuvwxyz".split("");
-    const allResults = new Map<number, ResidentInfo>();
-
-    const batchSize = 6;
-    for (let i = 0; i < prefixes.length; i += batchSize) {
-      const batch = prefixes.slice(i, i + batchSize);
-      const results = await Promise.allSettled(
-        batch.map(async (p) => {
-          const res = await fetch(
-            `${API_BASE}/search-residents?prefix=${encodeURIComponent(p)}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "X-BrewHub-Action": "true",
-              },
-            },
-          );
-          if (!res.ok) return [];
-          const data = await res.json();
-          return (data.results || []) as ResidentInfo[];
-        }),
-      );
-      for (const r of results) {
-        if (r.status === "fulfilled") {
-          for (const res of r.value) allResults.set(res.id, res);
-        }
-      }
-    }
-
-    const dir = Array.from(allResults.values());
-    directoryRef.current = dir;
-    directoryLoadingRef.current = false;
-    return dir;
-  }, [token]);
-
-  // Preload directory on mount
-  useEffect(() => {
-    loadDirectory();
-  }, [loadDirectory]);
-
   /* ─── Manual search: phone first, name fallback ──────────────── */
   const runSearch = useCallback(async (query: string) => {
     const q = query.trim();
@@ -366,13 +309,28 @@ export default function ParcelDashboardPage() {
     }
   }, [tracking]);
 
-  /* ─── Resident lookup by unit ────────────────────────────────── */
+  /* ─── Resident lookup by unit (live API call) ─────────────────── */
   const lookupUnit = useCallback(async (unit: string): Promise<ResidentInfo | null> => {
     if (!unit.trim()) return null;
-    const dir = await loadDirectory();
-    const normalised = unit.trim().toLowerCase();
-    return dir.find((r) => r.unit_number?.trim().toLowerCase() === normalised) || null;
-  }, [loadDirectory]);
+    try {
+      const res = await fetch(
+        `${API_BASE}/search-residents?unit=${encodeURIComponent(unit.trim())}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-BrewHub-Action": "true",
+          },
+        },
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      const results = (data.results || []) as ResidentInfo[];
+      const normalised = unit.trim().toLowerCase();
+      return results.find((r) => r.unit_number?.trim().toLowerCase() === normalised) || null;
+    } catch {
+      return null;
+    }
+  }, [token]);
 
   /* ─── Realtime sync from iPhone ──────────────────────────────── */
   const { connected, sendResult } = useParcelSync({

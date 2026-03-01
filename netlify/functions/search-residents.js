@@ -31,7 +31,28 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { prefix, phone } = event.queryStringParameters || {};
+    const { prefix, phone, unit } = event.queryStringParameters || {};
+
+    // ── Unit lookup (parcel intake) ────────────────────────────
+    if (unit) {
+      const trimmed = unit.trim();
+      if (trimmed.length < 1 || trimmed.length > 10) {
+        return json(400, { error: 'Unit must be 1-10 characters' });
+      }
+      const { data, error } = await supabase
+        .from('residents')
+        .select('id, name, unit_number, phone')
+        .ilike('unit_number', trimmed)
+        .order('name')
+        .limit(5);
+
+      if (error) throw error;
+
+      return json(200, {
+        results: data || [],
+        count: data?.length || 0,
+      });
+    }
 
     // ── Phone lookup (primary) ─────────────────────────────────
     if (phone) {

@@ -41,51 +41,6 @@ function HourglassIcon() {
   )
 }
 
-/** Win95 pixel-art coffee mug with flapping wings */
-function FlyingCoffeeMug() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 40 32"
-      width="40"
-      height="32"
-      style={{ imageRendering: "pixelated" }}
-      aria-hidden="true"
-    >
-      {/* Left wing */}
-      <g style={{ transformOrigin: "14px 12px", animation: "wingFlap 0.3s ease-in-out infinite alternate" }}>
-        <polygon points="14,12 6,6 4,10 8,14" fill="#c0c0c0" stroke="#808080" strokeWidth="0.5" />
-        <polygon points="12,14 4,10 2,14 6,16" fill="#dfdfdf" stroke="#808080" strokeWidth="0.5" />
-      </g>
-      {/* Right wing */}
-      <g style={{ transformOrigin: "26px 12px", animation: "wingFlap 0.3s ease-in-out infinite alternate-reverse" }}>
-        <polygon points="26,12 34,6 36,10 32,14" fill="#c0c0c0" stroke="#808080" strokeWidth="0.5" />
-        <polygon points="28,14 36,10 38,14 34,16" fill="#dfdfdf" stroke="#808080" strokeWidth="0.5" />
-      </g>
-      {/* Steam wisps */}
-      <rect x="17" y="4" width="2" height="3" rx="1" fill="#808080" opacity="0.5" style={{ animation: "steamRise 0.8s ease-in-out infinite" }} />
-      <rect x="21" y="5" width="2" height="2" rx="1" fill="#808080" opacity="0.4" style={{ animation: "steamRise 0.8s ease-in-out infinite 0.3s" }} />
-      {/* Mug body */}
-      <rect x="13" y="12" width="14" height="14" rx="1" fill="#8B4513" />
-      <rect x="14" y="13" width="12" height="12" rx="1" fill="#A0522D" />
-      {/* Coffee surface */}
-      <rect x="14" y="13" width="12" height="4" rx="1" fill="#3E1C00" />
-      {/* Highlight on mug */}
-      <rect x="15" y="19" width="2" height="4" fill="#C9773D" opacity="0.6" />
-      {/* Handle */}
-      <rect x="27" y="15" width="3" height="2" fill="#8B4513" />
-      <rect x="29" y="15" width="2" height="7" fill="#8B4513" />
-      <rect x="27" y="21" width="3" height="2" fill="#8B4513" />
-      {/* Smiley face on mug :-) */}
-      <rect x="17" y="20" width="1" height="1" fill="#FFD700" />
-      <rect x="22" y="20" width="1" height="1" fill="#FFD700" />
-      <rect x="18" y="23" width="4" height="1" fill="#FFD700" />
-      <rect x="17" y="22" width="1" height="1" fill="#FFD700" />
-      <rect x="22" y="22" width="1" height="1" fill="#FFD700" />
-    </svg>
-  )
-}
-
 /** Warning triangle for guest / unpaid orders */
 function WarningIcon() {
   return (
@@ -150,8 +105,6 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
   const [freshReadyIds, setFreshReadyIds] = useState<Set<string>>(new Set())
     const [popups, setPopups] = useState<{ id: string; handle: string; when: number; status: string }[]>([])
     const prevStatuses = useRef<Record<string, string>>({})
-  const [mugVisible, setMugVisible] = useState(false)
-  const mugKey = useRef(0)
   const [dialupPhase, setDialupPhase] = useState(0)
 
   // Cycle through dial-up modem status text
@@ -162,20 +115,7 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
     return () => clearInterval(interval)
   }, [])
 
-  // Flying mug timer — launches every ~10s, visible for 3s during flight
-  useEffect(() => {
-    const launch = () => {
-      mugKey.current += 1
-      setMugVisible(true)
-      setTimeout(() => setMugVisible(false), 3200)
-    }
-    // First launch after 5s, then every 10s
-    const initial = setTimeout(launch, 5000)
-    const interval = setInterval(launch, 10000)
-    return () => { clearTimeout(initial); clearInterval(interval) }
-  }, [])
-
-  // "Ready for pickup" = KDS completed (barista brought drink to counter)
+  // Derived lists — cheap O(N) filters, only recalculated when `orders` identity changes
   const readyOrders = orders.filter((o) => o.status === "completed")
   const inProgressOrders = orders.filter(
     (o) => o.status !== "completed" && !o.is_guest_order,
@@ -186,38 +126,39 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
     (o) => o.status !== "completed" && o.status !== "cancelled",
   ).length
 
+  // ── Unified data-diffing effect ───────────────────────────────
+  // ALL popup / ready-bounce / status-transition logic lives here.
+  // It ONLY runs when the `orders` array reference changes — NOT on
+  // every cosmetic timer tick (dialup phase, etc.).
   useEffect(() => {
-    const currentIds = new Set(readyOrders.map((o) => o.id))
+    // 1. Detect newly-ready orders for bounce animation
+    const currentReadyIds = new Set(
+      orders.filter((o) => o.status === "completed").map((o) => o.id),
+    )
     const newlyReady = new Set(
-      [...currentIds].filter((id) => !prevReadyIds.current.has(id)),
+      [...currentReadyIds].filter((id) => !prevReadyIds.current.has(id)),
     )
     if (newlyReady.size > 0) {
       setFreshReadyIds(newlyReady)
-      // Add popup notifications for each new ready order
       const now = Date.now()
-        const additions = [...newlyReady].map((id) => {
-          const ord = readyOrders.find((o) => o.id === id)
-          return { id, handle: ord ? aimHandle(ord) : id, when: now, status: "ready" }
-        })
-        setPopups((p) => {
-          // avoid duplicates by id+status
-          const existing = new Set(p.map((x) => `${x.id}:${x.status}`))
-          const merged = [...p, ...additions.filter((a) => !existing.has(`${a.id}:${a.status}`))]
-          return merged.slice(-10)
-        })
-        // Clear fresh-ready markers after animation completes (≈2s)
-        setTimeout(() => setFreshReadyIds(new Set()), 2000)
+      const additions = [...newlyReady].map((id) => {
+        const ord = orders.find((o) => o.id === id)
+        return { id, handle: ord ? aimHandle(ord) : id, when: now, status: "ready" }
+      })
+      setPopups((p) => {
+        const existing = new Set(p.map((x) => `${x.id}:${x.status}`))
+        const merged = [...p, ...additions.filter((a) => !existing.has(`${a.id}:${a.status}`))]
+        return merged.slice(-10)
+      })
+      setTimeout(() => setFreshReadyIds(new Set()), 2000)
     }
-    prevReadyIds.current = currentIds
-  }, [readyOrders])
+    prevReadyIds.current = currentReadyIds
 
-  // Track status transitions — popup fires when KDS marks "completed" (drink at counter)
-  useEffect(() => {
+    // 2. Track status transitions — popup fires when KDS marks "completed"
     const nextStatuses: Record<string, string> = { ...prevStatuses.current }
     orders.forEach((o) => {
       const prev = prevStatuses.current[o.id]
       if (prev !== o.status) {
-        // Fire "ready" popup only when barista completes order on KDS
         if (o.status === "completed") {
           setPopups((p) => {
             const key = `${o.id}:ready`
@@ -257,32 +198,6 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
         @keyframes spin {
           from { transform: rotate(0deg); }
           to   { transform: rotate(360deg); }
-        }
-
-        /* ── Flying coffee mug (delivers AIM mail to popup corner) ── */
-        @keyframes mugFly {
-          0%   { top: 2%; left: 10%; opacity: 0; transform: scale(0.6) rotate(-10deg); }
-          8%   { opacity: 1; transform: scale(1) rotate(0deg); }
-          25%  { top: 20%; left: 30%; transform: scale(1) rotate(8deg); }
-          50%  { top: 45%; left: 55%; transform: scale(1.1) rotate(-5deg); }
-          75%  { top: 65%; left: 75%; transform: scale(1) rotate(5deg); }
-          92%  { opacity: 1; transform: scale(0.9) rotate(0deg); }
-          100% { top: 82%; left: 92%; opacity: 0; transform: scale(0.6) rotate(10deg); }
-        }
-        @keyframes wingFlap {
-          0%   { transform: rotateX(0deg) scaleY(1); }
-          100% { transform: rotateX(50deg) scaleY(0.6); }
-        }
-        @keyframes steamRise {
-          0%   { opacity: 0.5; transform: translateY(0); }
-          100% { opacity: 0; transform: translateY(-4px); }
-        }
-        .flying-mug {
-          position: absolute;
-          z-index: 50;
-          pointer-events: none;
-          animation: mugFly 3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-          filter: drop-shadow(1px 2px 0 rgba(0,0,0,0.3));
         }
 
         /* ── Dial-up runner ── */
@@ -418,13 +333,6 @@ export default function AolBuddyQueue({ orders }: AolBuddyQueueProps) {
 
           {/* ── Buddy list body ── */}
           <div className="win-inset m-2" style={{ background: "#fff", flex: 1, position: "relative", overflow: "hidden" }}>
-            {/* ── Flying coffee mug (Win95 nostalgia) ── */}
-            {mugVisible && (
-              <div key={mugKey.current} className="flying-mug">
-                <FlyingCoffeeMug />
-              </div>
-            )}
-
             {/* ── SECTION: Orders Signed On (Ready) ── */}
             <CategoryHeader
               label="Orders Signed On"

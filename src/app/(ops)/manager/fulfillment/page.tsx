@@ -31,6 +31,7 @@ import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import { supabase } from "@/lib/supabase";
+import { useOpsSession } from "@/components/OpsGate";
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface ShippingAddress {
@@ -69,16 +70,6 @@ const API_BASE =
     ? "http://localhost:8888/.netlify/functions"
     : "/.netlify/functions";
 
-function getAccessToken(): string | null {
-  try {
-    const raw = sessionStorage.getItem("ops_session");
-    if (!raw) return null;
-    return JSON.parse(raw)?.token ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
@@ -111,6 +102,7 @@ interface Toast {
    FULFILLMENT DASHBOARD
    ═══════════════════════════════════════════════════════════ */
 export default function FulfillmentDashboard() {
+  const { token } = useOpsSession();
   const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +120,6 @@ export default function FulfillmentDashboard() {
       setError(null);
       setAuthzState(null);
 
-      const token = getAccessToken();
       try {
         const qs = activeTab === "history" ? "?include_shipped=true" : "";
         const res = await fetch(`${API_BASE}/get-fulfillment-orders${qs}`, {
@@ -154,7 +145,7 @@ export default function FulfillmentDashboard() {
         setLoading(false);
       }
     },
-    [activeTab],
+    [activeTab, token],
   );
 
   /* ── Helper: show a toast ───────────────────────────── */
@@ -203,7 +194,6 @@ export default function FulfillmentDashboard() {
 
   /* ── Mark as Shipped ───────────────────────────────────── */
   const markAsShipped = async (orderId: string) => {
-    const token = getAccessToken();
     if (!token) {
       setError("Session expired — please re-authenticate.");
       return;
@@ -249,8 +239,6 @@ export default function FulfillmentDashboard() {
 
   /* ── Authz error handler ───────────────────────────────── */
   const handleAuthzAction = () => {
-    // Clear session and reload to trigger PIN re-entry
-    sessionStorage.removeItem("ops_session");
     window.location.reload();
   };
 

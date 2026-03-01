@@ -4,16 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOpsSession } from '@/components/OpsGate';
 import { useConnection } from '@/lib/useConnection';
 import OfflineBanner from '@/components/OfflineBanner';
+import LiveClock from '@/components/LiveClock';
 import { KdsGrid } from '@/components/KdsGrid';
 import type { KdsGridState } from '@/components/KdsGrid';
-
-function getAccessToken(): string | null {
-  try {
-    const raw = sessionStorage.getItem("ops_session");
-    if (!raw) return null;
-    return JSON.parse(raw)?.token ?? null;
-  } catch { return null; }
-}
 
 const API_BASE =
   typeof window !== "undefined" && window.location.hostname === "localhost"
@@ -34,7 +27,6 @@ export default function KDS() {
   const session = useOpsSession();
   const { isOnline, wasOffline, offlineSince } = useConnection();
 
-  const [clock, setClock]           = useState<string>("");
   const [ordersLen, setOrdersLen]   = useState(0);
   const [kdsSource, setKdsSource]   = useState<"live" | "cached">("live");
   const [error, setError]           = useState<string | null>(null);
@@ -46,14 +38,6 @@ export default function KDS() {
   const [undoingId, setUndoingId]             = useState<string | null>(null);
   const undoLockRef = useRef(false);
 
-  // Tick the clock every second
-  useEffect(() => {
-    const tick = () => setClock(new Date().toLocaleTimeString());
-    tick();
-    const t = setInterval(tick, 1000);
-    return () => clearInterval(t);
-  }, []);
-
   function handleStateChange({ orders, source, error: err }: KdsGridState) {
     setOrdersLen(orders.length);
     setKdsSource(source);
@@ -64,7 +48,7 @@ export default function KDS() {
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const t = getAccessToken();
+      const t = session.token;
       if (!t) throw new Error("No PIN session");
       const res = await fetch(`${API_BASE}/get-kds-orders?history=true`, {
         headers: { Authorization: `Bearer ${t}` },
@@ -78,7 +62,7 @@ export default function KDS() {
     } finally {
       setHistoryLoading(false);
     }
-  }, []);
+  }, [session.token]);
 
   // Fetch history when panel opens
   useEffect(() => {
@@ -91,7 +75,7 @@ export default function KDS() {
     undoLockRef.current = true;
     setUndoingId(orderId);
     try {
-      const t = getAccessToken();
+      const t = session.token;
       if (!t) throw new Error("No PIN session");
       const res = await fetch(`${API_BASE}/update-order-status`, {
         method: "POST",
@@ -116,7 +100,7 @@ export default function KDS() {
       setUndoingId(null);
       undoLockRef.current = false;
     }
-  }, []);
+  }, [session.token]);
 
   /* ── Time helper ──────────────────────────────────────────── */
   function timeAgo(iso: string): string {
@@ -137,7 +121,7 @@ export default function KDS() {
           <p className="text-sm font-mono text-stone-600 mt-2">
             {isOnline ? 'SYSTEM ONLINE' : '\u26A0 OFFLINE \u2014 SHOWING LAST KNOWN ORDERS'}
             {kdsSource === 'cached' && isOnline ? ' (cached)' : ''}
-            {' // '}{clock || '\u2014'} // {ordersLen} active
+            {' // '}<LiveClock intervalMs={1_000}>{(now) => now.toLocaleTimeString()}</LiveClock> // {ordersLen} active
           </p>
         </div>
 
@@ -248,7 +232,7 @@ export default function KDS() {
         </div>
       )}
 
-      <KdsGrid token={getAccessToken()} staffId={session.staff.id} onStateChange={handleStateChange} />
+      <KdsGrid token={session.token} staffId={session.staff.id} onStateChange={handleStateChange} />
     </main>
   );
 }

@@ -195,7 +195,6 @@ export default function ParcelsPickupPage() {
   const handleAuthzAction = useCallback(() => {
     if (!authzState) return;
     if (authzState.status === 401) {
-      sessionStorage.removeItem("ops_session");
       window.location.reload();
       return;
     }

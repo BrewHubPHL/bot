@@ -82,8 +82,5 @@ let _logoutFired = false;
 export function forceOpsLogout(): void {
   if (_logoutFired) return;
   _logoutFired = true;
-  try {
-    sessionStorage.removeItem("ops_session");
-  } catch { /* SSR guard */ }
   window.location.reload();
 }

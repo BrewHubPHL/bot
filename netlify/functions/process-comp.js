@@ -7,7 +7,7 @@
 //   2. Manager enters their 6-digit PIN into the modal
 //   3. Frontend calls this endpoint with the manager_pin + cart + reason
 //   4. This function verifies the manager PIN server-side (bcrypt via RPC)
-//   5. Creates the order with total_amount_cents = 0, status = 'comped'
+//   5. Creates the order with total_amount_cents = 0, status = 'preparing'
 //   6. Logs the event in comp_audit with the manager as the authorizing actor
 //
 // SECURITY:
@@ -356,10 +356,10 @@ exports.handler = async (event) => {
     originalTotalCents = Math.max(0, originalTotalCents);
 
     // ════════════════════════════════════════════════════════════
-    // STEP 4: Create order (total_amount_cents = 0, status = 'comped')
+    // STEP 4: Create order (total_amount_cents = 0, status = 'preparing')
     // ════════════════════════════════════════════════════════════
     const orderRow = {
-      status: 'comped',
+      status: 'preparing',
       type: 'cafe',
       total_amount_cents: 0,
       payment_id: `comp-mgr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

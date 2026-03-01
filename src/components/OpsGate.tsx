@@ -201,67 +201,51 @@ export default function OpsGate({ children, requireManager = false }: { children
     return () => clearInterval(tick);
   }, [mounted]);
 
-  // Verify existing session with backend on mount
-  const verifySession = useCallback(async (savedSession: OpsSession) => {
+  // Verify existing session with backend on mount (HttpOnly cookie is sent automatically)
+  const verifySession = useCallback(async () => {
     setVerifying(true);
     try {
-      // Call a lightweight endpoint to verify token & sync is_working status
       const res = await fetch(`${API_BASE}/pin-verify`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${savedSession.token}`,
           "X-BrewHub-Action": "true",
         },
+        credentials: "include",
       });
 
       if (!res.ok) {
         const data = await res.json();
-        // Handle token version mismatch or other auth failures
         if (data.code === "TOKEN_VERSION_MISMATCH") {
           console.warn("[OpsGate] Session invalidated by backend");
         }
-        sessionStorage.removeItem("ops_session");
         setSession(null);
         return;
       }
 
       const data = await res.json();
-      // Sync is_working status from backend
-      const syncedSession: OpsSession = {
-        ...savedSession,
-        staff: { ...savedSession.staff, is_working: data.is_working ?? savedSession.staff.is_working },
-      };
-      setSession(syncedSession);
-      sessionStorage.setItem("ops_session", JSON.stringify(syncedSession));
+      // Restore session from backend — single source of truth
+      // pin-verify now returns the full { staff, token } payload.
+      if (!data.staff || !data.token) {
+        console.warn('[OpsGate] Verify response missing staff or token — forcing re-auth');
+        setSession(null);
+        return;
+      }
+      setSession({
+        staff: data.staff,
+        token: data.token,
+      });
     } catch (err) {
       console.error("[OpsGate] Session verification failed:", (err as Error)?.message);
-      sessionStorage.removeItem("ops_session");
       setSession(null);
     } finally {
       setVerifying(false);
     }
   }, []);
 
-  // Check for existing session in sessionStorage on mount
+  // On mount, verify session with backend via HttpOnly cookie — no sessionStorage
   useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem("ops_session");
-      if (saved) {
-        const parsed = JSON.parse(saved) as OpsSession;
-        // Check if token hasn't expired (parse the base64 payload)
-        const [payloadB64] = parsed.token.split(".");
-        const payload = JSON.parse(atob(payloadB64));
-        if (payload.exp && Date.now() < payload.exp) {
-          // Verify with backend to ensure token is still valid
-          verifySession(parsed);
-        } else {
-          sessionStorage.removeItem("ops_session");
-        }
-      }
-    } catch {
-      sessionStorage.removeItem("ops_session");
-    }
+    verifySession();
   }, [verifySession]);
 
   // Keyboard input handler
@@ -349,7 +333,6 @@ export default function OpsGate({ children, requireManager = false }: { children
         needsPinRotation: data.needsPinRotation || false,
       };
       setSession(newSession);
-      sessionStorage.setItem("ops_session", JSON.stringify(newSession));
       setPin("");
       setTotpCode("");
       setIsTotpMode(false);
@@ -408,15 +391,13 @@ export default function OpsGate({ children, requireManager = false }: { children
       const timeStr = formatTime(new Date(data.time));
       setClockMsg(`Clocked ${action === "in" ? "IN" : "OUT"} at ${timeStr}`);
 
-      // Update session state
+      // Update session state (React-only — no sessionStorage)
       setSession(prev => {
         if (!prev) return prev;
-        const updated = {
+        return {
           ...prev,
           staff: { ...prev.staff, is_working: action === "in" },
         };
-        sessionStorage.setItem("ops_session", JSON.stringify(updated));
-        return updated;
       });
 
       // Notify other tabs & trigger global context refresh
@@ -433,7 +414,6 @@ export default function OpsGate({ children, requireManager = false }: { children
     setPin("");
     setError("");
     setClockMsg("");
-    sessionStorage.removeItem("ops_session");
 
     // Scenario 8 defense: wipe any session-sensitive localStorage that
     // could bleed into the next operator's session on a shared iPad.
@@ -490,7 +470,6 @@ export default function OpsGate({ children, requireManager = false }: { children
         needsPinRotation: false,
       };
       setSession(newSession);
-      sessionStorage.setItem("ops_session", JSON.stringify(newSession));
       setPin("");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Passkey login failed";

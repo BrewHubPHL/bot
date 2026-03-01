@@ -181,18 +181,15 @@ async function confirmPayment({ supabase, orderId, paymentId, paidAmountCents, c
 
   // ── 5. Receipt generation (non-fatal) ─────────────────────
   try {
-    const { data: lineItems } = await supabase
-      .from('coffee_orders')
-      .select('drink_name, price')
-      .eq('order_id', orderId);
-
     const { data: fullOrder } = await supabase
       .from('orders')
-      .select('*')
+      .select('*, coffee_orders(drink_name, price)')
       .eq('id', orderId)
       .single();
 
-    if (fullOrder && lineItems) {
+    if (fullOrder) {
+      const lineItems = fullOrder.coffee_orders || [];
+      delete fullOrder.coffee_orders;
       const receiptText = generateReceiptString(fullOrder, lineItems);
       await queueReceipt(supabase, orderId, receiptText);
     }

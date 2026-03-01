@@ -9,6 +9,13 @@ const { authorize, sanitizedError } = require('./_auth');
 const { sanitizeInput } = require('./_sanitize');
 const { orderBucket } = require('./_token-bucket');
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 // ── Fail-closed env guard ─────────────────────────────────────────────────────
 const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -91,22 +98,28 @@ exports.handler = async (event) => {
     let query;
     if (isHistory) {
       const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      query = supabase
-        .from('orders')
-        .select('id, customer_name, status, created_at, updated_at, is_guest_order, total_amount_cents, claimed_by, coffee_orders(id, drink_name, customizations, price, completed_at, completed_by)')
-        .in('status', ['completed', 'ready'])
-        .neq('type', 'merch')
-        .gte('updated_at', cutoff)
-        .order('updated_at', { ascending: false })
-        .limit(10);
+      query = withSourceComment(
+        supabase
+          .from('orders')
+          .select('id, customer_name, status, created_at, updated_at, is_guest_order, total_amount_cents, claimed_by, coffee_orders(id, drink_name, customizations, price, completed_at, completed_by)')
+          .in('status', ['completed', 'ready'])
+          .neq('type', 'merch')
+          .gte('updated_at', cutoff)
+          .order('updated_at', { ascending: false })
+          .limit(10),
+        'kds-fetch-orders'
+      );
     } else {
-      query = supabase
-        .from('orders')
-        .select('id, customer_name, status, created_at, is_guest_order, total_amount_cents, claimed_by, coffee_orders(id, drink_name, customizations, price, completed_at, completed_by)')
-        .in('status', ['unpaid', 'pending', 'paid', 'preparing', 'ready'])
-        .neq('type', 'merch')
-        .order('created_at', { ascending: true })
-        .limit(200);
+      query = withSourceComment(
+        supabase
+          .from('orders')
+          .select('id, customer_name, status, created_at, is_guest_order, total_amount_cents, claimed_by, coffee_orders(id, drink_name, customizations, price, completed_at, completed_by)')
+          .in('status', ['unpaid', 'pending', 'paid', 'preparing', 'ready'])
+          .neq('type', 'merch')
+          .order('created_at', { ascending: true })
+          .limit(200),
+        'kds-fetch-orders'
+      );
     }
 
     const { data, error } = await query;

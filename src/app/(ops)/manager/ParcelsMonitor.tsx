@@ -46,12 +46,9 @@ interface ParcelRow {
 /* Constants                                                            */
 /* ------------------------------------------------------------------ */
 
-const POLL_MS     = 10_000;
-const MAX_POLL_MS = 60_000;
 const STALE_MS    = 30_000;
 const NEW_MS      = 5 * 60 * 1000;
 const DELAYED_MS  = 48 * 60 * 60 * 1000;
-const FLAP_INTERVAL_MS = 30_000; // trigger a flap cycle every 30s
 const FLAP_CHAR_POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -.:";
 
 /* ------------------------------------------------------------------ */
@@ -265,7 +262,9 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
   const [lastSuccess, setLastSuccess] = useState<number>(Date.now());
   const [flappingRowId, setFlappingRowId] = useState<string | null>(null);
   const flipIndexRef = useRef(0);
-  const backoffRef = useRef(POLL_MS);
+  const prevParcelIdsRef = useRef<Set<string>>(new Set());
+  // Schema 78: unified cafe order count for cross-reference badge
+  const [cafeReadyCount, setCafeReadyCount] = useState<number>(0);
 
   /* ---- Auto-fullscreen on mount --------------------------------- */
   useEffect(() => {
@@ -276,6 +275,7 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
 
   /* ---- Fetch from the secure VIEW ------------------------------- */
   const fetchParcels = useCallback(async () => {
+    // source: parcels-monitor-board
     const { data, error } = await supabase
       .from("parcel_departure_board")
       .select("id, masked_name, masked_tracking, carrier, received_at, direction, board_status")
@@ -284,60 +284,59 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
 
     if (error) {
       setFetchError(toUserSafeMessage(error.message, "Connection lost — retrying."));
-      backoffRef.current = Math.min(backoffRef.current * 2, MAX_POLL_MS);
     } else {
-      setParcels(data as ParcelRow[]);
+      const incoming = data as ParcelRow[];
+      // Detect changed rows to trigger the split-flap animation
+      const incomingIds = new Set(incoming.map(p => p.id));
+      const changed = incoming.find(p => !prevParcelIdsRef.current.has(p.id));
+      prevParcelIdsRef.current = incomingIds;
+      if (changed) {
+        setFlappingRowId(changed.id);
+        setTimeout(() => setFlappingRowId(null), 800);
+      }
+      setParcels(incoming);
       setFetchError(null);
       setLastSuccess(Date.now());
-      backoffRef.current = POLL_MS;
     }
     setLoading(false);
+
+    // Schema 78: fetch cafe order count from unified view
+    try {
+      // source: parcels-monitor-cafe-count
+      const { count, error: countErr } = await supabase
+        .from("v_items_to_pickup")
+        .select("item_id", { count: "exact", head: true })
+        .eq("item_type", "cafe_order");
+      if (!countErr) setCafeReadyCount(count ?? 0);
+    } catch { /* non-critical */ }
   }, []);
 
-  /* ---- Polling with adaptive backoff + pause when hidden -------- */
+  // Fetch once on mount + keep the clock ticking for the MechanicalClock display
   useEffect(() => {
     fetchParcels();
-    let pollId: ReturnType<typeof setTimeout>;
-    const schedulePoll = () => {
-      pollId = setTimeout(() => void fetchParcels().then(schedulePoll), backoffRef.current);
-    };
-    schedulePoll();
-
     const clockId = setInterval(() => setTick(Date.now()), 1_000);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        clearTimeout(pollId);
-        void fetchParcels().then(schedulePoll);
-      } else {
-        clearTimeout(pollId);
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-
-    return () => {
-      clearTimeout(pollId);
-      clearInterval(clockId);
-      document.removeEventListener("visibilitychange", handleVisibility);
-    };
+    return () => { clearInterval(clockId); };
   }, [fetchParcels]);
 
-  /* ---- Auto-flap: cycle through rows every 30s ----------------- */
+  // Realtime subscriptions — sole data-refresh mechanism (no polling).
+  // Subscribe to both underlying tables that feed the parcel_departure_board VIEW.
+  const channelIdRef = useRef(Math.random().toString(36).slice(2, 8));
   useEffect(() => {
-    if (!parcels || parcels.length === 0) return;
-
-    const flapTimer = setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      const idx = flipIndexRef.current % parcels.length;
-      const id = parcels[idx].id;
-      flipIndexRef.current += 1;
-      setFlappingRowId(id);
-      // Stop flapping after animation settles (~800ms)
-      setTimeout(() => setFlappingRowId(null), 800);
-    }, FLAP_INTERVAL_MS);
-
-    return () => clearInterval(flapTimer);
-  }, [parcels]);
+    const channel = supabase
+      .channel(`parcel-monitor-${channelIdRef.current}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "parcels" },
+        () => { fetchParcels(); },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "outbound_parcels" },
+        () => { fetchParcels(); },
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchParcels]);
 
   const isStale = tick - lastSuccess > STALE_MS;
 
@@ -412,6 +411,14 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
               <span className="text-xs" style={{ color: "#448899" }}>▲</span>
               <span className="text-lg font-bold tabular-nums" style={{ color: "#44ddee" }}>{outboundCount}</span>
             </span>
+            {/* Schema 78: cafe orders ready badge from unified view */}
+            {cafeReadyCount > 0 && (<>
+              <span className="text-xs uppercase tracking-widest" style={{ color: "#665530" }}>|</span>
+              <span className="flex items-center gap-1" title="Cafe orders ready for pickup">
+                <span className="text-xs" style={{ color: "#66cc66" }}>☕</span>
+                <span className="text-lg font-bold tabular-nums" style={{ color: "#88ee88" }}>{cafeReadyCount}</span>
+              </span>
+            </>)}
           </div>
           <MechanicalClock tick={tick} />
           <SystemStatus isStale={isStale} />

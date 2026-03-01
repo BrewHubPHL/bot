@@ -136,9 +136,10 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'No valid products in cart' }) };
     }
 
+    // Single query fetches prices AND stock_quantity — eliminates N per-item SELECTs
     const { data: dbProducts, error: dbErr } = await supabase
       .from('merch_products')
-      .select('id, name, price_cents')
+      .select('id, name, price_cents, stock_quantity')
       .eq('is_active', true)
       .is('archived_at', null)
       .or(filterParts.join(','));
@@ -184,58 +185,63 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid order total' }) };
     }
 
-    // ── ATOMIC pre-charge stock reservation ─────────────────────
-    // Strategy: Reserve (decrement) stock BEFORE charging the card.
-    // The Postgres UPDATE … WHERE stock_quantity >= qty acquires a
-    // row-level lock, so concurrent requests serialise automatically.
-    // If anything fails later we call rollback_merch_stock to restock.
+    // ── ATOMIC pre-charge stock reservation (batch — 1 RPC call) ─
+    // Strategy: Reserve (decrement) stock for ALL cart items in a single
+    // Postgres transaction via reserve_merch_stock_batch(). The RPC locks
+    // rows with FOR UPDATE and rolls back the entire batch if ANY item
+    // has insufficient stock. This eliminates the N+1 loop that previously
+    // ran 2 queries per cart item (SELECT stock + RPC reserve).
     //
-    // NULL stock_quantity = unlimited (print-on-demand / digital) — skipped.
-    const reservedItems = []; // Track what we reserved so we can rollback
+    // NULL stock_quantity = unlimited (print-on-demand / digital) — the
+    // RPC skips those rows automatically.
 
+    // Build the batch reservation payload — only items that exist in DB
+    // and have finite stock need to be included.
+    const batchItems = [];
     for (const item of cart) {
       const product = (dbProducts || []).find(p => p.id === item.id || p.name === item.name);
       if (!product) continue;
-
-      // Fetch current stock_quantity for this product
-      const { data: stockRow } = await supabase
-        .from('merch_products')
-        .select('stock_quantity')
-        .eq('id', product.id)
-        .single();
-
-      // NULL = unlimited — no reservation needed
-      if (!stockRow || stockRow.stock_quantity === null) continue;
-
+      // stock_quantity is now included in the initial dbProducts query
+      if (product.stock_quantity === null || product.stock_quantity === undefined) continue;
       const requestedQty = Math.min(20, Math.max(1, parseInt(item.quantity) || 1));
+      batchItems.push({ product_id: product.id, quantity: requestedQty, displayName: item.name || item.id });
+    }
 
-      // Atomic reserve: decrements stock only if enough is available
-      const { data: reserved, error: reserveErr } = await supabase
-        .rpc('reserve_merch_stock', { p_product_id: product.id, p_quantity: requestedQty });
+    // reservedItems tracks what was reserved for rollback on payment failure
+    let reservedItems = [];
 
-      if (reserveErr || !reserved || reserved.length === 0) {
-        // Insufficient stock — rollback any previously reserved items
-        for (const r of reservedItems) {
-          await supabase.rpc('rollback_merch_stock', {
-            p_product_id: r.productId,
-            p_quantity: r.quantity,
-          }).catch(e => console.error('[MERCH-PAY] Rollback failed during stock rejection:', e.message));
+    if (batchItems.length > 0) {
+      const { data: batchResult, error: batchErr } = await supabase
+        .rpc('reserve_merch_stock_batch', {
+          p_items: batchItems.map(({ product_id, quantity }) => ({ product_id, quantity })),
+        });
+
+      if (batchErr) {
+        // Parse the structured INSUFFICIENT_STOCK exception from Postgres
+        const errMsg = batchErr.message || '';
+        const stockMatch = errMsg.match(/INSUFFICIENT_STOCK::([^:]+)::(\d+)::(\d+)/);
+        if (stockMatch) {
+          const [, failedId, available, requested] = stockMatch;
+          const failedItem = batchItems.find(i => i.product_id === failedId);
+          const displayName = failedItem?.displayName || failedId;
+          const avail = parseInt(available);
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify({
+              error: avail <= 0
+                ? `${displayName} is out of stock.`
+                : `Only ${avail} of ${displayName} available (you requested ${requested}).`,
+            }),
+          };
         }
-
-        const displayName = item.name || item.id;
-        const available = stockRow.stock_quantity;
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({
-            error: available <= 0
-              ? `${displayName} is out of stock.`
-              : `Only ${available} of ${displayName} available (you requested ${requestedQty}).`,
-          }),
-        };
+        // Generic stock error
+        console.error('[MERCH-PAY] Batch reserve error:', errMsg);
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unable to reserve stock. Please try again.' }) };
       }
 
-      reservedItems.push({ productId: product.id, quantity: requestedQty });
+      // batchResult is a JSONB array of {product_id, quantity} that were reserved
+      reservedItems = (batchResult || []).map(r => ({ productId: r.product_id, quantity: r.quantity }));
     }
 
     // Deterministic idempotency key: same cart + same customer = same key
@@ -289,12 +295,11 @@ exports.handler = async (event) => {
 
       if (!payment || payment.status === 'FAILED') {
         console.error('Payment failed:', paymentResponse);
-        // Rollback reserved stock — card was NOT charged
-        for (const r of reservedItems) {
-          await supabase.rpc('rollback_merch_stock', {
-            p_product_id: r.productId,
-            p_quantity: r.quantity,
-          }).catch(e => console.error('[MERCH-PAY] Rollback failed after payment decline:', e.message));
+        // Rollback reserved stock — card was NOT charged (single batch call)
+        if (reservedItems.length > 0) {
+          await supabase.rpc('rollback_merch_stock_batch', {
+            p_items: reservedItems.map(r => ({ product_id: r.productId, quantity: r.quantity })),
+          }).catch(e => console.error('[MERCH-PAY] Batch rollback failed after payment decline:', e.message));
         }
         return { 
           statusCode: 400, 
@@ -303,12 +308,11 @@ exports.handler = async (event) => {
         };
       }
     } catch (squareErr) {
-      // Square threw — rollback reserved stock
-      for (const r of reservedItems) {
-        await supabase.rpc('rollback_merch_stock', {
-          p_product_id: r.productId,
-          p_quantity: r.quantity,
-        }).catch(e => console.error('[MERCH-PAY] Rollback failed after Square error:', e.message));
+      // Square threw — rollback reserved stock (single batch call)
+      if (reservedItems.length > 0) {
+        await supabase.rpc('rollback_merch_stock_batch', {
+          p_items: reservedItems.map(r => ({ product_id: r.productId, quantity: r.quantity })),
+        }).catch(e => console.error('[MERCH-PAY] Batch rollback failed after Square error:', e.message));
       }
       throw squareErr; // re-throw so outer catch returns 400/500
     }
@@ -345,12 +349,11 @@ exports.handler = async (event) => {
 
     if (insertErr || !insertedOrder) {
       // CRITICAL: Payment succeeded but DB insert failed.
-      // 1. Rollback reserved stock
-      for (const r of reservedItems) {
-        await supabase.rpc('rollback_merch_stock', {
-          p_product_id: r.productId,
-          p_quantity: r.quantity,
-        }).catch(e => console.error('[MERCH-PAY] Rollback failed after DB insert error:', e.message));
+      // 1. Rollback reserved stock (single batch call)
+      if (reservedItems.length > 0) {
+        await supabase.rpc('rollback_merch_stock_batch', {
+          p_items: reservedItems.map(r => ({ product_id: r.productId, quantity: r.quantity })),
+        }).catch(e => console.error('[MERCH-PAY] Batch rollback failed after DB insert error:', e.message));
       }
       // 2. Refund the Square payment so the customer isn't silently charged
       try {

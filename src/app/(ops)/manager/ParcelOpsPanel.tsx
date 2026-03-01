@@ -11,12 +11,13 @@
  * Fetches from the get-arrived-parcels Netlify function (staff-authed).
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Package, AlertTriangle, Clock, MonitorPlay, RefreshCw,
   Mail, MailX, ArrowLeftRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useOpsSession } from "@/components/OpsGate";
 
 /* ── Types ──────────────────────────────────────────────── */
 interface StaffParcel {
@@ -38,18 +39,6 @@ const API_BASE =
     ? "http://localhost:8888/.netlify/functions"
     : "/.netlify/functions";
 
-const POLL_MS = 30_000;
-
-function getAccessToken(): string | null {
-  try {
-    const raw = sessionStorage.getItem("ops_session");
-    if (!raw) return null;
-    return JSON.parse(raw)?.token ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "—";
   const ms = Date.now() - new Date(dateStr).getTime();
@@ -68,15 +57,14 @@ interface ParcelOpsPanelProps {
 }
 
 export default function ParcelOpsPanel({ onLaunchBoard }: ParcelOpsPanelProps) {
+  const { token } = useOpsSession();
   const [parcels, setParcels] = useState<StaffParcel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState<number>(0);
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchParcels = useCallback(async () => {
     try {
-      const token = getAccessToken();
       const res = await fetch(`${API_BASE}/get-arrived-parcels`, {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -95,18 +83,11 @@ export default function ParcelOpsPanel({ onLaunchBoard }: ParcelOpsPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [token]);
 
+  // Fetch once on mount — subsequent refreshes are manual via the Refresh button
   useEffect(() => {
     fetchParcels();
-    const schedule = () => {
-      pollRef.current = setTimeout(async () => {
-        await fetchParcels();
-        schedule();
-      }, POLL_MS);
-    };
-    schedule();
-    return () => { if (pollRef.current) clearTimeout(pollRef.current); };
   }, [fetchParcels]);
 
   /* ── Partition parcels ──────────────────────────────── */

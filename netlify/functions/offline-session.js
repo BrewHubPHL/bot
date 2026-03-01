@@ -181,15 +181,33 @@ exports.handler = async (event) => {
   }
 
   // ── STATUS: Get current offline exposure ──────────────────
+  // .comment('source: offline-session-failsafe')
   if (action === 'status') {
-    const { data, error } = await supabase.rpc('get_offline_exposure_stats');
+    let stats = null;
+    let degraded = false;
 
-    if (error) {
-      console.error('[OFFLINE-SESSION] Status failed:', error.message);
-      return json(500, { error: 'Failed to get offline stats' });
+    try {
+      const { data, error } = await supabase.rpc('get_offline_exposure_stats');
+
+      if (error) {
+        console.error('[OFFLINE-SESSION] Status RPC error (failsafe):', error.message);
+        degraded = true;
+      } else {
+        stats = Array.isArray(data) ? data[0] : data;
+      }
+    } catch (err) {
+      console.error('[OFFLINE-SESSION] Status RPC exception (failsafe):', err.message);
+      degraded = true;
     }
 
-    const stats = Array.isArray(data) ? data[0] : data;
+    // Safe Default: if the RPC is missing or schema-mismatched, return degraded 200
+    if (degraded || !stats) {
+      return json(200, {
+        total_offline_cents: 0,
+        pending_sync_count: 0,
+        status: 'degraded',
+      });
+    }
 
     return json(200, {
       active_session_id: stats?.active_session_id || null,

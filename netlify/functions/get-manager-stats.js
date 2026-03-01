@@ -7,6 +7,13 @@ const { authorize, sanitizedError } = require('./_auth');
 const { sanitizeInput } = require('./_sanitize');
 const { staffBucket } = require('./_token-bucket');
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const ALLOWED_ORIGINS = new Set([
@@ -59,26 +66,35 @@ exports.handler = async (event) => {
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 
     const [ordersRes, staffRes, logsRes, inventoryRes, noShowRes] = await Promise.all([
-      supabase
-        .from('orders')
-        .select('total_amount_cents, created_at')
-        .gte('created_at', start)
-        .lt('created_at', end),
+      withSourceComment(
+        supabase
+          .from('orders')
+          .select('total_amount_cents, created_at')
+          .gte('created_at', start)
+          .lt('created_at', end),
+        'mgr-stats-revenue'
+      ),
       supabase
         .from('staff_directory')
         .select('email, full_name, hourly_rate, role'),
-      supabase
-        .from('time_logs')
-        .select('employee_email, clock_in, clock_out, action_type')
-        // Only real clock-in shifts: open (clock_out IS NULL + action_type=in)
-        // OR any shift that started today (for labor calculation).
-        // Excludes adjustment rows which always have clock_out=NULL.
-        .or(`and(clock_out.is.null,action_type.eq.in),clock_in.gte.${start}`),
-      supabase
-        .from('merch_products')
-        .select('id, name, stock_quantity, min_threshold')
-        .eq('is_active', true)
-        .not('stock_quantity', 'is', null),
+      withSourceComment(
+        supabase
+          .from('time_logs')
+          .select('employee_email, clock_in, clock_out, action_type')
+          // Only real clock-in shifts: open (clock_out IS NULL + action_type=in)
+          // OR any shift that started today (for labor calculation).
+          // Excludes adjustment rows which always have clock_out=NULL.
+          .or(`and(clock_out.is.null,action_type.eq.in),clock_in.gte.${start}`),
+        'mgr-stats-active-shifts'
+      ),
+      withSourceComment(
+        supabase
+          .from('merch_products')
+          .select('id, name, stock_quantity, min_threshold')
+          .eq('is_active', true)
+          .not('stock_quantity', 'is', null),
+        'mgr-stats-inventory'
+      ),
       supabase
         .from('scheduled_shifts')
         .select('id, user_id, start_time, staff_directory(name)')

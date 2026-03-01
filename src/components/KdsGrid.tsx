@@ -82,14 +82,6 @@ const API_BASE =
     ? "http://localhost:8888/.netlify/functions"
     : "/.netlify/functions";
 
-function getAccessToken(): string | null {
-  try {
-    const raw = sessionStorage.getItem("ops_session");
-    if (!raw) return null;
-    return JSON.parse(raw)?.token ?? null;
-  } catch { return null; }
-}
-
 function haptic(pattern: "tap" | "success" | "error") {
   if (typeof navigator === "undefined" || !navigator.vibrate) return;
   const p: Record<string, number | number[]> = {
@@ -198,7 +190,7 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
     if (fetchingRef.current) return;
     fetchingRef.current = true;
     try {
-      const t = token ?? getAccessToken();
+      const t = token;
       if (!t) { console.warn("KdsGrid: No auth token"); return; }
       const res = await fetch(`${API_BASE}/get-kds-orders`, {
         headers: { Authorization: `Bearer ${t}` },
@@ -264,10 +256,94 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
   const channelIdRef = useRef(Math.random().toString(36).slice(2, 8));
   useEffect(() => {
     fetchOrders();
+
+    // ── Targeted Realtime subscriptions ──────────────────────────
+    // Split the wildcard `event: "*"` into granular listeners with
+    // Supabase Realtime filters so the WebSocket only delivers events
+    // the KDS actually needs. This prevents completed/cancelled order
+    // chatter from waking every iPad in the shop.
+    //
+    // Filter semantics for postgres_changes:
+    //   INSERT / UPDATE → filter matches the NEW row
+    //   DELETE           → filter matches the OLD row
+
+    const ACTIVE_STATUSES = "in.(unpaid,pending,paid,preparing,ready)";
+
     const channel = supabase
       .channel(`kds-grid-realtime-${channelIdRef.current}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" },       () => debouncedFetch())
-      .on("postgres_changes", { event: "*", schema: "public", table: "coffee_orders" }, () => debouncedFetch())
+      // ── orders: INSERT — new orders always have active status
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "orders",
+          filter: `status=${ACTIVE_STATUSES}`,
+        },
+        () => debouncedFetch(),
+      )
+      // ── orders: UPDATE — only active-status transitions
+      // Completed/cancelled updates are handled by the local optimistic
+      // update on the barista who tapped the button. Cross-device
+      // completions are reconciled by the INSERT-triggered fetch cycle
+      // (a new order INSERT always triggers a full fetch which prunes stale cards).
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "orders",
+          filter: `status=${ACTIVE_STATUSES}`,
+        },
+        (payload) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const row = payload.new as any;
+          const id = row.id as string;
+          // Merge scalar fields in-place — keeps existing `items` array
+          // (the Realtime payload for `orders` doesn't include joined coffee_orders)
+          setOrders((prev) => {
+            const idx = prev.findIndex((o) => o.id === id);
+            if (idx === -1) {
+              // Unknown order — fall back to full fetch
+              debouncedFetch();
+              return prev;
+            }
+            const updated = [...prev];
+            updated[idx] = {
+              ...updated[idx],
+              status: row.status ?? updated[idx].status,
+              customer_name: row.first_name ?? updated[idx].customer_name,
+              is_guest_order: row.is_guest_order ?? updated[idx].is_guest_order,
+              total_amount_cents: row.total_amount_cents ?? updated[idx].total_amount_cents,
+              claimed_by: row.claimed_by ?? updated[idx].claimed_by,
+            };
+            return updated;
+          });
+        },
+      )
+      // ── orders: DELETE — always relevant (remove card immediately)
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "orders" },
+        (payload) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const id = (payload.old as any).id as string;
+          setOrders((prev) => prev.filter((o) => o.id !== id));
+        },
+      )
+      // ── coffee_orders: INSERT/UPDATE only — item additions & completions
+      // DELETE on coffee_orders is extremely rare (admin cleanup) and not
+      // worth a dedicated listener; the next orders-table event will reconcile.
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "coffee_orders" },
+        () => debouncedFetch(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "coffee_orders" },
+        () => debouncedFetch(),
+      )
       .subscribe();
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -313,7 +389,7 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
     }
 
     try {
-      const t = token ?? getAccessToken();
+      const t = token;
       if (!t) throw new Error("No PIN session");
       const res = await fetch(`${API_BASE}/update-order-status`, {
         method: "POST",
@@ -354,7 +430,7 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
   /* ── Item toggle handler (passed to KdsOrderCard) ────────── */
   const handleItemToggle = useCallback(async (itemId: string) => {
     try {
-      const t = token ?? getAccessToken();
+      const t = token;
       if (!t) throw new Error("No PIN session");
       const res = await fetch(`${API_BASE}/update-item-status`, {
         method: "POST",
@@ -384,7 +460,6 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
         state={authzState}
         onAction={() => {
           if (authzState.status === 401) {
-            sessionStorage.removeItem("ops_session");
             window.location.reload();
             return;
           }

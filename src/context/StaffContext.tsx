@@ -102,7 +102,7 @@ export function StaffShiftProvider({
     fetchingRef.current = true;
 
     try {
-      const res = await fetchOps("/get-shift-status");
+      const res = await fetchOps("/get-shift-status", {}, token);
 
       if (!res.ok) {
         // 401 = session expired → fetchOps already triggers forceOpsLogout

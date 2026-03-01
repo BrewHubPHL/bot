@@ -40,19 +40,27 @@ function toKdsOrder(q: QueueItem): KdsOrder {
   }
 }
 
-/* ── Poll interval (ms) — matches /queue page cadence ────────── */
-const POLL_MS = 10_000
-
 export default function QueueMonitor({ onBack }: QueueMonitorProps) {
   const [orders, setOrders] = useState<KdsOrder[]>([])
   const [error, setError] = useState<string | null>(null)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Schema 78: unified pickup count (parcels + outbound awaiting pickup)
+  const [pickupCount, setPickupCount] = useState<number>(0)
 
   /* ---- Auto-fullscreen on mount --------------------------------- */
   useEffect(() => {
     const el = document.documentElement
     if (el.requestFullscreen) el.requestFullscreen().catch(() => {})
     return () => { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}) }
+  }, [])
+
+  /* ── Fetch unified pickup count from v_items_to_pickup (schema 78) ── */
+  const fetchPickupCount = useCallback(async () => {
+    try {
+      const { count, error: countErr } = await supabase
+        .from("v_items_to_pickup")
+        .select("item_id", { count: "exact", head: true })
+      if (!countErr) setPickupCount(count ?? 0)
+    } catch { /* non-critical — badge just won't show */ }
   }, [])
 
   /* ── Fetch from the PUBLIC get-queue endpoint (no auth needed) ── */
@@ -70,58 +78,39 @@ export default function QueueMonitor({ onBack }: QueueMonitorProps) {
     } catch (e) {
       setError(toUserSafeMessageFromUnknown(e, "Unable to refresh queue monitor right now."))
     }
-  }, [])
+    // Also refresh unified count
+    fetchPickupCount()
+  }, [fetchPickupCount])
 
-  // Initial fetch + polling, with tab-visibility pause
+  // Fetch once on mount
   useEffect(() => {
-    const startPoll = () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-      timerRef.current = setInterval(fetchOrders, POLL_MS)
-    }
-    const stopPoll = () => {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
-    }
-
     fetchOrders()
-    startPoll()
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        fetchOrders()
-        startPoll()
-      } else {
-        stopPoll()
-      }
-    }
-    document.addEventListener("visibilitychange", handleVisibility)
-
-    return () => {
-      stopPoll()
-      document.removeEventListener("visibilitychange", handleVisibility)
-    }
   }, [fetchOrders])
 
-  // Realtime push via Supabase — resets the poll cadence so the next
-  // scheduled tick doesn't fire immediately after a push-triggered fetch.
+  // Realtime push via Supabase — sole data-refresh mechanism (no polling)
   const channelIdRef = useRef(Math.random().toString(36).slice(2, 8))
   useEffect(() => {
     const channel = supabase
       .channel(`queue-monitor-orders-${channelIdRef.current}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "orders" },
-        () => {
-          fetchOrders()
-          // Reset interval only if it's currently running (tab visible)
-          if (timerRef.current) {
-            clearInterval(timerRef.current)
-            timerRef.current = setInterval(fetchOrders, POLL_MS)
-          }
-        },
+        { event: "*", schema: "public", table: "orders", filter: "status=in.(pending,preparing,ready)" },
+        () => { fetchOrders() },
+      )
+      // Schema 78: also refresh when parcels change
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "parcels" },
+        () => { fetchPickupCount() },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "outbound_parcels" },
+        () => { fetchOrders() },
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [fetchOrders])
+  }, [fetchOrders, fetchPickupCount])
 
   function handleBack() {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
@@ -164,6 +153,16 @@ export default function QueueMonitor({ onBack }: QueueMonitorProps) {
       >
         ← DASH
       </button>
+      {/* Schema 78: unified pickup count badge */}
+      {pickupCount > 0 && (
+        <div
+          className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-[11px] tracking-widest"
+          style={{ background: "oklch(0.20 0.04 70)", color: "oklch(0.85 0.12 70)" }}
+          title="Total items awaiting pickup (orders + parcels)"
+        >
+          📦 {pickupCount} pickup
+        </div>
+      )}
       <AolBuddyQueue orders={orders} />
     </div>
   )

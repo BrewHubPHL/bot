@@ -2,6 +2,13 @@ const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const { redactIP } = require('./_ip-hash');
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 // Lazy-initialized Supabase client — avoids module-scope crash when env vars
 // are missing (which turns every function that imports _auth into a 502).
 let _supabase = null;
@@ -163,7 +170,11 @@ async function authorize(event, options = {}) {
         };
       }
 
-      const { data: staff, error } = await getSupabase().from('staff_directory').select('role, version_updated_at').eq('email', email).single();
+      const staffLookupQuery = withSourceComment(
+        getSupabase().from('staff_directory').select('role, version_updated_at').eq('email', email),
+        'auth-authorize-guard'
+      );
+      const { data: staff, error } = await staffLookupQuery.single();
       if (error || !staff) return { ok: false, response: json(403, { error: 'Staff not found' }) };
 
       if (staff.version_updated_at && payload.iat) {
@@ -274,7 +285,11 @@ async function authorize(event, options = {}) {
     }
 
     const email = (data.user.email || '').toLowerCase();
-    const { data: staff, error: staffErr } = await getSupabase().from('staff_directory').select('role, version_updated_at').eq('email', email).single();
+    const staffLookupQuery = withSourceComment(
+      getSupabase().from('staff_directory').select('role, version_updated_at').eq('email', email),
+      'auth-authorize-guard'
+    );
+    const { data: staff, error: staffErr } = await staffLookupQuery.single();
     if (staffErr || !staff) {
       console.error(`[AUTH BLOCKED] Not in staff directory: ${email}`);
       return { ok: false, response: json(403, { error: 'Forbidden' }) };

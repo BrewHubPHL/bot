@@ -21,6 +21,13 @@ const { redactIP } = require('./_ip-hash');
 const RP_ID = process.env.WEBAUTHN_RP_ID || 'brewhubphl.com';
 const ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 function supabase() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
@@ -203,11 +210,15 @@ async function handleVerifyAuth(sb, body, event) {
     .lte('created_at', new Date().toISOString());
 
   // Look up the staff member
-  const { data: staffRow, error: staffErr } = await sb
-    .from('staff_directory')
+  // Schema 77: read from v_staff_status which computes is_working from time_logs
+  const staffLookupQuery = withSourceComment(
+    sb
+    .from('v_staff_status')
     .select('id, name, full_name, email, role, is_working, is_active')
-    .eq('id', credRow.staff_id)
-    .single();
+    .eq('id', credRow.staff_id),
+    'auth-staff-status-lookup'
+  );
+  const { data: staffRow, error: staffErr } = await staffLookupQuery.single();
 
   if (staffErr || !staffRow) {
     return respond(403, { error: 'Staff record not found' });

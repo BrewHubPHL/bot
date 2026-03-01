@@ -7,6 +7,13 @@ const { authorize, json, sanitizedError } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { publicBucket } = require('./_token-bucket');
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const ALLOWED_ORIGINS = new Set([
@@ -104,11 +111,14 @@ exports.handler = async (event) => {
     if (!Number.isFinite(limit) || limit <= 0) limit = 10;
     limit = Math.min(Math.max(1, Math.floor(limit)), 100);
 
-    const { data, error } = await supabase
-      .from('receipt_queue')
-      .select('id, receipt_text, created_at')
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    const { data, error } = await withSourceComment(
+      supabase
+        .from('receipt_queue')
+        .select('id, receipt_text, created_at')
+        .order('created_at', { ascending: false })
+        .limit(limit),
+      'mgr-receipt-roll-list'
+    );
 
     if (error) throw error;
 

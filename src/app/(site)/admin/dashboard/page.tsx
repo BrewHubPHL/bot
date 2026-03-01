@@ -16,7 +16,7 @@ export default function ManagerDashboard() {
     loadDashboardData();
     // Real-time subscription to refresh sales when orders are updated
     const channel = supabase.channel('manager-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => loadSalesReport())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: 'status=eq.completed' }, () => loadSalesReport())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);

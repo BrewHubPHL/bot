@@ -3,6 +3,13 @@ const { authorize, json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { redactIP } = require('./_ip-hash');
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 /**
@@ -64,14 +71,18 @@ exports.handler = async (event) => {
   }
 
   try {
-    // Fetch current is_working status from staff_directory
-    const { data: staff, error } = await supabase
-      .from('staff_directory')
-      .select('is_working')
-      .eq('email', auth.user.email)
-      .single();
+    // Fetch full staff record so OpsGate can hydrate the session on reload
+    // Schema 77: read from v_staff_status which computes is_working from time_logs
+    const staffLookupQuery = withSourceComment(
+      supabase
+      .from('v_staff_status')
+      .select('id, name, full_name, email, role, is_working, is_active')
+      .eq('email', auth.user.email),
+      'auth-staff-status-lookup'
+    );
+    const { data: staffRow, error } = await staffLookupQuery.single();
 
-    if (error || !staff) {
+    if (error || !staffRow) {
       return {
         statusCode: 403,
         headers: corsHeaders,
@@ -79,12 +90,25 @@ exports.handler = async (event) => {
       };
     }
 
+    // Re-read the raw session token from the HttpOnly cookie so OpsGate
+    // can restore the full { staff, token } session contract.
+    const cookieHeader = event.headers?.cookie || '';
+    const tokenMatch = cookieHeader.match(/(?:^|;\s*)hub_staff_session=([^;]+)/);
+    const sessionToken = tokenMatch ? decodeURIComponent(tokenMatch[1]) : null;
+
     return {
       statusCode: 200,
       headers: corsHeaders,
       body: JSON.stringify({
         valid: true,
-        is_working: staff.is_working ?? false
+        token: sessionToken,
+        staff: {
+          id: staffRow.id,
+          name: staffRow.full_name,
+          email: staffRow.email,
+          role: staffRow.role,
+          is_working: staffRow.is_working ?? false,
+        },
       })
     };
   } catch (err) {

@@ -4,6 +4,13 @@ const { requireCsrfHeader } = require('./_csrf');
 const { staffBucket } = require('./_token-bucket');
 const { hashIP } = require('./_ip-hash');
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 // Service-role client — bypasses RLS
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -76,18 +83,18 @@ exports.handler = async (event) => {
       };
     }
 
-    // Query for an open shift (clock_out IS NULL, action_type = 'in')
-    const { data, error } = await supabase
-      .from('time_logs')
-      .select('id, clock_in')
-      .eq('employee_email', staffEmail)
-      .is('clock_out', null)
-      .eq('action_type', 'in')
-      .order('clock_in', { ascending: false })
-      .limit(1);
+    // Schema 79: use v_staff_status as the single source of truth for is_working
+    const { data: staffRow, error: viewError } = await withSourceComment(
+      supabase
+        .from('v_staff_status')
+        .select('is_working')
+        .eq('email', staffEmail)
+        .single(),
+      'polling-staff-shift-status'
+    );
 
-    if (error) {
-      console.error('[GET-SHIFT-STATUS] DB error:', error.message);
+    if (viewError) {
+      console.error('[GET-SHIFT-STATUS] DB error:', viewError.message);
       return {
         statusCode: 500,
         headers: corsHeaders,
@@ -95,15 +102,36 @@ exports.handler = async (event) => {
       };
     }
 
-    const activeShift = data && data.length > 0 ? data[0] : null;
+    const isClockedIn = staffRow?.is_working ?? false;
+    let shiftId = null;
+    let clockIn = null;
+
+    // If clocked in, fetch active shift details for the response contract
+    if (isClockedIn) {
+      const { data: shiftData } = await withSourceComment(
+        supabase
+          .from('time_logs')
+          .select('id, clock_in')
+          .eq('employee_email', staffEmail)
+          .is('clock_out', null)
+          .eq('action_type', 'in')
+          .order('clock_in', { ascending: false })
+          .limit(1),
+        'polling-staff-shift-detail'
+      );
+      if (shiftData?.[0]) {
+        shiftId = shiftData[0].id;
+        clockIn = shiftData[0].clock_in;
+      }
+    }
 
     return {
       statusCode: 200,
       headers: corsHeaders,
       body: JSON.stringify({
-        isClockedIn: !!activeShift,
-        shiftId: activeShift?.id ?? null,
-        clockIn: activeShift?.clock_in ?? null,
+        isClockedIn,
+        shiftId,
+        clockIn,
       }),
     };
   } catch (err) {

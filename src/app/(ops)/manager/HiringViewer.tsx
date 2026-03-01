@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useOpsSession } from "@/components/OpsGate";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
@@ -45,8 +45,7 @@ const API_BASE =
     ? "http://localhost:8888/.netlify/functions"
     : "/.netlify/functions";
 
-/* Polling interval: check for new applications every 30 seconds */
-const POLL_INTERVAL_MS = 30_000;
+
 
 /**
  * Validate that a resume URL is safe to open.
@@ -81,7 +80,6 @@ export default function HiringViewer() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchApplicants = useCallback(async () => {
     setLoading(true);
@@ -105,13 +103,9 @@ export default function HiringViewer() {
     setLoading(false);
   }, [token]);
 
-  /* Initial fetch + polling for new applications */
+  // Fetch once on mount — subsequent refreshes are manual via the Refresh button
   useEffect(() => {
     fetchApplicants();
-    pollRef.current = setInterval(fetchApplicants, POLL_INTERVAL_MS);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
   }, [fetchApplicants]);
 
   /* ── Status update ─────────────────────────────────────── */
@@ -155,7 +149,6 @@ export default function HiringViewer() {
   const handleAuthzAction = useCallback(() => {
     if (!authzState) return;
     if (authzState.status === 401) {
-      sessionStorage.removeItem("ops_session");
       window.location.reload();
       return;
     }

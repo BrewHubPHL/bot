@@ -17,6 +17,13 @@ const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const twilio = require('twilio');
 
+function withSourceComment(query, tag) {
+  if (typeof query?.comment === 'function') {
+    return query.comment(`source: ${tag}`);
+  }
+  return query;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function safeCompare(a, b) {
@@ -127,12 +134,16 @@ exports.handler = async (event) => {
 
     console.log(`[NO-SHOW][DETECT] Querying shifts starting between ${twoHoursAgo} and ${fifteenAgo}`);
 
-    const { data: shifts, error: shiftErr } = await supabase
-      .from('scheduled_shifts')
-      .select('id, user_id, start_time')
-      .eq('status', 'scheduled')
-      .lt('start_time', fifteenAgo)
-      .gt('start_time', twoHoursAgo);
+    // ── Single joined query: shifts + staff info in one request ──
+    const { data: shifts, error: shiftErr } = await withSourceComment(
+      supabase
+        .from('scheduled_shifts')
+        .select('id, user_id, start_time, staff_directory(name, email)')
+        .eq('status', 'scheduled')
+        .lt('start_time', fifteenAgo)
+        .gt('start_time', twoHoursAgo),
+      'cron-no-show-check'
+    );
 
     if (shiftErr) throw new Error(`Shift Query Failed: ${shiftErr.message}`);
 
@@ -142,39 +153,65 @@ exports.handler = async (event) => {
       return json(200, { alerted: 0, mode: 'detect', status: 'Clear' });
     }
 
+    // ── Batch-fetch ALL relevant time_logs in one query ─────────
+    // Compute a broad window that covers every shift's clock-in range:
+    //   earliest possible = earliest shift start − 30 min
+    //   latest possible   = latest shift start + 15 min
+    const shiftStarts = shifts.map(s => new Date(s.start_time).getTime());
+    const broadWindowStart = new Date(Math.min(...shiftStarts) - 30 * 60 * 1000).toISOString();
+    const broadWindowEnd   = new Date(Math.max(...shiftStarts) + 15 * 60 * 1000).toISOString();
+
+    const staffEmails = shifts
+      .map(s => s.staff_directory?.email)
+      .filter(Boolean)
+      .map(e => e.toLowerCase());
+    const uniqueEmails = [...new Set(staffEmails)];
+
+    const { data: allClockIns, error: logErr } = uniqueEmails.length > 0
+      ? await supabase
+          .from('time_logs')
+          .select('id, employee_email, clock_in')
+          .in('employee_email', uniqueEmails)
+          .eq('action_type', 'in')
+          .gte('clock_in', broadWindowStart)
+          .lte('clock_in', broadWindowEnd)
+      : { data: [], error: null };
+
+    if (logErr) {
+      console.error('[NO-SHOW][DETECT] Batch time_logs query error:', logErr.message);
+      // Non-fatal — we'll treat everyone as no-shows (SMS is the safe default)
+    }
+
+    // Index clock-ins by lowercase email for O(1) lookup
+    const clockInsByEmail = new Map();
+    for (const log of (allClockIns || [])) {
+      const key = (log.employee_email || '').toLowerCase();
+      if (!clockInsByEmail.has(key)) clockInsByEmail.set(key, []);
+      clockInsByEmail.get(key).push(log);
+    }
+
     let alertedCount = 0;
 
+    // ── Iterate locally — zero additional DB queries ─────────────
     for (const shift of shifts) {
-      const { data: staffRow, error: staffErr } = await supabase
-        .from('staff_directory')
-        .select('name, email')
-        .eq('id', shift.user_id)
-        .single();
-
-      if (staffErr || !staffRow) {
+      const staff = shift.staff_directory;
+      if (!staff || !staff.name || !staff.email) {
         console.error(`[NO-SHOW][DETECT] Skipping shift ${shift.id}: Staff record not found.`);
         continue;
       }
 
-      // Window for clock-in (30m before shift start → 15m after)
-      const windowStart = new Date(new Date(shift.start_time).getTime() - 30 * 60 * 1000).toISOString();
-      const windowEnd = new Date(new Date(shift.start_time).getTime() + 15 * 60 * 1000).toISOString();
+      // Check for a clock-in within this shift's specific window
+      const shiftStart = new Date(shift.start_time).getTime();
+      const windowStart = new Date(shiftStart - 30 * 60 * 1000).getTime();
+      const windowEnd   = new Date(shiftStart + 15 * 60 * 1000).getTime();
 
-      const { data: clockIn, error: logErr } = await supabase
-        .from('time_logs')
-        .select('id')
-        .ilike('employee_email', staffRow.email)
-        .eq('action_type', 'in')
-        .gte('clock_in', windowStart)
-        .lte('clock_in', windowEnd)
-        .limit(1);
+      const staffLogs = clockInsByEmail.get(staff.email.toLowerCase()) || [];
+      const hasClockedIn = staffLogs.some(log => {
+        const t = new Date(log.clock_in).getTime();
+        return t >= windowStart && t <= windowEnd;
+      });
 
-      if (logErr) {
-        console.error(`[NO-SHOW][DETECT] Log check error for ${staffRow.name}:`, logErr.message);
-        continue;
-      }
-
-      if (!clockIn || clockIn.length === 0) {
+      if (!hasClockedIn) {
         const startTime = new Date(shift.start_time);
         const latenessMinutes = Math.floor((now - startTime) / 1000 / 60);
 
@@ -183,12 +220,12 @@ exports.handler = async (event) => {
         });
 
         const smsBody = buildSmsBody({
-          employeeName: staffRow.name,
+          employeeName: staff.name,
           shiftTime: shiftLocal,
           latenessMinutes,
         });
 
-        console.log(`[NO-SHOW][DETECT] Sending SMS for ${staffRow.name}`);
+        console.log(`[NO-SHOW][DETECT] Sending SMS for ${staff.name}`);
 
         try {
           await twilioClient.messages.create({
@@ -210,7 +247,7 @@ exports.handler = async (event) => {
           console.error(`[NO-SHOW][DETECT] SMS Failed: ${smsErr.message}`);
         }
       } else {
-        console.log(`[NO-SHOW][DETECT] ${staffRow.name} is clocked in. No alert needed.`);
+        console.log(`[NO-SHOW][DETECT] ${staff.name} is clocked in. No alert needed.`);
       }
     }
 

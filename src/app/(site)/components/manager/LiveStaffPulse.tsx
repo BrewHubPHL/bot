@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { fetchOps } from "@/utils/ops-api";
-import { Users } from "lucide-react";
+import { Users, RefreshCw } from "lucide-react";
 
 /* ================================================================== */
 /*  LiveStaffPulse — persistent header badge showing who's on-site    */
@@ -14,8 +14,6 @@ import { Users } from "lucide-react";
 /*                                                                     */
 /*  Doomsday Scenario 6: THE LATE NIGHT BAKER                         */
 /* ================================================================== */
-
-const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
 interface ActiveStaff {
   name: string;
@@ -29,13 +27,13 @@ export default function LiveStaffPulse() {
   const [staff, setStaff] = useState<ActiveStaff[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [tick, setTick] = useState(0); // forces timer re-render
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchActiveStaff = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetchOps("/get-manager-stats");
+      const res = await fetchOps("/get-manager-stats", {}, token);
       if (res.status === 401) return; // fetchOps already triggers forceOpsLogout
       if (!res.ok) return;
       const data = await res.json();
@@ -45,13 +43,15 @@ export default function LiveStaffPulse() {
     }
   }, [token]);
 
-  // Poll on mount and every 30s
+  // Fetch once on mount — subsequent refreshes are manual
   useEffect(() => {
     fetchActiveStaff();
-    pollRef.current = setInterval(fetchActiveStaff, POLL_INTERVAL_MS);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+  }, [fetchActiveStaff]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchActiveStaff();
+    setRefreshing(false);
   }, [fetchActiveStaff]);
 
   // Tick every 60s to update duration timers
@@ -108,7 +108,7 @@ export default function LiveStaffPulse() {
                      }`}
         aria-label={`${count} staff currently on-site`}
       >
-        <Users size={14} />
+        <Users size={14} className={refreshing ? "animate-spin" : ""} />
         <span className="hidden sm:inline">On-Site:</span>
         <span className="font-bold">{count}</span>
         {count > 0 && (
@@ -130,9 +130,15 @@ export default function LiveStaffPulse() {
             <span className="text-sm font-bold text-stone-200">
               👥 Currently On-Site
             </span>
-            <span className="text-xs text-stone-500">
-              Live • {new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-            </span>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleRefresh(); }}
+              className="flex items-center gap-1 text-xs text-stone-500 hover:text-stone-300 transition-colors"
+              aria-label="Refresh staff data"
+            >
+              <RefreshCw size={10} className={refreshing ? "animate-spin" : ""} />
+              {new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+            </button>
           </div>
 
           {count === 0 ? (
@@ -183,7 +189,7 @@ export default function LiveStaffPulse() {
           )}
 
           <div className="px-4 py-2 border-t border-stone-800 text-[10px] text-stone-600 text-center">
-            Powered by time_logs • Updates every 30s
+            Powered by time_logs • Manual refresh
           </div>
         </div>
       )}

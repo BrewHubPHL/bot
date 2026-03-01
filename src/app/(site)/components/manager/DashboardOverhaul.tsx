@@ -119,7 +119,7 @@ export default function DashboardOverhaul() {
   const fetchStats = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetchOps("/get-manager-stats");
+      const res = await fetchOps("/get-manager-stats", {}, token);
       if (res.status === 401) return; // fetchOps already triggers forceOpsLogout
       if (res.status === 429) {
         pollBackoffRef.current = Math.min(pollBackoffRef.current * 2, MAX_BACKOFF_MS);
@@ -166,7 +166,6 @@ export default function DashboardOverhaul() {
   const handleAuthzAction = useCallback(() => {
     if (!authzState) return;
     if (authzState.status === 401) {
-      sessionStorage.removeItem("ops_session");
       window.location.reload();
       return;
     }
@@ -470,7 +469,7 @@ export default function DashboardOverhaul() {
                             shiftId: ns.shiftId,
                             reason,
                           }),
-                        });
+                        }, token);
                         if (!res.ok) {
                           const err = await res.json().catch(() => ({}));
                           showToast("error", err.error || "Failed to resolve no-show");

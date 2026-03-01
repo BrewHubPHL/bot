@@ -8,7 +8,6 @@ import { fetchOps } from "@/utils/ops-api";
 import { RefreshCw } from "lucide-react";
 
 const MAX_RECEIPTS = 10;
-const POLL_INTERVAL_MS = 30_000; // poll every 30 s
 
 /* ─── Types ─── */
 interface Receipt {
@@ -52,17 +51,14 @@ export default function ReceiptRoll() {
   const [rateLimited, setRateLimited] = useState(false);
   const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
   const initialLoadDone = useRef(false);
-  const backoffRef = useRef<number>(POLL_INTERVAL_MS);
-  const backoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch receipts via server-side Netlify function (bypasses RLS)
   const loadReceipts = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetchOps("/get-receipts?limit=10");
+      const res = await fetchOps("/get-receipts?limit=10", {}, token);
       if (res.status === 401) return; // fetchOps already triggers forceOpsLogout
       if (res.status === 429) {
-        backoffRef.current = Math.min(backoffRef.current * 2, 120_000);
         setRateLimited(true);
         return;
       }
@@ -77,7 +73,6 @@ export default function ReceiptRoll() {
       }
       setRateLimited(false);
       setAuthzState(null);
-      backoffRef.current = POLL_INTERVAL_MS;
       const json = await res.json();
       const incoming = (json.receipts ?? []) as Receipt[];
 
@@ -102,26 +97,15 @@ export default function ReceiptRoll() {
     }
   }, [token]);
 
-  // Poll for new receipts with exponential backoff on 429
+  // Fetch once on mount — subsequent refreshes are manual via the Refresh button
   useEffect(() => {
     if (!token) return;
-    let cancelled = false;
-    const schedule = async () => {
-      if (cancelled) return;
-      await loadReceipts();
-      if (!cancelled) backoffTimerRef.current = setTimeout(schedule, backoffRef.current);
-    };
-    schedule();
-    return () => {
-      cancelled = true;
-      if (backoffTimerRef.current) clearTimeout(backoffTimerRef.current);
-    };
+    loadReceipts();
   }, [token, loadReceipts]);
 
   const handleAuthzAction = useCallback(() => {
     if (!authzState) return;
     if (authzState.status === 401) {
-      sessionStorage.removeItem("ops_session");
       window.location.reload();
       return;
     }
@@ -208,7 +192,7 @@ export default function ReceiptRoll() {
 
       {rateLimited && (
         <div role="status" aria-live="polite" className="text-xs text-amber-400 font-mono px-3 py-1.5 bg-amber-950/40 rounded mb-2">
-          ⏳ Rate limited — backing off, will retry automatically
+          ⏳ Rate limited — please wait a moment before refreshing
         </div>
       )}
 

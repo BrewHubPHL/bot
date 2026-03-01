@@ -81,9 +81,12 @@ self.addEventListener('fetch', (event) => {
   const isProtected = PROTECTED_ROUTES.some(p => url.pathname.startsWith(p));
   if (isProtected) return;
 
-  // ── API calls: Network-first with cache fallback ──────────
-  if (url.pathname.startsWith('/.netlify/functions/') || url.pathname.startsWith('/api/')) {
-    event.respondWith(networkFirstWithCache(request));
+  // ── API calls: Zero-trust — NEVER cache or intercept any backend call ──
+  // All offline data is handled by IndexedDB in the frontend (offlineStore.ts).
+  // The SW must not touch Netlify Functions, Next.js API routes, or Supabase.
+  if (url.pathname.startsWith('/.netlify/functions/') ||
+      url.pathname.startsWith('/api/') ||
+      url.hostname.endsWith('.supabase.co')) {
     return;
   }
 
@@ -93,32 +96,43 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ── App pages & other assets: Stale-while-revalidate ──────
+  // ── Next.js RSC payloads & HTML navigations: Network-first ──
+  // RSC flight data and page navigations MUST always fetch live data
+  // so baristas never see yesterday's prices, stale queues, or ghost items.
+  // Cached version is only served when Wi-Fi is completely dead.
+  const isRSC = request.headers.get('RSC') === '1' || url.searchParams.has('_rsc');
+  const isNavigation = request.mode === 'navigate'
+    || (request.headers.get('accept') || '').includes('text/html');
+
+  if (isRSC || isNavigation) {
+    event.respondWith(
+      fetch(request)
+        .then(async (response) => {
+          if (response.ok) {
+            const cache = await caches.open(CACHE_NAME);
+            cache.put(request, response.clone());
+          }
+          return response;
+        })
+        .catch(async () => {
+          const cached = await caches.match(request);
+          if (cached) return cached;
+
+          // Navigation fallback — show a cached app shell page
+          if (request.mode === 'navigate') {
+            const cache = await caches.open(CACHE_NAME);
+            const shell = await cache.match('/cafe') || await cache.match('/login');
+            if (shell) return shell;
+          }
+          return new Response('Offline', { status: 503 });
+        })
+    );
+    return;
+  }
+
+  // ── Remaining static assets (images, fonts): Stale-while-revalidate ──
   event.respondWith(staleWhileRevalidate(request));
 });
-
-// ── Strategy: Network-first, fallback to cache ──────────────────
-async function networkFirstWithCache(request) {
-  const cache = await caches.open(API_CACHE);
-  try {
-    const response = await fetch(request);
-    // Cache successful GET responses for offline fallback
-    if (response.ok) {
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    // Network failed — try cache
-    const cached = await cache.match(request);
-    if (cached) return cached;
-
-    // No cache either — return offline JSON
-    return new Response(
-      JSON.stringify({ error: 'offline', message: 'You are offline. Cached data unavailable.' }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
-}
 
 // ── Strategy: Cache-first (immutable hashed assets) ─────────────
 // If a chunk 404s, the build changed — tell the client to hard-reload
@@ -135,17 +149,22 @@ async function cacheFirst(request) {
       return response;
     }
 
-    // Chunk 404 → deployment changed. Purge stale cache & notify clients.
-    if (response.status === 404 && request.url.includes('/_next/static/chunks/')) {
-      console.warn('[SW] Stale chunk detected, triggering reload:', request.url);
+    // Chunk 404 → deployment changed. Nuke ALL caches & notify clients.
+    // Every Netlify build produces uniquely-hashed chunk filenames so old
+    // entries are never reused. Keeping them wastes iPad storage quota and
+    // eventually causes Safari to evict the entire CacheStorage mid-shift.
+    if (response.status === 404 && request.url.includes('/_next/static/')) {
+      console.warn('[SW] Stale asset detected — purging all caches:', request.url);
       const allClients = await self.clients.matchAll({ type: 'window' });
       allClients.forEach((client) => client.postMessage({ type: 'CHUNK_STALE' }));
-      // Clear cached pages so reload fetches fresh HTML
-      const cache = await caches.open(CACHE_NAME);
-      const keys = await cache.keys();
-      await Promise.all(
-        keys.filter((k) => !k.url.includes('/_next/static/')).map((k) => cache.delete(k))
-      );
+      // Burn both caches to the ground — reload will repopulate cleanly
+      const appCache = await caches.open(CACHE_NAME);
+      const apiCache = await caches.open(API_CACHE);
+      const [appKeys, apiKeys] = await Promise.all([appCache.keys(), apiCache.keys()]);
+      await Promise.all([
+        ...appKeys.map((k) => appCache.delete(k)),
+        ...apiKeys.map((k) => apiCache.delete(k)),
+      ]);
     }
     return response;
   } catch {
@@ -187,28 +206,33 @@ async function staleWhileRevalidate(request) {
   return new Response('Offline', { status: 503 });
 }
 
-// ── Message handler: Manual cache updates from app ──────────────
+// ── Message handler: Only SKIP_WAITING ──────────────────────────
+// CACHE_MENU removed — offline menu data is handled by IndexedDB
+// in the frontend (offlineStore.ts). The SW never touches API payloads.
 self.addEventListener('message', (event) => {
-  // Validate sender origin: only accept messages from same-origin clients
-  try {
-    const sourceUrl = event.source && event.source.url;
-    const origin = sourceUrl ? new URL(sourceUrl).origin : null;
-    const allowedOrigins = [self.location.origin, 'https://brewhubphl.com', 'https://www.brewhubphl.com'];
-    if (!origin || !allowedOrigins.includes(origin)) return;
-  } catch (e) {
+  // ── Origin validation ─────────────────────────────────────────
+  let messageOrigin = null;
+  if (typeof event.origin === 'string' && event.origin.length > 0) {
+    messageOrigin = event.origin;
+  } else if (event.source && typeof event.source.url === 'string') {
+    try { messageOrigin = new URL(event.source.url).origin; } catch { return; }
+  }
+  if (messageOrigin !== self.location.origin &&
+      messageOrigin !== 'https://brewhubphl.com' &&
+      messageOrigin !== 'https://www.brewhubphl.com') {
     return;
   }
-  if (event.data?.type === 'CACHE_MENU') {
-    // App sends fresh menu data to cache
-    const menuResponse = new Response(JSON.stringify(event.data.payload), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-    caches.open(API_CACHE).then((cache) => {
-      cache.put('/.netlify/functions/get-menu', menuResponse);
-    });
-  }
 
-  if (event.data?.type === 'SKIP_WAITING') {
+  // ── Require a valid Client source ─────────────────────────────
+  if (!event.source || typeof event.source.url !== 'string') return;
+
+  // ── Validate event.data shape ─────────────────────────────────
+  const { data } = event;
+  if (data == null || typeof data !== 'object' || Array.isArray(data)) return;
+  if (typeof data.type !== 'string') return;
+
+  // ── SKIP_WAITING only ─────────────────────────────────────────
+  if (data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });

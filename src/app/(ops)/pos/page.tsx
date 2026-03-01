@@ -13,6 +13,7 @@ import {
 import SwipeCartItem from "@/components/SwipeCartItem";
 import { useConnection } from "@/lib/useConnection";
 import OfflineBanner from "@/components/OfflineBanner";
+import LiveClock from "@/components/LiveClock";
 import OnscreenKeyboard from "@/components/OnscreenKeyboard";
 import { toUserSafeMessage, toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import {
@@ -169,8 +170,6 @@ export default function POSPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [pendingMods, setPendingMods] = useState<Modifier[]>([]);
-  const [clock, setClock] = useState(new Date());
-
   // Ticket lifecycle
   const [ticketPhase, setTicketPhase] = useState<TicketPhase>("building");
   const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
@@ -244,12 +243,6 @@ export default function POSPage() {
   // POS-1: useRef lock to prevent duplicate handleSendToKDS calls (race condition fix)
   const submittingRef = useRef(false);
 
-  /* ─── Clock (POS-7: 60s interval — display is HH:MM only) ───── */
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 60_000);
-    return () => clearInterval(t);
-  }, []);
-
   /* ─── Fetch menu (with offline fallback) ──────────────────────── */
   useEffect(() => {
     (async () => {
@@ -289,13 +282,62 @@ export default function POSPage() {
    * Listen for INSERT / UPDATE / DELETE on merch_products so the
    * POS menu refreshes instantly when a manager edits the catalog,
    * without requiring the barista to reload the page.
+   *
+   * Filter: is_active=eq.true — only active product changes trigger
+   * a re-fetch. Archived/inactive product edits are ignored.
    * ──────────────────────────────────────────────────────────── */
   useEffect(() => {
     const channel = supabase
       .channel("pos-catalog-sync")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "merch_products" },
+        { event: "INSERT", schema: "public", table: "merch_products", filter: "is_active=eq.true" },
+        async () => {
+          try {
+            const { data, error } = await supabase
+              .from("merch_products")
+              .select("id, name, price_cents, description, image_url")
+              .eq("is_active", true)
+              .is("archived_at", null)
+              .order("sort_order", { ascending: true })
+              .order("name", { ascending: true });
+
+            if (!error && data && data.length > 0) {
+              setMenuItems(data);
+              setMenuSource("live");
+              cacheMenu(data).catch(() => {});
+            }
+          } catch {
+            // Non-critical — menu stays as-is until next change event
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "merch_products" },
+        async () => {
+          try {
+            const { data, error } = await supabase
+              .from("merch_products")
+              .select("id, name, price_cents, description, image_url")
+              .eq("is_active", true)
+              .is("archived_at", null)
+              .order("sort_order", { ascending: true })
+              .order("name", { ascending: true });
+
+            if (!error && data && data.length > 0) {
+              setMenuItems(data);
+              setMenuSource("live");
+              cacheMenu(data).catch(() => {});
+            }
+          } catch {
+            // Non-critical — menu stays as-is until next change event
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "merch_products" },
         async () => {
           try {
             const { data, error } = await supabase
@@ -1641,10 +1683,25 @@ export default function POSPage() {
       if (resp.ok) {
         const data = await resp.json();
         if (data.receipt_text) {
-          // Open receipt in a print-friendly window
+          // Break taint chain: whitelist printable ASCII + common whitespace only.
+          // Receipts are monospace text — no HTML/unicode needed. (CWE-79 fix)
+          const raw = String(data.receipt_text).slice(0, 10_000);
+          const sanitized = Array.from(raw, (ch) => {
+            const c = ch.charCodeAt(0);
+            // Allow printable ASCII (0x20–0x7E), tab (0x09), newline (0x0A), carriage return (0x0D)
+            return (c >= 0x20 && c <= 0x7E) || c === 0x09 || c === 0x0A || c === 0x0D ? ch : "";
+          }).join("");
+
           const w = window.open("", "_blank", "width=400,height=600");
           if (w) {
-            w.document.write(`<pre style="font-family:monospace;font-size:12px;white-space:pre;margin:20px;">${data.receipt_text}</pre>`);
+            const pre = w.document.createElement("pre");
+            pre.style.fontFamily = "monospace";
+            pre.style.fontSize = "12px";
+            pre.style.whiteSpace = "pre";
+            pre.style.margin = "20px";
+            // textContent is a safe sink — never parses HTML
+            pre.textContent = sanitized;
+            w.document.body.appendChild(pre);
             w.document.close();
             w.print();
           }
@@ -1863,15 +1920,19 @@ export default function POSPage() {
               ))}
             </nav>
 
-            {/* Clock */}
-            <div className="px-4 py-4 border-t border-stone-800 text-center">
-              <div className="text-lg font-mono font-bold text-stone-300">
-                {clock.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </div>
-              <div className="text-[10px] text-stone-600 uppercase tracking-widest mt-0.5">
-                {clock.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
-              </div>
-            </div>
+            {/* Clock — isolated to prevent full-page re-renders */}
+            <LiveClock intervalMs={60_000}>
+              {(now) => (
+                <div className="px-4 py-4 border-t border-stone-800 text-center">
+                  <div className="text-lg font-mono font-bold text-stone-300">
+                    {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </div>
+                  <div className="text-[10px] text-stone-600 uppercase tracking-widest mt-0.5">
+                    {now.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+                  </div>
+                </div>
+              )}
+            </LiveClock>
           </aside>
 
           {/* ── Main product area ─────────────────────────── */}

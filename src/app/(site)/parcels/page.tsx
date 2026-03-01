@@ -140,6 +140,13 @@ export default function LobbyBoardPage() {
           fetchBoard();
         },
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "outbound_parcels" },
+        () => {
+          fetchBoard();
+        },
+      )
       .subscribe();
 
     return () => {

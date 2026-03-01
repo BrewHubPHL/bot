@@ -3,26 +3,30 @@ import { createClient, type SupabaseClientOptions } from '@supabase/supabase-js'
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-function getBrowserStorage(): Storage | undefined {
-  if (typeof window === 'undefined') return undefined;
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
-}
+/**
+ * In-memory storage adapter — tokens never touch localStorage or sessionStorage.
+ * On shared POS iPads this guarantees zero token residue between operators.
+ * Tokens vanish the moment the browser tab closes.
+ */
+const memoryStore = new Map<string, string>();
+const inMemoryStorage = {
+  getItem: (key: string) => memoryStore.get(key) ?? null,
+  setItem: (key: string, value: string) => { memoryStore.set(key, value); },
+  removeItem: (key: string) => { memoryStore.delete(key); },
+};
 
 const DEFAULT_AUTH = {
-  persistSession: true,
-  autoRefreshToken: true,
-  detectSessionInUrl: true,
-  storage: getBrowserStorage(),
+  persistSession: false,
+  autoRefreshToken: false,
+  detectSessionInUrl: false,
+  storage: inMemoryStorage,
   storageKey: 'brewhub-auth-session',
 };
 
 /**
  * Default Supabase browser client.
- * Sessions are scoped to sessionStorage to reduce token persistence risk.
+ * Sessions are strictly in-memory — no localStorage/sessionStorage persistence.
+ * This prevents token residue on shared POS iPads between operator sessions.
  */
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: DEFAULT_AUTH,
