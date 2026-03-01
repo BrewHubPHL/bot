@@ -489,6 +489,12 @@ export default function BrewHubLanding() {
           {waitlistError && (
             <p className="hero-success" style={{ color: 'var(--hub-brown)', fontSize: '0.9rem', marginTop: '0.5rem' }}>{waitlistError}</p>
           )}
+          {/* Quick-nav CTAs */}
+          <div className="flex flex-wrap justify-center gap-3 mt-6 w-full">
+            <a href="/shop" className="hero-cta-link">Browse the Shop</a>
+            <a href="/about" className="hero-cta-link">Our Story</a>
+            <a href="/location" className="hero-cta-link">Find Us</a>
+          </div>
         </div>
       </section>
 

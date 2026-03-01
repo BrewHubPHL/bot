@@ -187,18 +187,18 @@ export default function StaffHubPage() {
         </div>
 
         {/* Quick Links Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full max-w-xl">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 w-full max-w-xl">
+          <Link href="/pos" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
+                                        transition-all hover:-translate-y-1 hover:border-amber-400"
+            style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(10px)" }}>
+            <div className="text-3xl mb-2">💳</div>
+            <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">POS</div>
+          </Link>
           <Link href="/kds" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
                                         transition-all hover:-translate-y-1 hover:border-amber-400"
             style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(10px)" }}>
             <div className="text-3xl mb-2">☕</div>
             <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">KDS</div>
-          </Link>
-          <Link href="/cafe" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
-                                         transition-all hover:-translate-y-1 hover:border-amber-400"
-            style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(10px)" }}>
-            <div className="text-3xl mb-2">💳</div>
-            <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">Cafe POS</div>
           </Link>
           <Link href="/parcels-pickup" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
                                             transition-all hover:-translate-y-1 hover:border-amber-400"
@@ -206,10 +206,16 @@ export default function StaffHubPage() {
             <div className="text-3xl mb-2">📦</div>
             <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">Parcel Pickup</div>
           </Link>
-          <Link href="/scanner" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
+          <Link href="/parcels/dashboard" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
                                             transition-all hover:-translate-y-1 hover:border-amber-400"
             style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(10px)" }}>
             <div className="text-3xl mb-2">📋</div>
+            <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">Parcel Dashboard</div>
+          </Link>
+          <Link href="/scanner" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
+                                            transition-all hover:-translate-y-1 hover:border-amber-400"
+            style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(10px)" }}>
+            <div className="text-3xl mb-2">📷</div>
             <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">Inventory</div>
           </Link>
           <Link href="/manager/calender" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
@@ -219,7 +225,7 @@ export default function StaffHubPage() {
             <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">My Schedule</div>
           </Link>
           {isManager && (
-            <Link href="/manager" className="group rounded-2xl p-6 text-center text-white no-underline col-span-2 sm:col-span-4
+            <Link href="/manager" className="group rounded-2xl p-6 text-center text-white no-underline
                                               border border-amber-400/40 transition-all hover:-translate-y-1 hover:border-amber-400"
               style={{ background: "rgba(243,156,18,0.15)" }}>
               <div className="text-3xl mb-2">📊</div>

@@ -2332,29 +2332,40 @@ export default function POSPage() {
                   ) : (
                     /* ── NORMAL: Payment buttons ── */
                     <>
-                      <button
-                        disabled={cart.length === 0 || isSubmitting}
-                        onClick={handleSendToKDS}
-                        className="w-full min-h-[56px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-base uppercase tracking-[0.2em] rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20"
-                      >
-                        {isSubmitting ? (
-                          <><Loader2 size={18} className="animate-spin" /> Processing…</>
-                        ) : (
-                          <><CreditCard size={18} /> Collect Payment</>
-                        )}
-                      </button>
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           disabled={cart.length === 0 || isSubmitting}
-                          onClick={() => handleMarkPaid()}
-                          className="min-h-[44px] py-3 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                          onClick={handleSendToKDS}
+                          className="min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
                         >
-                          <Banknote size={14} /> Cash
+                          <ChevronRight size={14} /> Send to KDS
                         </button>
                         <button
                           disabled={cart.length === 0 || isSubmitting}
+                          onClick={handleSendToKDS}
+                          className="min-h-[44px] py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                        >
+                          {isSubmitting ? (
+                            <><Loader2 size={16} className="animate-spin" /> Processing…</>
+                          ) : (
+                            <><CreditCard size={16} /> Pay on Terminal</>
+                          )}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {!createdOrderId && (
+                          <button
+                            disabled={cart.length === 0 || isSubmitting}
+                            onClick={() => handleMarkPaid()}
+                            className="min-h-[44px] py-3 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                          >
+                            <Banknote size={14} /> Cash
+                          </button>
+                        )}
+                        <button
+                          disabled={cart.length === 0 || isSubmitting}
                           onClick={handleCompInit}
-                          className="min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                          className={`min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2 ${createdOrderId ? "col-span-2" : ""}`}
                         >
                           <Gift size={14} /> Comp
                         </button>
@@ -2386,7 +2397,7 @@ export default function POSPage() {
                 <div className="flex items-center justify-center gap-2 bg-orange-500/15 border border-orange-500/30 rounded-lg px-3 py-2 mb-1">
                   <MessageSquare size={14} className="text-orange-400" />
                   <span className="text-xs font-bold uppercase tracking-widest text-orange-400">
-                    Chat Order — Collect Payment
+                    Chat Order — Pay on Terminal
                   </span>
                 </div>
               )}
@@ -2458,10 +2469,11 @@ export default function POSPage() {
               )}
 
               <button
-                onClick={handleCashFallback}
-                className="w-full min-h-[48px] py-3 bg-stone-800 hover:bg-stone-700 active:bg-stone-600 text-stone-300 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                disabled={cart.length === 0 || isSubmitting}
+                onClick={handleCompInit}
+                className="w-full min-h-[48px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
               >
-                <Banknote size={14} /> Switch to Cash
+                <Gift size={14} /> Comp
               </button>
 
               <button
@@ -2643,29 +2655,40 @@ export default function POSPage() {
             <>
               {isOnline ? (
                 <>
-                  <button
-                    disabled={cart.length === 0 || isSubmitting}
-                    onClick={handleSendToKDS}
-                    className="w-full min-h-[48px] py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-bold text-sm uppercase tracking-[0.2em] rounded-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                  >
-                    {isSubmitting ? (
-                      <><Loader2 size={16} className="animate-spin" /> Processing…</>
-                    ) : (
-                      <><CreditCard size={16} /> Collect Payment</>
-                    )}
-                  </button>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       disabled={cart.length === 0 || isSubmitting}
-                      onClick={() => handleMarkPaid()}
-                      className="min-h-[44px] py-3 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                      onClick={handleSendToKDS}
+                      className="min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
                     >
-                      <Banknote size={14} /> Cash
+                      <ChevronRight size={14} /> Send to KDS
                     </button>
                     <button
                       disabled={cart.length === 0 || isSubmitting}
+                      onClick={handleSendToKDS}
+                      className="min-h-[44px] py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                    >
+                      {isSubmitting ? (
+                        <><Loader2 size={16} className="animate-spin" /> Processing…</>
+                      ) : (
+                        <><CreditCard size={16} /> Pay on Terminal</>
+                      )}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {!createdOrderId && (
+                      <button
+                        disabled={cart.length === 0 || isSubmitting}
+                        onClick={() => handleMarkPaid()}
+                        className="min-h-[44px] py-3 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                      >
+                        <Banknote size={14} /> Cash
+                      </button>
+                    )}
+                    <button
+                      disabled={cart.length === 0 || isSubmitting}
                       onClick={handleCompInit}
-                      className="min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2"
+                      className={`min-h-[44px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2 ${createdOrderId ? "col-span-2" : ""}`}
                     >
                       <Gift size={14} /> Comp
                     </button>
@@ -2695,7 +2718,7 @@ export default function POSPage() {
                 <div className="flex items-center justify-center gap-2 bg-orange-500/15 border border-orange-500/30 rounded-lg px-3 py-2 mb-1">
                   <MessageSquare size={14} className="text-orange-400" />
                   <span className="text-xs font-bold uppercase tracking-widest text-orange-400">
-                    Chat Order — Collect Payment
+                    Chat Order — Pay on Terminal
                   </span>
                 </div>
               )}
@@ -2747,8 +2770,8 @@ export default function POSPage() {
                   <button onClick={dismissVoucherError} className="w-full py-2 text-xs text-stone-600 hover:text-stone-400 transition-colors text-center">Dismiss</button>
                 </div>
               )}
-              <button onClick={handleCashFallback} className="w-full min-h-[48px] py-3 bg-stone-800 hover:bg-stone-700 active:bg-stone-600 text-stone-300 font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2">
-                <Banknote size={14} /> Switch to Cash
+              <button disabled={cart.length === 0 || isSubmitting} onClick={handleCompInit} className="w-full min-h-[48px] py-3 bg-stone-700 hover:bg-stone-600 active:bg-stone-500 disabled:bg-stone-800 disabled:text-stone-600 text-white font-semibold text-xs uppercase tracking-[0.15em] rounded-lg transition-all flex items-center justify-center gap-2">
+                <Gift size={14} /> Comp
               </button>
               <button onClick={handleCancelOrder} className="w-full min-h-[48px] py-2 text-xs text-stone-600 hover:text-red-400 active:text-red-300 transition-colors text-center rounded-lg">
                 Cancel Order

@@ -79,6 +79,28 @@ exports.handler = async (event) => {
       }
     }
 
+    // ── RESOLVE STAFF ID ───────────────────────────────────────
+    // Admin tokens (issued via ADMIN_PIN) may carry a null staffId
+    // if the admin row wasn't in staff_directory at login time, or
+    // if a legacy session is still active. Resolve by email as fallback.
+    let staffId = auth.user.id;
+    if (!staffId && auth.user.email) {
+      const { data: lookup, error: lookupErr } = await supabase
+        .from('staff_directory')
+        .select('id')
+        .eq('email', auth.user.email.toLowerCase())
+        .single();
+      if (lookupErr || !lookup) {
+        console.error('[PIN-CLOCK] Cannot resolve staff_directory ID for:', auth.user.email);
+        return {
+          statusCode: 400,
+          headers: corsHeaders,
+          body: JSON.stringify({ error: 'Staff record not found. Contact a manager.' })
+        };
+      }
+      staffId = lookup.id;
+    }
+
     // ── CALL ATOMIC RPC ────────────────────────────────────────
     // atomic_staff_clock handles:
     //   • IP allowlist enforcement (manager bypass built in)
@@ -88,7 +110,7 @@ exports.handler = async (event) => {
     const { data: result, error: rpcError } = await supabase.rpc(
       'atomic_staff_clock',
       {
-        p_staff_id: auth.user.id,
+        p_staff_id: staffId,
         p_action:   action,
         p_ip:       ip,
       }

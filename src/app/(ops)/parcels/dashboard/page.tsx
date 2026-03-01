@@ -36,7 +36,7 @@ import { useParcelSync } from "@/hooks/useParcelSync";
 import { cn } from "@/lib/utils";
 import {
   Package, Truck, Wifi, WifiOff, Clock, AlertTriangle,
-  CheckCircle2, Building, User, Archive,
+  CheckCircle2, Building, User, Archive, Search, Phone, UserPlus, X,
 } from "lucide-react";
 import type { Carrier } from "@/lib/detectCarrier";
 
@@ -223,6 +223,17 @@ export default function ParcelDashboardPage() {
   /** Sequence guard — discard out-of-order broadcast messages */
   const lastProcessedSeqRef = useRef(0);
 
+  /* ─── Manual Lookup State ────────────────────────────────────── */
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ResidentInfo[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchDone, setSearchDone] = useState(false);
+  const [guestMode, setGuestMode] = useState(false);
+  const [guestName, setGuestName] = useState("");
+  const [guestPhone, setGuestPhone] = useState("");
+  const [guestSaving, setGuestSaving] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   /* ─── Resident directory cache ───────────────────────────────── */
   const directoryRef = useRef<ResidentInfo[] | null>(null);
   const directoryLoadingRef = useRef(false);
@@ -279,6 +290,81 @@ export default function ParcelDashboardPage() {
   useEffect(() => {
     loadDirectory();
   }, [loadDirectory]);
+
+  /* ─── Manual search: phone first, name fallback ──────────────── */
+  const runSearch = useCallback(async (query: string) => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      setSearchDone(false);
+      return;
+    }
+    setSearchLoading(true);
+    setSearchDone(false);
+    setGuestMode(false);
+
+    try {
+      const isPhone = /^\d[\d\s\-().+]{2,}$/.test(q);
+      const param = isPhone
+        ? `phone=${encodeURIComponent(q)}`
+        : `prefix=${encodeURIComponent(q)}`;
+
+      const res = await fetch(`${API_BASE}/search-residents?${param}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-BrewHub-Action": "true",
+        },
+      });
+      if (!res.ok) { setSearchResults([]); return; }
+      const data = await res.json();
+      setSearchResults(data.results || []);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+      setSearchDone(true);
+    }
+  }, [token]);
+
+  /** Debounced search on query change */
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      setSearchDone(false);
+      return;
+    }
+    searchTimerRef.current = setTimeout(() => runSearch(searchQuery), 350);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchQuery, runSearch]);
+
+  /** Select a resident from search results */
+  const selectSearchResult = useCallback((r: ResidentInfo) => {
+    setResident(r);
+    setUnitInput(r.unit_number || "");
+    setIsGhost(false);
+    setIntakeState("ready");
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchDone(false);
+    setGuestMode(false);
+  }, []);
+
+  /** Reset manual lookup */
+  const clearManualLookup = useCallback(() => {
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchDone(false);
+    setGuestMode(false);
+    setGuestName("");
+    setGuestPhone("");
+    if (!tracking) {
+      setResident(null);
+      setUnitInput("");
+      setIsGhost(false);
+      setIntakeState("idle");
+    }
+  }, [tracking]);
 
   /* ─── Resident lookup by unit ────────────────────────────────── */
   const lookupUnit = useCallback(async (unit: string): Promise<ResidentInfo | null> => {
@@ -343,8 +429,9 @@ export default function ParcelDashboardPage() {
     onSubmit: async (data) => {
       setIntakeState("processing");
 
-      // Ghost check — if unit doesn't exist, DENY and broadcast back
-      const found = await lookupUnit(data.unit);
+      // Use pre-selected resident (from manual search or guest upsert) if available,
+      // otherwise fall back to directory lookup by unit number.
+      const found = resident ?? await lookupUnit(data.unit);
       if (!found) {
         setIsGhost(true);
         setIntakeState("ghost");
@@ -572,7 +659,7 @@ export default function ParcelDashboardPage() {
           </div>
 
           {/* Resident Card */}
-          <div className="mx-4 mt-4 flex-1">
+          <div className="mx-4 mt-4 flex-1 overflow-y-auto">
             {/* Found resident */}
             {resident && !isGhost && (
               <div className="flex items-center gap-3 rounded-xl border border-green-800 bg-green-950/20 px-4 py-3">
@@ -587,15 +674,23 @@ export default function ParcelDashboardPage() {
                     <Building className="h-3 w-3" />
                     <span className="font-mono font-bold">Unit {resident.unit_number}</span>
                   </div>
+                  {resident.phone && (
+                    <div className="flex items-center gap-1 text-xs text-green-400/70 mt-0.5">
+                      <Phone className="h-3 w-3" />
+                      <span>{resident.phone}</span>
+                    </div>
+                  )}
                 </div>
-                <CheckCircle2 className="h-6 w-6 shrink-0 text-green-500" />
+                <button onClick={clearManualLookup} className="text-stone-500 hover:text-white p-1" aria-label="Clear">
+                  <X className="h-4 w-4" />
+                </button>
               </div>
             )}
 
             {/* Ghost Resident Alert */}
             {isGhost && (
-              <div className="animate-pulse rounded-xl border-2 border-red-600 bg-red-950/40 px-4 py-4 text-center">
-                <AlertTriangle className="mx-auto h-10 w-10 text-red-400" />
+              <div className="rounded-xl border-2 border-red-600 bg-red-950/40 px-4 py-4 text-center">
+                <AlertTriangle className="mx-auto h-10 w-10 text-red-400 animate-pulse" />
                 <h3 className="mt-2 text-lg font-black uppercase tracking-wider text-red-400">
                   Ghost Resident
                 </h3>
@@ -606,11 +701,179 @@ export default function ParcelDashboardPage() {
               </div>
             )}
 
-            {/* Idle state */}
-            {!resident && !isGhost && !unitInput && intakeState === "idle" && (
-              <div className="flex flex-col items-center justify-center py-6 text-center">
-                <User className="h-10 w-10 text-stone-800" />
-                <p className="mt-2 text-xs text-stone-700">Resident info appears here</p>
+            {/* ─── MANUAL RESIDENT LOOKUP ──────────────────────── */}
+            {!resident && (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-widest text-stone-500">
+                  <Search className="h-3 w-3" />
+                  Find Resident
+                </div>
+
+                {!guestMode ? (
+                  <>
+                    {/* Search input — phone or name */}
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Phone number or name…"
+                        className="w-full rounded-lg border border-stone-700 bg-stone-900 px-3 py-2.5 pl-9 text-sm text-white placeholder:text-stone-600 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+                      />
+                      {/^\d/.test(searchQuery.trim()) ? (
+                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-stone-500" />
+                      ) : (
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-stone-500" />
+                      )}
+                      {searchQuery && (
+                        <button
+                          onClick={() => { setSearchQuery(""); setSearchResults([]); setSearchDone(false); }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-stone-500 hover:text-white"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Loading spinner */}
+                    {searchLoading && (
+                      <div className="flex items-center justify-center py-2">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+                      </div>
+                    )}
+
+                    {/* Search results */}
+                    {searchResults.length > 0 && (
+                      <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-stone-700 bg-stone-900/80">
+                        {searchResults.map((r) => (
+                          <button
+                            key={r.id}
+                            onClick={() => selectSearchResult(r)}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-stone-800 transition-colors"
+                          >
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-800 text-xs font-bold text-amber-400">
+                              {getInitials(r.name)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium text-white">{r.name}</div>
+                              <div className="flex items-center gap-2 text-[11px] text-stone-500">
+                                {r.unit_number && <span>Unit {r.unit_number}</span>}
+                                {r.phone && <span>{r.phone}</span>}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* No results — offer guest checkout */}
+                    {searchDone && !searchLoading && searchResults.length === 0 && searchQuery.trim().length >= 2 && (
+                      <div className="rounded-lg border border-stone-700 bg-stone-900/50 p-3 text-center">
+                        <p className="text-xs text-stone-500">No residents found</p>
+                        <button
+                          onClick={() => {
+                            setGuestMode(true);
+                            // Pre-fill phone if they searched by phone
+                            if (/^\d/.test(searchQuery.trim())) {
+                              setGuestPhone(searchQuery.trim());
+                              setGuestName("");
+                            } else {
+                              setGuestName(searchQuery.trim());
+                              setGuestPhone("");
+                            }
+                            setSearchQuery("");
+                            setSearchResults([]);
+                            setSearchDone(false);
+                          }}
+                          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500 transition-colors"
+                        >
+                          <UserPlus className="h-3.5 w-3.5" />
+                          Check in as Guest
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Idle hint */}
+                    {!searchQuery && !searchDone && !isGhost && intakeState === "idle" && (
+                      <div className="flex flex-col items-center justify-center py-3 text-center">
+                        <User className="h-8 w-8 text-stone-800" />
+                        <p className="mt-1 text-[11px] text-stone-700">Search by phone # or name</p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* ─── GUEST CHECKOUT FORM ──────────────────────── */
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1 text-xs font-semibold text-amber-400">
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Guest Check-in
+                      </span>
+                      <button onClick={clearManualLookup} className="text-stone-500 hover:text-white text-xs">
+                        Cancel
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={guestName}
+                      onChange={(e) => setGuestName(e.target.value)}
+                      placeholder="Guest name *"
+                      className="w-full rounded-lg border border-stone-700 bg-stone-900 px-3 py-2 text-sm text-white placeholder:text-stone-600 focus:border-amber-500 focus:outline-none"
+                    />
+                    <input
+                      type="tel"
+                      value={guestPhone}
+                      onChange={(e) => setGuestPhone(e.target.value)}
+                      placeholder="Phone (optional — for SMS alerts)"
+                      className="w-full rounded-lg border border-stone-700 bg-stone-900 px-3 py-2 text-sm text-white placeholder:text-stone-600 focus:border-amber-500 focus:outline-none"
+                    />
+                    <button
+                      disabled={!guestName.trim() || guestSaving}
+                      onClick={async () => {
+                        // Persist guest to Supabase residents table
+                        setGuestSaving(true);
+                        try {
+                          const res = await fetch(`${API_BASE}/upsert-guest`, {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Authorization: `Bearer ${token}`,
+                              "X-BrewHub-Action": "true",
+                            },
+                            body: JSON.stringify({
+                              name: guestName.trim(),
+                              phone: guestPhone.trim() || undefined,
+                              unit_number: unitInput || undefined,
+                            }),
+                          });
+                          const json = await res.json();
+                          if (!res.ok || !json.resident) {
+                            console.error("[GUEST] upsert failed", json.error);
+                            return;
+                          }
+                          const saved: ResidentInfo = {
+                            id: json.resident.id,
+                            name: json.resident.name,
+                            unit_number: json.resident.unit_number || null,
+                            phone: json.resident.phone || null,
+                          };
+                          setResident(saved);
+                          setUnitInput(saved.unit_number || "");
+                          setIsGhost(false);
+                          setIntakeState("ready");
+                          setGuestMode(false);
+                        } catch (err) {
+                          console.error("[GUEST] upsert error", err);
+                        } finally {
+                          setGuestSaving(false);
+                        }
+                      }}
+                      className="w-full rounded-lg bg-green-700 py-2 text-sm font-bold text-white hover:bg-green-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {guestSaving ? "Saving…" : "Confirm Guest"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

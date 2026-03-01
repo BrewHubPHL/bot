@@ -1,0 +1,1 @@
+supabase migration new add_fulfillment_type

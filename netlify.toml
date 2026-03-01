@@ -20,7 +20,7 @@
 # Staff shortcut
 [[redirects]]
   from = "/staff"
-  to = "/login"
+  to = "/pos"
   status = 302
   force = true
 

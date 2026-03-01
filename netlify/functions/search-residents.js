@@ -1,4 +1,4 @@
-// PHILLY WAY: Search residents by name prefix (first 3+ letters)
+// PHILLY WAY: Search residents by phone (primary) or name prefix (fallback)
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 
@@ -23,8 +23,7 @@ exports.handler = async (event) => {
   }
 
   // 1. Staff auth (contains resident PII - parcels workflow)
-  // High-sensitivity: Require token issued within last 15 minutes
-  const auth = await authorize(event, { maxTokenAgeMinutes: 15, requirePin: true });
+  const auth = await authorize(event, { requirePin: true });
   if (!auth.ok) return auth.response;
 
   if (event.httpMethod !== 'GET') {
@@ -32,21 +31,45 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { prefix } = event.queryStringParameters || {};
+    const { prefix, phone } = event.queryStringParameters || {};
 
-    if (!prefix || prefix.length < 2) {
-      return json(400, { error: 'Need at least 2 characters to search' });
+    // ── Phone lookup (primary) ─────────────────────────────────
+    if (phone) {
+      // Strip everything except digits
+      const digits = phone.replace(/\D/g, '');
+      if (digits.length < 4 || digits.length > 15) {
+        return json(400, { error: 'Phone number must be 4-15 digits' });
+      }
+
+      // Search by phone suffix (last N digits) to handle +1 prefix variations
+      const { data, error } = await supabase
+        .from('residents')
+        .select('id, name, unit_number, phone')
+        .like('phone', `%${digits.slice(-10)}`)
+        .order('name')
+        .limit(10);
+
+      if (error) throw error;
+
+      return json(200, {
+        results: data || [],
+        count: data?.length || 0,
+      });
+    }
+
+    // ── Name prefix lookup (fallback) ──────────────────────────
+    if (!prefix || prefix.length < 1) {
+      return json(400, { error: 'Need at least 1 character to search' });
     }
 
     // SECURITY: Escape SQL LIKE wildcards to prevent table-wide enumeration
-    // % and _ are special characters in LIKE/ILIKE queries
     const escapeWildcards = (str) => str
-      .replace(/\\/g, '\\\\')  // Escape backslash first
-      .replace(/%/g, '\\%')      // Escape %
-      .replace(/_/g, '\\_');     // Escape _
+      .replace(/\\/g, '\\\\')
+      .replace(/%/g, '\\%')
+      .replace(/_/g, '\\_');
     
     // SECURITY: Only allow letters, spaces, hyphens, apostrophes (valid name characters)
-    const NAME_REGEX = /^[A-Za-z\s\-']{2,30}$/;
+    const NAME_REGEX = /^[A-Za-z\s\-']{1,30}$/;
     const sanitized = prefix.trim();
     
     if (!NAME_REGEX.test(sanitized)) {

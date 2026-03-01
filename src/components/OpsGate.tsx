@@ -5,6 +5,7 @@ import {
   Lock, LogIn, LogOut, Loader2, Clock, AlertCircle, User, CheckCircle2, Delete, Shield, ScanFace, Fingerprint, WifiOff
 } from "lucide-react";
 import { startRegistration, startAuthentication, browserSupportsWebAuthn } from "@simplewebauthn/browser";
+import { useRouter } from "next/navigation";
 import PinRotationModal from "./PinRotationModal";
 import ManagerChallengeModal from "./ManagerChallengeModal";
 import { StaffShiftProvider, broadcastShiftChange, useStaff as useStaffHook } from "@/context/StaffContext";
@@ -163,6 +164,7 @@ export default function OpsGate({ children, requireManager = false }: { children
   // Terminal Mode: shared POS iPads use ?mode=pos or localStorage flag.
   // In POS mode, WebAuthn/Face ID is hidden — PIN only for per-barista tracking.
   const [terminalMode, setTerminalMode] = useState(false);
+  const opsRouter = useRouter();
 
   // Hydration-safe mount — defer client-only rendering
   useEffect(() => {
@@ -356,6 +358,9 @@ export default function OpsGate({ children, requireManager = false }: { children
       if (data.needsPinRotation) {
         setShowPinRotation(true);
       }
+
+      // Always land on the staff hub (clock-in portal) after login
+      opsRouter.replace("/staff-hub");
     } catch {
       setError("Connection error — try again");
       setPin("");

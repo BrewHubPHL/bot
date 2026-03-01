@@ -25,16 +25,8 @@ export default function StaffNavigation() {
 
   if (!session) return null; // only show when authenticated
 
-  const role = session.staff.role?.toLowerCase() ?? "";
-  const homeBase =
-    role === "manager" || role === "admin" || role === "owner"
-      ? "/manager"
-      : "/staff-hub";
-
-  const homeLabel =
-    role === "manager" || role === "admin" || role === "owner"
-      ? "Manager Dashboard"
-      : "Staff Hub";
+  const homeBase = "/staff-hub";
+  const homeLabel = "Staff Hub";
 
   // Don't render on the home-base page itself
   if (pathname === homeBase) return null;

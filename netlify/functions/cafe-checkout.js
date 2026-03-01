@@ -269,13 +269,13 @@ exports.handler = async (event) => {
       qtyMap[compositeKey].totalQty += item.quantity;
     }
 
-    let totalCents = 0;
+    let subtotalCents = 0;
     const validatedItems = [];
 
     for (const { product, totalQty, customizations, modCostCents, effectivePriceCents: epCents } of Object.values(qtyMap)) {
       const unitCents = epCents + modCostCents;
       const lineCents = unitCents * totalQty;
-      totalCents += lineCents;
+      subtotalCents += lineCents;
       validatedItems.push({
         drink_name: product.name,
         price: unitCents / 100,
@@ -285,10 +285,18 @@ exports.handler = async (event) => {
     }
 
     // ── Strict $0.00 floor — prevent negative totals ────────
-    totalCents = Math.max(0, totalCents);
-    if (totalCents <= 0) {
+    subtotalCents = Math.max(0, subtotalCents);
+    if (subtotalCents <= 0) {
       return json(400, { error: 'Order total must be greater than $0.00.' });
     }
+
+    // ── Server-side tax calculation (Philadelphia 8%) ────────
+    // Tax is authoritative here — POS displays the same rate client-side
+    // but the DB total MUST come from the server. Comp orders are tax-exempt.
+    const TAX_RATE = 0.08;
+    const isCompOrder = paymentMethod === 'comp';
+    const taxAmountCents = isCompOrder ? 0 : Math.round(subtotalCents * TAX_RATE);
+    const totalCents = subtotalCents + taxAmountCents;
 
     // ── Create order with SERVER-calculated total ────────────
     // Atomic cash/comp: order lands on KDS as 'preparing', fully paid.
@@ -306,6 +314,8 @@ exports.handler = async (event) => {
     const orderRow = {
       status: orderStatus,
       type: 'cafe',
+      subtotal_cents: subtotalCents,
+      tax_amount_cents: taxAmountCents,
       total_amount_cents: totalCents,
     };
 
@@ -488,6 +498,8 @@ exports.handler = async (event) => {
                 <p style="margin: 10px 0 0 0;"><strong>Items:</strong></p>
                 <p style="margin: 5px 0;">${itemList}</p>
                 <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
+                <p style="margin: 0;"><strong>Subtotal:</strong> $${(subtotalCents/100).toFixed(2)}</p>
+                ${taxAmountCents > 0 ? `<p style="margin: 0;"><strong>Tax (8%):</strong> $${(taxAmountCents/100).toFixed(2)}</p>` : ''}
                 <p style="margin: 0; font-size: 1.2em;"><strong>Total: $${(totalCents/100).toFixed(2)}</strong></p>
               </div>
               <p>Your order is being prepared. See you soon!</p>
@@ -504,6 +516,8 @@ exports.handler = async (event) => {
     return json(200, { 
       success: true, 
       order: order,
+      subtotal_cents: subtotalCents,
+      tax_cents: taxAmountCents,
       total_cents: totalCents 
     });
 

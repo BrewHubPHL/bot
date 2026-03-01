@@ -16,12 +16,19 @@ const OPS_PATHS = ["/kds", "/pos", "/scanner", "/manager", "/staff-hub", "/admin
 /** Routes that require manager (or higher) role */
 const MANAGER_ONLY_PATHS = ["/manager", "/admin"];
 
+/** Subpaths under manager routes that all staff can access (read-only) */
+const STAFF_ALLOWED_MANAGER_PATHS = ["/manager/calender"];
+
 function isOpsRoute(pathname: string): boolean {
   // Match /kds, /pos, /scanner, /manager (Next.js removes the (ops) group prefix)
   return OPS_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
 function isManagerRoute(pathname: string): boolean {
+  // Allow staff-accessible subpaths through
+  if (STAFF_ALLOWED_MANAGER_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+    return false;
+  }
   return MANAGER_ONLY_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 

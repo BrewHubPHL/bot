@@ -1,6 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
-const { authenticator } = require('otplib');
 const { signToken } = require('./_auth.js');
 const { requireCsrfHeader } = require('./_csrf');
 const { sanitizeInput } = require('./_sanitize');
@@ -19,6 +18,41 @@ function deriveDeviceFingerprint(event) {
     || 'unknown';
   const raw = `${ua}|${accept}|${clientIp}`;
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+}
+
+/**
+ * RFC 6238 TOTP verification using Node.js built-in crypto.
+ * Replaces otplib (whose v13 API broke the authenticator export).
+ * Accepts a ±1 time-step window to tolerate clock drift.
+ */
+function verifyTOTP(token, secret, window = 1) {
+  if (!token || !secret) return false;
+  // Decode base32 secret
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const c of secret.toUpperCase().replace(/[\s=]+/g, '')) {
+    const val = alphabet.indexOf(c);
+    if (val === -1) return false;
+    bits += val.toString(2).padStart(5, '0');
+  }
+  const keyBytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    keyBytes.push(parseInt(bits.substring(i, i + 8), 2));
+  }
+  const key = Buffer.from(keyBytes);
+
+  const counter = Math.floor(Date.now() / 30000);
+  for (let i = -window; i <= window; i++) {
+    const time = counter + i;
+    const buf = Buffer.alloc(8);
+    buf.writeUInt32BE(Math.floor(time / 0x100000000), 0);
+    buf.writeUInt32BE(time >>> 0, 4);
+    const hmac = crypto.createHmac('sha1', key).update(buf).digest();
+    const offset = hmac[hmac.length - 1] & 0x0f;
+    const code = ((hmac[offset] & 0x7f) << 24 | hmac[offset + 1] << 16 | hmac[offset + 2] << 8 | hmac[offset + 3]) % 1000000;
+    if (String(code).padStart(6, '0') === token) return true;
+  }
+  return false;
 }
 
 exports.handler = async (event) => {
@@ -62,8 +96,27 @@ exports.handler = async (event) => {
     // _auth.js can re-validate the token on subsequent requests.
     if (pin === process.env.ADMIN_PIN) {
       console.log('[PIN-LOGIN] Admin login detected. Bypassing network security.');
-      const adminEmail = process.env.ADMIN_EMAIL || '';
-      const token = signToken({ role: 'admin', email: adminEmail, status: 'active', dfp });
+      const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
+
+      // Resolve admin's staff_directory row so the token carries a real staffId.
+      // Without this, clock-in/out and any RPC keyed on staff_directory.id fails.
+      const adminSupabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+      const { data: adminRow, error: adminLookupErr } = await adminSupabase
+        .from('staff_directory')
+        .select('id, name, full_name, is_working')
+        .eq('email', adminEmail)
+        .single();
+
+      if (adminLookupErr || !adminRow) {
+        console.error('[PIN-LOGIN] Admin email not found in staff_directory:', adminLookupErr?.message);
+        // Graceful degradation: proceed with null staffId (clock won't work but login will)
+      }
+
+      const adminStaffId = adminRow?.id || null;
+      const adminName = adminRow?.full_name || adminRow?.name || 'Admin';
+      const adminIsWorking = adminRow?.is_working ?? false;
+
+      const token = signToken({ role: 'admin', email: adminEmail, staffId: adminStaffId, status: 'active', dfp });
 
       // Set HttpOnly session cookie so middleware recognizes the session
       const isProduction = !['localhost', '127.0.0.1'].includes(
@@ -84,7 +137,7 @@ exports.handler = async (event) => {
         body: JSON.stringify({
           token,
           role: 'admin',
-          staff: { id: null, name: 'Admin', email: adminEmail, role: 'admin', is_working: false },
+          staff: { id: adminStaffId, name: adminName, email: adminEmail, role: 'admin', is_working: adminIsWorking },
         }),
       };
     }
@@ -142,7 +195,7 @@ exports.handler = async (event) => {
         if (!totpCode) {
           return { statusCode: 403, body: JSON.stringify({ error: 'TOTP_REQUIRED' }) };
         }
-        const isValid = authenticator.verify({ token: totpCode, secret: process.env.MANAGER_TOTP_SECRET });
+        const isValid = verifyTOTP(totpCode, process.env.MANAGER_TOTP_SECRET);
         if (!isValid) {
           return { statusCode: 401, body: JSON.stringify({ error: 'INVALID_TOTP' }) };
         }

@@ -96,7 +96,7 @@ function paymentLabel(paymentId) {
  * Layout per the BrewHub spec (strict 32-char width):
  * ================================
  *        BREWHUB PHL
- *   1801 S 20th St, Philly
+ *      Philly 19146
  * ================================
  * Order #: BRW-7K2L
  * Date:    02/18/2026 11:42 AM
@@ -105,7 +105,9 @@ function paymentLabel(paymentId) {
  * Iced Americano     x1     $4.00
  * Blueberry Muffin   x1     $3.75
  * --------------------------------
- * TOTAL                    $13.25
+ * Subtotal                 $13.25
+ * Tax (8%)                  $1.06
+ * TOTAL                    $14.31
  * Paid: Square
  * --------------------------------
  *   Thank you, neighbor!
@@ -171,11 +173,38 @@ function generateReceiptString(order, items) {
   }
   lines.push(thinDiv);
 
-  // --- Total ---
-  const totalStr = formatMoney(order.total_amount_cents || 0);
-  const totalLabel = 'TOTAL';
-  const totalGap = W - totalLabel.length - totalStr.length;
-  lines.push(`${totalLabel}${' '.repeat(Math.max(1, totalGap))}${totalStr}`);
+  // --- Subtotal / Tax / Total ---
+  // If the order has tax columns (schema-75+), show the full breakdown.
+  // Legacy orders (pre-schema-75) fall back to a single TOTAL line.
+  const subtotalCents = order.subtotal_cents;
+  const taxCents = order.tax_amount_cents;
+  const totalAmountCents = order.total_amount_cents || 0;
+
+  if (subtotalCents != null && taxCents != null) {
+    // Subtotal line
+    const subStr = formatMoney(subtotalCents);
+    const subLabel = 'Subtotal';
+    const subGap = W - subLabel.length - subStr.length;
+    lines.push(`${subLabel}${' '.repeat(Math.max(1, subGap))}${subStr}`);
+
+    // Tax line (show rate if non-zero)
+    const taxStr = formatMoney(taxCents);
+    const taxLabel = taxCents > 0 ? 'Tax (8%)' : 'Tax';
+    const taxGap = W - taxLabel.length - taxStr.length;
+    lines.push(`${taxLabel}${' '.repeat(Math.max(1, taxGap))}${taxStr}`);
+
+    // Total line (bold visual emphasis with padding)
+    const totalStr = formatMoney(totalAmountCents);
+    const totalLabel = 'TOTAL';
+    const totalGap = W - totalLabel.length - totalStr.length;
+    lines.push(`${totalLabel}${' '.repeat(Math.max(1, totalGap))}${totalStr}`);
+  } else {
+    // Legacy fallback: single total line for pre-schema-75 orders
+    const totalStr = formatMoney(totalAmountCents);
+    const totalLabel = 'TOTAL';
+    const totalGap = W - totalLabel.length - totalStr.length;
+    lines.push(`${totalLabel}${' '.repeat(Math.max(1, totalGap))}${totalStr}`);
+  }
 
   // --- Payment ---
   lines.push(`Paid: ${paymentLabel(order.payment_id)}`);

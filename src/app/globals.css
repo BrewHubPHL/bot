@@ -217,6 +217,25 @@ html, body {
   margin-top: 1rem;
   letter-spacing: 0.03em;
 }
+.hero-cta-link {
+  display: inline-block;
+  padding: 0.5rem 1.2rem;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--hub-espresso);
+  border: 2px solid var(--hub-tan);
+  border-radius: 0.6rem;
+  text-decoration: none;
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+  cursor: pointer;
+}
+.hero-cta-link:hover {
+  background: var(--hub-tan);
+  color: #fff;
+  border-color: var(--hub-espresso);
+}
 
 /* ===== ABOUT SECTION ===== */
 .about-section {
