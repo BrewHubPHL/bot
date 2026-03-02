@@ -134,11 +134,14 @@ exports.handler = async (event) => {
 
     console.log(`[NO-SHOW][DETECT] Querying shifts starting between ${twoHoursAgo} and ${fifteenAgo}`);
 
-    // ── Single joined query: shifts + staff info in one request ──
+    // ── Query 1: Overdue shifts ──────────────────────────────────
+    // NOTE: scheduled_shifts.user_id FK → auth.users(id), NOT staff_directory.
+    // PostgREST cannot infer a join to staff_directory, so we split into
+    // two queries and match on sd.id = shift.user_id (same UUID by convention).
     const { data: shifts, error: shiftErr } = await withSourceComment(
       supabase
         .from('scheduled_shifts')
-        .select('id, user_id, start_time, staff_directory(name, email)')
+        .select('id, user_id, start_time')
         .eq('status', 'scheduled')
         .lt('start_time', fifteenAgo)
         .gt('start_time', twoHoursAgo),
@@ -153,6 +156,31 @@ exports.handler = async (event) => {
       return json(200, { alerted: 0, mode: 'detect', status: 'Clear' });
     }
 
+    // ── Query 2: Batch-fetch staff info by matching user_id → staff_directory.id ──
+    const userIds = [...new Set(shifts.map(s => s.user_id).filter(Boolean))];
+    const { data: staffRows, error: staffErr } = userIds.length > 0
+      ? await supabase
+          .from('v_staff_status')
+          .select('id, name, email')
+          .in('id', userIds)
+      : { data: [], error: null };
+
+    if (staffErr) {
+      console.error('[NO-SHOW][DETECT] Staff lookup error:', staffErr.message);
+      // Non-fatal: shifts without staff info will be skipped below
+    }
+
+    // Index staff by id for O(1) lookup
+    const staffById = new Map();
+    for (const s of (staffRows || [])) {
+      staffById.set(s.id, s);
+    }
+
+    // Attach staff info to each shift for downstream processing
+    for (const shift of shifts) {
+      shift._staff = staffById.get(shift.user_id) || null;
+    }
+
     // ── Batch-fetch ALL relevant time_logs in one query ─────────
     // Compute a broad window that covers every shift's clock-in range:
     //   earliest possible = earliest shift start − 30 min
@@ -162,7 +190,7 @@ exports.handler = async (event) => {
     const broadWindowEnd   = new Date(Math.max(...shiftStarts) + 15 * 60 * 1000).toISOString();
 
     const staffEmails = shifts
-      .map(s => s.staff_directory?.email)
+      .map(s => s._staff?.email)
       .filter(Boolean)
       .map(e => e.toLowerCase());
     const uniqueEmails = [...new Set(staffEmails)];
@@ -194,7 +222,7 @@ exports.handler = async (event) => {
 
     // ── Iterate locally — zero additional DB queries ─────────────
     for (const shift of shifts) {
-      const staff = shift.staff_directory;
+      const staff = shift._staff;
       if (!staff || !staff.name || !staff.email) {
         console.error(`[NO-SHOW][DETECT] Skipping shift ${shift.id}: Staff record not found.`);
         continue;

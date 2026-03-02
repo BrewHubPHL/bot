@@ -17,10 +17,25 @@
 import { forceOpsLogout } from "@/lib/authz";
 
 /* ─── Resolved once at module load ────────────────────── */
-export const OPS_API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+function resolveApiBase(): string {
+  // Browser: use relative path (or localhost for dev)
+  if (typeof window !== "undefined") {
+    return window.location.hostname === "localhost"
+      ? "http://localhost:8888/.netlify/functions"
+      : "/.netlify/functions";
+  }
+  // Server (SSR): Node.js fetch() requires an absolute URL.
+  // Netlify provides URL / DEPLOY_PRIME_URL at runtime.
+  const siteUrl = process.env.URL || process.env.DEPLOY_PRIME_URL || "";
+  if (siteUrl) {
+    return `${siteUrl.replace(/\/$/, '')}/.netlify/functions`;
+  }
+  // Fallback: relative path — safe only for client-side.
+  // If hit during SSR, fetch() will throw a clear error.
+  return "/.netlify/functions";
+}
+
+export const OPS_API_BASE = resolveApiBase();
 
 /* ─── Core wrapper ────────────────────────────────────── */
 /**
