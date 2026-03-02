@@ -24,7 +24,9 @@ function deriveDeviceFingerprint(event) {
     || (xff ? xff.split(',')[0].trim() : null)
     || '127.0.0.1';
   const raw = `${ua}|${accept}|${clientIp}`;
-  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+  const hash = crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+  console.log(`[DFP-LOGIN] hash=${hash} ip=${clientIp} accept-lang=${accept.substring(0, 40)} ua=${ua.substring(0, 60)}`);
+  return hash;
 }
 
 /**

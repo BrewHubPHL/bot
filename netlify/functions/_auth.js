@@ -55,7 +55,7 @@ function getJwtIat(token) {
  * When x-forwarded-for contains multiple IPs we use only the first
  * (left-most) entry to keep the hash deterministic.
  */
-function deriveDeviceFingerprint(event) {
+function deriveDeviceFingerprint(event, { log = false } = {}) {
   const ua = event.headers?.['user-agent'] || '';
   const accept = event.headers?.['accept-language'] || '';
   const xff = event.headers?.['x-forwarded-for'];
@@ -64,7 +64,11 @@ function deriveDeviceFingerprint(event) {
     || (xff ? xff.split(',')[0].trim() : null)
     || '127.0.0.1';
   const raw = `${ua}|${accept}|${clientIp}`;
-  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+  const hash = crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+  if (log) {
+    console.log(`[DFP] hash=${hash} ip=${clientIp} accept-lang=${accept.substring(0, 40)} ua=${ua.substring(0, 60)}`);
+  }
+  return hash;
 }
 
 async function authorize(event, options = {}) {
@@ -161,10 +165,12 @@ async function authorize(event, options = {}) {
       // ═══════════════════════════════════════════════════════════
       if (payload.role === 'admin') {
         if (payload.dfp) {
-          const currentFp = deriveDeviceFingerprint(event);
+          const currentFp = deriveDeviceFingerprint(event, { log: true });
           if (payload.dfp !== currentFp) {
-            console.warn(`[AUTH BLOCKED] Device fingerprint mismatch for admin token: token=${payload.dfp} current=${currentFp}`);
-            return { ok: false, response: json(401, { error: 'Session bound to a different device. Please log in again.', code: 'DEVICE_MISMATCH' }) };
+            // Soft warning — cookie is HttpOnly+Secure+SameSite=Lax+HMAC-signed,
+            // so DFP is defense-in-depth. Header drift between requests on Netlify
+            // (edge vs serverless, accept-language presence) causes false positives.
+            console.warn(`[AUTH DFP WARN] Admin fingerprint drift: token=${payload.dfp} current=${currentFp}`);
           }
         }
         // If the admin token carries a token_version, verify it against the DB
@@ -225,10 +231,10 @@ async function authorize(event, options = {}) {
       // matches the current request. Prevents token theft/reuse.
       // ═══════════════════════════════════════════════════════════
       if (payload.dfp) {
-        const currentFp = deriveDeviceFingerprint(event);
+        const currentFp = deriveDeviceFingerprint(event, { log: true });
         if (payload.dfp !== currentFp) {
-          console.warn(`[AUTH BLOCKED] Device fingerprint mismatch for ${email}: token=${payload.dfp} current=${currentFp}`);
-          return { ok: false, response: json(401, { error: 'Session bound to a different device. Please log in again.', code: 'DEVICE_MISMATCH' }) };
+          // Soft warning — see admin block comment above.
+          console.warn(`[AUTH DFP WARN] Staff fingerprint drift for ${email}: token=${payload.dfp} current=${currentFp}`);
         }
       }
 

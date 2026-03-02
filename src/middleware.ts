@@ -197,14 +197,13 @@ export async function middleware(request: NextRequest) {
   // Defense-in-depth: If the edge runtime derives a different fingerprint
   // than the serverless function that issued the token (possible on
   // Netlify where edge and Lambda see slightly different headers), log
-  // it and clear the cookie but DON'T hard-block — the serverless
-  // function's own dfp check in _auth.js is the authoritative gate.
+  // it but DON'T block — DFP is defense-in-depth and header drift
+  // between edge runtime and serverless causes false positives.
+  // The cookie is already HttpOnly+Secure+SameSite=Lax+HMAC-signed.
   if (typeof payload.dfp === "string" && payload.dfp.length > 0) {
     const currentDfp = await deriveDeviceFingerprint(request);
     if (payload.dfp !== currentDfp) {
-      console.warn(`[MIDDLEWARE] DFP mismatch on ${pathname}: token=${payload.dfp} edge=${currentDfp}`);
-      // Clear the suspect cookie and let OpsGate re-auth
-      return failSession("Session not valid for this device");
+      console.warn(`[MIDDLEWARE] DFP drift on ${pathname}: token=${payload.dfp} edge=${currentDfp} (allowing through)`);
     }
   }
 
