@@ -116,7 +116,10 @@ async function authorize(event, options = {}) {
     if (match) token = decodeURIComponent(match[1]);
   }
 
-  if (!token) return { ok: false, response: json(401, { error: 'Unauthorized' }) };
+  if (!token) {
+    console.warn('[AUTH] No token found — checked Authorization header and hub_staff_session cookie');
+    return { ok: false, response: json(401, { error: 'Unauthorized' }) };
+  }
 
   const parts = token.split('.');
 
@@ -134,11 +137,13 @@ async function authorize(event, options = {}) {
       const sigBuf = Buffer.from(signature, 'hex');
       const expBuf = Buffer.from(expected, 'hex');
       if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+        console.warn('[AUTH] HMAC signature mismatch on PIN token');
         return { ok: false, response: json(401, { error: 'Invalid PIN session' }) };
       }
 
       const payload = JSON.parse(payloadStr);
       if (!payload.exp || Date.now() > payload.exp) {
+        console.warn(`[AUTH] PIN token expired: exp=${payload.exp} now=${Date.now()}`);
         return { ok: false, response: json(401, { error: 'PIN session expired' }) };
       }
 

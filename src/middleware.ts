@@ -150,17 +150,23 @@ export async function middleware(request: NextRequest) {
 
   const result = await verifySessionToken(sessionCookie, secret);
 
-  if (result.expired) {
-    // Clear the stale cookie and deny access (force re-authentication)
+  // ── Helper: graceful session failure ────────────────────────────────
+  // On any cookie validation failure, clear the cookie and let the page
+  // through so OpsGate can render the PIN screen.  Only deny non-page
+  // requests (RSC, fetch, etc.) with a 401.  This prevents raw JSON
+  // responses on full page loads AND prevents cookie deletion on RSC
+  // navigations from breaking the login flow.
+  function failSession(reason: string) {
+    console.warn(`[MIDDLEWARE] ${reason} on ${pathname}`);
     const accept = request.headers.get("accept") || "";
     if (accept.includes("text/html")) {
-      // HTML request — clear cookie and allow through so OpsGate shows PIN screen
       const response = NextResponse.next();
       response.cookies.delete("hub_staff_session");
       return response;
     }
-    // Non-HTML (fetch/API) — return 401
-    const response = new NextResponse(JSON.stringify({ error: "Session expired" }), {
+    // Non-HTML: return 401 but still clear the cookie so the next
+    // page load shows the PIN screen instead of looping.
+    const response = new NextResponse(JSON.stringify({ error: reason }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
     });
@@ -168,15 +174,12 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  if (result.expired) {
+    return failSession("Session expired");
+  }
+
   if (!result.valid) {
-    // Invalid signature — possible spoofing attempt. Delete and deny.
-    console.warn(`[MIDDLEWARE] Invalid session cookie on ${pathname}`);
-    const response = new NextResponse(JSON.stringify({ error: "Invalid session" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-    response.cookies.delete("hub_staff_session");
-    return response;
+    return failSession("Invalid session");
   }
 
   // ── Payload shape validation (defense-in-depth) ────────────────────
@@ -187,27 +190,21 @@ export async function middleware(request: NextRequest) {
     typeof payload.email !== "string" || !payload.email ||
     (payload.staffId === undefined && payload.staffId !== null)
   ) {
-    console.warn(`[MIDDLEWARE] Malformed session payload on ${pathname}: missing role/email/staffId`);
-    const badPayloadResp = new NextResponse(JSON.stringify({ error: "Invalid session payload" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-    badPayloadResp.cookies.delete("hub_staff_session");
-    return badPayloadResp;
+    return failSession("Invalid session payload — missing role/email/staffId");
   }
 
   // ── Device fingerprint binding ──────────────────────────────────────
-  // Reject sessions replayed from a different device/browser.
+  // Defense-in-depth: If the edge runtime derives a different fingerprint
+  // than the serverless function that issued the token (possible on
+  // Netlify where edge and Lambda see slightly different headers), log
+  // it and clear the cookie but DON'T hard-block — the serverless
+  // function's own dfp check in _auth.js is the authoritative gate.
   if (typeof payload.dfp === "string" && payload.dfp.length > 0) {
     const currentDfp = await deriveDeviceFingerprint(request);
     if (payload.dfp !== currentDfp) {
-      console.warn(`[MIDDLEWARE] Device fingerprint mismatch on ${pathname}`);
-      const response = new NextResponse(JSON.stringify({ error: "Session not valid for this device" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-      response.cookies.delete("hub_staff_session");
-      return response;
+      console.warn(`[MIDDLEWARE] DFP mismatch on ${pathname}: token=${payload.dfp} edge=${currentDfp}`);
+      // Clear the suspect cookie and let OpsGate re-auth
+      return failSession("Session not valid for this device");
     }
   }
 

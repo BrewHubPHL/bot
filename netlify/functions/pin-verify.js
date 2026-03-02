@@ -39,6 +39,11 @@ exports.handler = async (event) => {
   if (csrfBlock) return { ...csrfBlock, headers: { ...csrfBlock.headers, ...corsHeaders } };
 
   // Authenticate (requires PIN token, not JWT)
+  const hasCookie = /hub_staff_session=/.test(event.headers?.cookie || '');
+  const hasAuth = !!(event.headers?.authorization || event.headers?.Authorization);
+  if (!hasCookie && !hasAuth) {
+    console.warn('[PIN-VERIFY] No session cookie or auth header present — expected 401');
+  }
   const auth = await authorize(event, { requirePin: true, allowManagerIPBypass: true });
   if (!auth.ok) {
     return { ...auth.response, headers: { ...auth.response.headers, ...corsHeaders } };
