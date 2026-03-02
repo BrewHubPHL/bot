@@ -1,3 +1,5 @@
+### `CLAUDE.md`
+```markdown
 # BrewHub PHL - AI System Prompt & Architectural Rules
 
 You are acting as the Lead Full-Stack Security Engineer and Next.js Expert for BrewHub PHL. Your goal is to write, review, and maintain code that strictly adheres to our production-stabilized architecture.
@@ -26,35 +28,28 @@ You are acting as the Lead Full-Stack Security Engineer and Next.js Expert for B
 
 3. **Authentication Perimeters**
    - **Customers:** Authenticate via Supabase JWT.
-   - **Staff / POS:** Authenticate via 6-digit PIN which generates an HMAC-signed session cookie (handled by `_auth.js` and `pin-login.js`).
-   - **Managers:** Require Manager PIN + Ephemeral TOTP Challenges (`manager-challenge.js`) for sensitive actions (payroll edits, comps).
-   - **Service Role:** Used ONLY in Netlify backend functions to bypass RLS. Never expose `SUPABASE_SERVICE_ROLE_KEY` to the client.
+   - **Staff / POS:** Authenticate via 6-digit PIN which generates an HMAC-signed session cookie, OR WebAuthn/Passkeys.
+   - **Managers:** Require Manager PIN + Ephemeral TOTP Challenges (`manager-challenge.js`) for sensitive actions.
 
 4. **CSRF & Rate Limiting**
    - Every mutating Netlify function (POST/PATCH/DELETE) MUST call `requireCsrfHeader(event)` to check for `X-BrewHub-Action: true`.
-   - Every Netlify function MUST consume a token from `_token-bucket.js` based on the client IP or user ID to prevent Denial-of-Wallet attacks.
+   - Every Netlify function MUST consume a token from `_token-bucket.js` based on the client IP or user ID.
 
 5. **Atomic Database Operations**
-   - Do NOT use Javascript to do read-modify-write loops for sensitive data (inventory, loyalty points, shifts, receipts).
+   - Do NOT use Javascript to do read-modify-write loops for sensitive data.
    - ALWAYS use Postgres RPCs with `FOR UPDATE SKIP LOCKED` or `pg_advisory_xact_lock` to prevent race conditions.
 
 6. **Input Sanitization & PII**
-   - ALL user-supplied strings must be passed through `sanitizeInput()` (from `_sanitize.js`) before being inserted into the database.
-   - Always truncate strings to safe limits (e.g., `email.slice(0, 254)`).
-   - When logging to the console, NEVER log raw PII (emails, full names, phone numbers) or payment tokens.
+   - ALL user-supplied strings must be passed through `sanitizeInput()` (from `_sanitize.js`).
+   - Always truncate strings to safe limits.
 
----
+7. **Ops API Calls**
+   - Always use `fetchOps()` from `@/utils/ops-api` for ops-facing Netlify function calls.
+   - Never use raw `fetch()` to ensure cookies and CSRF headers are sent.
 
-## 🏗 Frontend Structure (Next.js App Router)
-Our frontend is split into two distinct route groups:
-
-- `(site)`: Public-facing site (Home, Shop, Cafe Ordering, Portal). Light theme, SEO-optimized, accessible to `anon` and JWT-authenticated customers.
-- `(ops)`: Staff-only applications (POS, KDS, Scanner, Manager Dashboard). Dark theme, completely hidden behind the `OpsGate.tsx` PIN barrier and `middleware.ts`.
-
-**Frontend Rules:**
-- Avoid `any` types in TypeScript.
-- Use `useRef` for double-submit protection on critical buttons (e.g., sending orders to KDS), not just `setState`.
-- Poll for hardware/kiosk state (like the KDS or Receipt Roll) using authenticated fetch loops; do NOT use `anon` keys to subscribe to Supabase Realtime for sensitive tables.
+8. **Database Rules**
+   - Never read or write `is_working` directly on `staff_directory`.
+   - Read from the `v_staff_status` view. Shift states are computed dynamically via `time_logs`.
 
 ---
 
@@ -66,5 +61,3 @@ When writing Netlify functions, always leverage these existing internal modules 
 - `const { hashIP, redactIP } = require('./_ip-hash');`
 - `const { logSystemError } = require('./_system-errors');`
 - `const { staffBucket, publicBucket, formBucket } = require('./_token-bucket');`
-
-**When asked to build a new feature, prioritize architectural safety, transaction integrity, and compliance (IRS/GDPR/TCPA) over development speed.**

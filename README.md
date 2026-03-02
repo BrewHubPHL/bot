@@ -205,7 +205,7 @@ brewhubbot/
 **Database triggers:** `sync_coffee_order_status` syncs status to line items · `handle_order_completion` decrements inventory on completion (exact `'12oz Cups'` match).
 
 ### Supabase Schema Migrations
-The database is managed through sequential migration files (`schema-1` through `schema-43`):
+The database is managed through sequential migration files (`schema-1` through `schema-79`):
 
 | Schema | Purpose |
 |---|---|

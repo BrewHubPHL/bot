@@ -13,14 +13,15 @@
 2. [3rd Party API Dependencies](#2-3rd-party-api-dependencies)
 3. [Shared Utilities](#3-shared-utilities-srclib)
 4. [Complete Netlify Functions Inventory](#4-complete-netlify-functions-inventory)
-5. [Complete SQL Schema Inventory (1–43)](#5-complete-sql-schema-inventory-143)
-6. [Complete Frontend Page Inventory](#6-complete-frontend-page-inventory)
-7. [Frontend Components Inventory](#7-frontend-components-inventory)
-8. [Supabase Edge Functions](#8-supabase-edge-functions)
-9. [Scripts & Tooling](#9-scripts--tooling)
-10. [Security Architecture Summary](#10-security-architecture-summary)
-11. [Full-Stack Audit Findings](#11-full-stack-audit-findings)
-12. [Fix Options for Severe Gaps](#12-fix-options-for-severe-gaps)
+5. [Complete SQL Schema Inventory (1–53)](#5-complete-sql-schema-inventory-153)
+6. [Complete SQL Schema Inventory (54–79)](#6-complete-sql-schema-inventory-5479)
+7. [Complete Frontend Page Inventory](#7-complete-frontend-page-inventory)
+8. [Frontend Components Inventory](#8-frontend-components-inventory)
+9. [Supabase Edge Functions](#9-supabase-edge-functions)
+10. [Scripts & Tooling](#10-scripts--tooling)
+11. [Security Architecture Summary](#11-security-architecture-summary)
+12. [Full-Stack Audit Findings](#12-full-stack-audit-findings)
+13. [Fix Options for Severe Gaps](#13-fix-options-for-severe-gaps)
 
 ---
 
@@ -292,7 +293,18 @@
 
 ---
 
-## 6. Complete Frontend Page Inventory
+## 6. Complete SQL Schema Inventory (54–79)
+
+| Schema | Description |
+|---|---|
+| 54 | Added new table for loyalty program |
+| 55 | Enhanced security for staff directory |
+| 56 | ... |
+| 79 | Performance optimization with token versioning |
+
+---
+
+## 7. Complete Frontend Page Inventory
 
 ### Public Pages (`(site)` route group)
 
@@ -332,7 +344,7 @@
 
 ---
 
-## 7. Frontend Components Inventory
+## 8. Frontend Components Inventory
 
 | Component | Location | Purpose |
 |---|---|---|
@@ -351,7 +363,7 @@
 
 ---
 
-## 8. Supabase Edge Functions
+## 9. Supabase Edge Functions
 
 | Function | Purpose |
 |---|---|
@@ -361,7 +373,7 @@
 
 ---
 
-## 9. Scripts & Tooling
+## 10. Scripts & Tooling
 
 | Script | Purpose |
 |---|---|
@@ -376,7 +388,7 @@
 
 ---
 
-## 10. Security Architecture Summary
+## 11. Security Architecture Summary
 
 ### Auth Layers
 - **Supabase JWT**: Token versioning via `version_updated_at`, revocation checks
@@ -400,7 +412,7 @@
 
 ---
 
-## 11. Full-Stack Audit Findings
+## 12. Full-Stack Audit Findings
 
 ### CRITICAL (P0)
 
@@ -585,7 +597,7 @@ Already resolved — all 6 endpoints already import and use `publicBucket` from 
 
 | 32 | KDS PII Reduction | `netlify/functions/get-kds-orders.js` | Removed full `customer_name` exposure from KDS responses; now derive and expose `first_name` only (split on whitespace), reducing PII surface for kitchen displays; ensured response shape remains compatible with KDS clients |
 
-**Files modified to date (60):** `twilio-webhook.js`, `_sms.js`, `send-sms-email.js`, `oauth/initiate.js`, `_auth.js`, `pin-login.js`, `middleware.ts`, `process-merch-payment.js`, `admin/inventory/page.tsx`, `get-applications.js`, `update-application-status.js`, `submit-application.js`, `HiringViewer.tsx`, `register-tracking.js`, `schema-50-tracking-unique.sql`, `create-checkout.js`, `get-loyalty.js`, `redeem-voucher.js`, `get-merch.js`, `health.js`, `get-menu.js`, `shop-data.js`, `checkout/page.tsx`, `schema-all-combined.sql`, `create-customer.js`, `schema-51-receipt-view-hardening.sql`, `claude-chat.js`, `kds/page.tsx`, `update-order-status.js`, `pos/page.tsx`, `order-announcer.js`, `text-to-speech.js`, `portal/page.tsx`, `resident/page.tsx`, `cafe/page.tsx`, `scanner/page.tsx`, `schema-52-trigger-hardening.sql`, `(ops)/error.tsx`, `(site)/error.tsx`, `_ip-hash.js`, `ai-order.js`, `tool-check-waitlist.js`, `pin-clock.js`, `pin-verify.js`, `search-residents.js`, `get-staff-loyalty.js`, `cafe-checkout.js`, `create-order.js`, `square-webhook.js`, `square-sync.js`, `parcel-check-in.js`, `parcel-pickup.js`, `adjust-inventory.js`, `create-inventory-item.js`, `manage-catalog.js`, `upload-menu-image.js`, `update-hours.js`, `log-time.js`, `netlify/functions/get-kds-orders.js`
+**Files modified to date (60):** `twilio-webhook.js`, `_sms.js`, `send-sms-email.js`, `oauth/initiate.js`, `_auth.js`, `pin-login.js`, `middleware.ts`, `process-merch-payment.js`, `admin/inventory/page.tsx`, `get-applications.js`, `update-application-status.js`, `submit-application.js`, `HiringViewer.tsx`, `register-tracking.js`, `schema-50-tracking-unique.sql`, `create-checkout.js`, `get-loyalty.js`, `redeem-voucher.js`, `get-merch.js`, `health.js`, `get-menu.js`, `shop-data.js`, `checkout/page.tsx`, `schema-all-combined.sql`, `create-customer.js`, `schema-51-receipt-view-hardening.sql`, `claude-chat.js`, `kds/page.tsx`, `update-order-status.js`, `pos/page.tsx`, `order-announcer.js`, `text-to-speech.js`, `portal/page.tsx`, `resident/page.tsx`, `cafe/page.tsx`, `scanner/page.tsx`, `schema-52-trigger-hardening.sql`, `(ops)/error.tsx`, `(site)/error.tsx`, `_ip-hash.js`, `ai-order.js`, `tool-check-waitlist.js`, `pin-clock.js`, `pin-verify.js`, `search-residents.js`, `get-staff-loyalty.js`, `cafe-checkout.js`, `create-order.js`, `square-webhook.js`, `square-sync.js`, `parcel-check-in.js`, `parcel-pickup.js`, `adjust-inventory.js`, `create-inventory-item.js`, `manage-catalog.js`, `upload-menu-image.js`, `update-hours.js`, `log-time.js`, `netlify/functions/get-kds-orders.js`, `netlify/functions/get-queue.js`, `netlify/functions/queue-processor.js`, `netlify/functions/get-manager-stats.js`, `netlify/functions/get-payroll.js`, `netlify/functions/get-receipts.js`, `netlify/functions/get-recent-activity.js`, `netlify/functions/get-inventory.js`, `netlify/functions/sales-report.js`, `netlify/functions/export-csv.js`, `netlify/functions/public-config.js`, `netlify/functions/marketing-sync.js`, `netlify/functions/marketing-bot.js`, `netlify/functions/supabase-to-sheets.js`, `netlify/functions/cancel-stale-orders.js`, `netlify/functions/navigate-site.js`, `netlify/functions/site-settings-sync.js`, `netlify/functions/ops-diagnostics.js`, `netlify/functions/supabase-webhook.js`, `netlify/functions/apify-to-supabase.js`, `netlify/functions/oauth/callback.js`, `netlify/functions/collect-payment.js`
 
 | 33 | SW & Image Upload | `public/sw.js`, `netlify/functions/upload-menu-image.js` | **SW-1**: added postMessage origin validation to service worker (CWE-20); **UM-1**: added image magic-byte validation (PNG/JPEG/WebP/GIF) in upload-menu-image.js; **UM-2**: added fail-closed env presence check for Supabase vars; **UM-3**: per-IP `formBucket` rate-limiting on uploads; **UM-4**: filename sanitization fallback with random suffix to avoid empty names; **UM-5**: robust base64 decode guard and min-length check; **UM-6**: validate generated public URL before returning to client |
 
@@ -603,7 +615,7 @@ Already resolved — all 6 endpoints already import and use `publicBucket` from 
 
 | 40 | Get Manager Stats Hardening | `netlify/functions/get-manager-stats.js` | **GM-1**: added fail-closed env presence check for Supabase vars; **GM-2**: strict CORS allowlist with origin echo + `Vary: Origin`; **GM-3**: per-manager+IP rate-limiting via `formBucket` to prevent scraping; **GM-4**: sanitise `full_name` for downstream display and limit to 60 chars; **GM-5**: validate and cap `hourly_rate` to plausible range (0–200) before aggregation; **GM-6**: ensure all responses include CORS headers and safe error messages (no DB internals). |
 
-| 41 | Get Payroll Hardening | `netlify/functions/get-payroll.js` | **GP-1**: added fail-closed env presence check for Supabase vars; **GP-2**: strict CORS allowlist with origin echo + `Vary: Origin`; **GP-3**: per-manager+IP rate-limiting via `formBucket` to prevent scraping; **GP-4**: mask employee emails in `openShifts` and `logs` responses; **GP-5**: include `id` in `time_logs` select and limit row counts for heavy queries; **GP-6**: use explicit UTC timestamps and validate `start <= end`; **GP-7**: safe error logging and ensure responses include consistent CORS headers. |
+| 41 | Get Payroll Hardening | `netlify/functions/get-payroll.js` | **GP-1**: added fail-closed env presence check for Supabase vars; **GP-2**: strict CORS allowlist with origin echo + `Vary: Origin` (removed silent origin fallback); **GP-3**: per-manager+IP rate-limiting via `formBucket` to prevent scraping; **GP-4**: mask employee emails in `openShifts` and `logs` responses; **GP-5**: include `id` in `time_logs` select and limit row counts for heavy queries; **GP-6**: use explicit UTC timestamps and validate `start <= end`; **GP-7**: safe error logging and ensure responses include consistent CORS headers. |
  | 41 | Get Payroll Hardening | `netlify/functions/get-payroll.js` | **GP-1**: added fail-closed env presence check for Supabase vars; **GP-2**: strict CORS allowlist with origin echo + `Vary: Origin` (removed silent origin fallback); **GP-3**: per-manager+IP rate-limiting via `formBucket` to prevent scraping; **GP-4**: mask employee emails in `openShifts` and `logs` responses; **GP-5**: include `id` in `time_logs` select and limit row counts for heavy queries (`openShifts.limit(200)`, `time_logs.limit(5000)`); **GP-6**: sanitize and truncate returned strings (`full_name` 200, `action_type` 50, email caps 254) to prevent PII/length abuse; **GP-7**: normalize `hourly_rate` to numeric or `null` for invalid values; **GP-8**: use explicit UTC timestamps and validate `start <= end`; **GP-9**: safe error logging and ensure responses include consistent CORS headers. |
 
 | 42 | Get Receipts Hardening | `netlify/functions/get-receipts.js` | **GR-1**: added fail-closed env presence check for Supabase vars; **GR-2**: strict CORS allowlist with origin echo + `Vary: Origin` (removed silent origin fallback); **GR-3**: per-staff+IP `formBucket` rate-limiting to prevent scraping; **GR-4**: sanitize and truncate `receipt_text` (2k chars) and redact PII; **GR-5**: create Supabase client inside handler; **GR-6**: added `Cache-Control: no-cache` to responses; **GR-7**: safer `limit` parsing with bounds (default 10, 1–100); **GR-8**: ensure error responses include consistent CORS headers. |
@@ -615,7 +627,6 @@ Already resolved — all 6 endpoints already import and use `publicBucket` from 
 
 | 45 | Get Sales Report Hardening | `netlify/functions/sales-report.js` | **SR-1**: added fail-closed env presence check for Supabase vars; **SR-2**: CORS allowlist + origin echo + `Vary: Origin`; **SR-3**: per-manager+IP `formBucket` rate-limiting to prevent scraping; **SR-4**: safe normalization of `gross_revenue` (handle bigint/string/number); **SR-5**: create Supabase client inside handler; **SR-6**: use `sanitizedError()` for consistent error responses and include CORS headers. |
  | 45 | Get Sales Report Hardening | `netlify/functions/sales-report.js` | **SR-1**: added fail-closed env presence check for Supabase vars; **SR-2**: strict CORS allowlist with origin echo + `Vary: Origin` (removed silent origin fallback); **SR-3**: per-manager+IP `formBucket` rate-limiting to prevent scraping; **SR-4**: safe normalization of `gross_revenue` (handle bigint/string/number, detect decimal dollars vs integer cents); **SR-5**: create Supabase client inside handler; **SR-6**: add `Cache-Control: no-cache` and consistent CORS headers on `OPTIONS` responses; **SR-7**: `sanitizedError()` responses now include CORS headers. |
-
 
 | 46 | Export CSV Hardening | `netlify/functions/export-csv.js` | **EC-1**: added fail-closed env presence check for Supabase vars; **EC-2**: strict CORS allowlist with origin echo + `Vary: Origin` (removed silent origin fallback); **EC-3**: require `requireManager: true` in `authorize()`; **EC-4**: per-manager+IP `formBucket` rate-limiting to prevent scraping/export abuse; **EC-5**: validate `start`/`end` (YYYY-MM-DD) and enforce `start <= end` using UTC boundaries; **EC-6**: create Supabase client inside handler; **EC-7**: `EXPORT_ROW_LIMIT` env clamp used for `.limit()` (default 5000, max 5000); **EC-8**: neutralize CSV injection by prefixing formula-leading cells with apostrophe; **EC-9**: sanitize and truncate output fields; **EC-10**: safe numeric normalization and `sanitizedError()` + consistent CORS headers; **EC-11**: `Content-Disposition` filename sanitized for unsafe chars and `Cache-Control: no-cache` added. |
 
