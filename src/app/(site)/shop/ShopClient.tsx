@@ -407,7 +407,7 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
           ) : (
             <div className="space-y-4">
               {cart.map((item, idx) => (
-                <div key={item.name} className="flex items-center gap-4 p-3 bg-stone-50 rounded-lg">
+                <div key={cartKey(item.name, item.customizations ?? [])} className="flex items-center gap-4 p-3 bg-stone-50 rounded-lg">
                   <div className="flex-1">
                     <p className="font-semibold text-[var(--hub-espresso)] truncate">{item.name}</p>
                     {item.customizations && item.customizations.length > 0 && (

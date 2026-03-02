@@ -222,7 +222,7 @@ export default function BrewHubLandingClient() {
             }
           };
 
-      audioRef.current = source as unknown as HTMLAudioElement;
+      audioRef.current = source;
           setVoiceStatus("Elise is speaking...");
           source.start(0);
           return;

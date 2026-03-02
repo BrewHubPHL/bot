@@ -124,8 +124,9 @@ export default function CheckoutPage() {
       try {
         // Fetch Square config
         const configRes = await fetch('/.netlify/functions/public-config');
+        if (!configRes.ok) throw new Error(`Config fetch failed: ${configRes.status}`);
         const config = await configRes.json();
-        
+
         if (!config.squareAppId || !config.squareLocationId) {
           setError('Payment configuration unavailable');
           return;
