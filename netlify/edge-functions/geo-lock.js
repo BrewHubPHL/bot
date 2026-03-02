@@ -24,7 +24,14 @@ export default async (request, context) => {
     return new Response("Unauthorized Region", { status: 403 });
   }
 
-  // 🔒 Bonus: Add Security Headers to all API responses
+  // Serverless functions set their own headers (CORS, Set-Cookie, etc.).
+  // Proxying them through context.next() + header modification strips
+  // Set-Cookie — let them pass through unmodified after the geo check.
+  if (url.pathname.startsWith("/.netlify/functions/") || url.pathname.startsWith("/api/")) {
+    return;
+  }
+
+  // 🔒 Bonus: Add Security Headers to all page/asset responses
   const response = await context.next();
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("X-Content-Type-Options", "nosniff");
