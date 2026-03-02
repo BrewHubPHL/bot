@@ -75,9 +75,9 @@ export default function CafePage() {
   const loadLoyalty = useCallback(async (userId: string) => {
     try {
       const { data, error } = await supabase
-        .from("profiles")
+        .from("customers")
         .select("loyalty_points")
-        .eq("id", userId)
+        .eq("auth_id", userId)
         .maybeSingle();
       if (error) return;
       if (data) setLoyaltyPoints(data.loyalty_points ?? 0);

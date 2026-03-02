@@ -80,6 +80,22 @@ export default function StaffHubPage() {
       } else {
         setShiftStart(null);
         setShiftDuration("0:00:00");
+
+        // ── Clock Out = Log Out ──────────────────────────────
+        // End the PIN session so the barista is kicked back to
+        // the OpsGate PIN screen, preventing off-the-clock POS/KDS access.
+        try {
+          await fetchOps("/pin-logout", { method: "POST" }, token);
+        } catch { /* best-effort — reload will force re-auth anyway */ }
+
+        try {
+          localStorage.removeItem("brewhub_cart");
+          localStorage.removeItem("brewhub_cafe_cart");
+          localStorage.removeItem("brewhub_email");
+        } catch { /* storage unavailable */ }
+
+        window.location.reload();
+        return; // halt further execution
       }
       showMessage(`Successfully clocked ${action}!`, "success");
     } catch (err: unknown) {

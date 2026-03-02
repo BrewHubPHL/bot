@@ -1,8 +1,8 @@
 /**
  * get-staff-loyalty.js — PIN-authenticated loyalty lookup for POS + Scanner.
  *
- * Replaces direct anon-client queries to profiles/vouchers/customers
- * (which silently returned 0 rows due to deny-all RLS on those tables).
+ * Replaces direct anon-client queries to the unified customers table
+ * (anon role gets deny-all RLS, so this uses service_role via PIN auth).
  *
  * Auth: Staff PIN (via _auth.js)
  * CSRF: Yes (X-BrewHub-Action)
@@ -82,43 +82,31 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'Valid email required' }) };
     }
 
-    // ── Look up in profiles (POS uses this) ───────────────────
-    const { data: profile, error: pErr } = await supabase
-      .from('profiles')
-      .select('id, full_name, loyalty_points, email')
-      .eq('email', email)
-      .maybeSingle();
-
-    if (pErr) {
-      console.error('[GET-STAFF-LOYALTY] profiles error:', pErr?.message);
-      return { statusCode: 502, headers: corsHeaders, body: JSON.stringify({ error: 'Loyalty lookup failed' }) };
-    }
-
-    // ── Also look up in customers (Scanner uses this) ─────────
+    // ── Unified CRM: single customers table lookup ───────────
     const { data: customer, error: cErr } = await supabase
       .from('customers')
-      .select('email, name, loyalty_points')
+      .select('id, auth_id, full_name, loyalty_points, email')
       .eq('email', email)
       .maybeSingle();
 
     if (cErr) {
       console.error('[GET-STAFF-LOYALTY] customers error:', cErr?.message);
-      // Non-fatal — we may still have profile data
+      return { statusCode: 502, headers: corsHeaders, body: JSON.stringify({ error: 'Loyalty lookup failed' }) };
     }
 
-    // ── Fetch unredeemed vouchers (if profile found) ──────────
+    // ── Fetch unredeemed vouchers (if customer found) ─────────
     let vouchers = [];
-    if (profile?.id) {
+    if (customer?.id) {
       const { data: vData } = await supabase
         .from('vouchers')
         .select('id, code')
-        .eq('user_id', profile.id)
+        .eq('user_id', customer.id)
         .eq('is_redeemed', false);
       vouchers = (vData || []).map(v => ({ id: v.id, masked_code: maskCode(v.code) }));
     }
 
-    // If neither source found anything, report not found
-    if (!profile && !customer) {
+    // If not found, report not found
+    if (!customer) {
       return {
         statusCode: 404,
         headers: corsHeaders,
@@ -126,12 +114,9 @@ exports.handler = async (event) => {
       };
     }
 
-    // Merge: prefer profile data, fall back to customer
-    const loyaltyPoints = profile?.loyalty_points ?? customer?.loyalty_points ?? 0;
-    const displayName = profile?.full_name ?? customer?.name ?? '';
-
-    const rawEmailOut = profile?.email ?? customer?.email ?? email;
-    const maskedEmail = maskEmail(rawEmailOut);
+    const loyaltyPoints = customer.loyalty_points ?? 0;
+    const displayName = customer.full_name ?? '';
+    const maskedEmail = maskEmail(customer.email ?? email);
 
     return {
       statusCode: 200,
@@ -139,10 +124,12 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         found: true,
         email_masked: maskedEmail,
-        name: displayName,
+        full_name: displayName,
+        name: displayName,  // backward compat — prefer full_name
         loyalty_points: loyaltyPoints,
         drinks_toward_free: Math.floor((loyaltyPoints % 500) / 50),
-        profile_id: profile?.id ?? null,
+        customer_id: customer.id,
+        profile_id: customer.id,  // backward compat — prefer customer_id
         vouchers,
       }),
     };

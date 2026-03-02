@@ -131,12 +131,12 @@ function ResidentRegisterInner() {
     const safePassword = form.password.slice(0, MAX_PASSWORD);
 
     // ── Registration Guard: Check if phone number already exists ──
-    // If a resident with this phone already exists (e.g. quick-added ghost),
+    // If a customer with this phone already exists (e.g. quick-added ghost),
     // redirect them to verify/login instead of creating a duplicate record.
     // Also blocks cross-unit phone conflicts to prevent identity hijacking.
     if (safePhone) {
-      const { data: existingResident, error: lookupError } = await supabase
-        .from("residents")
+      const { data: existingCustomer, error: lookupError } = await supabase
+        .from("customers")
         .select("id, email, unit_number")
         .eq("phone", safePhone)
         .limit(1)
@@ -144,12 +144,12 @@ function ResidentRegisterInner() {
       if (lookupError) {
         console.error("Phone lookup error:", lookupError.message);
         // Non-fatal: continue with registration and let the DB constraint catch duplicates
-      } else if (existingResident) {
+      } else if (existingCustomer) {
         // ── Cross-unit conflict: phone belongs to a different unit ──
         if (
-          existingResident.unit_number &&
+          existingCustomer.unit_number &&
           safeUnit &&
-          existingResident.unit_number.trim().toLowerCase() !== safeUnit.trim().toLowerCase()
+          existingCustomer.unit_number.trim().toLowerCase() !== safeUnit.trim().toLowerCase()
         ) {
           setError(
             "This phone number is already associated with a different unit. " +
@@ -160,7 +160,7 @@ function ResidentRegisterInner() {
         }
 
         // ── Same unit: existing registered user → redirect to login ──
-        if (existingResident.email) {
+        if (existingCustomer.email) {
           setError(
             "A resident with this phone number already exists. Please log in from the portal instead."
           );
@@ -192,21 +192,21 @@ function ResidentRegisterInner() {
       setLoading(false);
       return;
     }
-    // 2. Upsert into residents table (ON CONFLICT phone → update unit_number)
+    // 2. Upsert into customers table (ON CONFLICT phone → update unit_number)
     // This safely handles the case where a ghost record was quick-added by staff
     // and the resident is now completing full registration.
-    const { error: residentError } = await supabase.from("residents").upsert(
+    const { error: customerError } = await supabase.from("customers").upsert(
       {
-        name: safeName,
+        full_name: safeName,
         unit_number: safeUnit,
         email: safeEmail,
         phone: safePhone,
       },
       { onConflict: "phone", ignoreDuplicates: false }
     );
-    if (residentError) {
-      console.error("Resident upsert error:", residentError.message);
-      if (residentError.code === "23505") {
+    if (customerError) {
+      console.error("Customer upsert error:", customerError.message);
+      if (customerError.code === "23505") {
         setError("This email or phone is already registered. Please sign in from the portal.");
       } else {
         setError("Registration failed. Please try again.");

@@ -21,41 +21,45 @@ function hashPickupCode(code) {
 }
 
 /**
- * Detect whether the recipient is a registered resident or a guest.
+ * Detect whether the recipient is a registered customer or a walk-in.
  * Returns { isGuest: boolean, resident: object|null }
+ *
+ * Unified CRM: all lookups go to the single `customers` table.
+ * The returned resident.name is mapped from customers.full_name for
+ * backward compatibility with the parcel check-in RPC contract.
  */
 async function detectGuestStatus(residentId, recipientEmail, recipientPhone, unitNumber) {
-  // If a resident_id was provided, look them up directly
+  // If a customer id was provided, look them up directly
   if (residentId) {
     const { data: res } = await supabase
-      .from('residents')
-      .select('id, name, unit_number, phone, email')
+      .from('customers')
+      .select('id, full_name, unit_number, phone, email')
       .eq('id', residentId)
       .single();
-    if (res && res.email) return { isGuest: false, resident: res };
+    if (res && res.email) return { isGuest: false, resident: { ...res, name: res.full_name, full_name: res.full_name } };
   }
 
   // Try matching by email
   if (recipientEmail) {
     const { data: res } = await supabase
-      .from('residents')
-      .select('id, name, unit_number, phone, email')
+      .from('customers')
+      .select('id, full_name, unit_number, phone, email')
       .eq('email', recipientEmail)
       .limit(1)
       .maybeSingle();
-    if (res) return { isGuest: false, resident: res };
+    if (res) return { isGuest: false, resident: { ...res, name: res.full_name, full_name: res.full_name } };
   }
 
   // Try matching by phone + unit combo
   if (recipientPhone && unitNumber) {
     const { data: res } = await supabase
-      .from('residents')
-      .select('id, name, unit_number, phone, email')
+      .from('customers')
+      .select('id, full_name, unit_number, phone, email')
       .eq('phone', recipientPhone)
       .eq('unit_number', unitNumber)
       .limit(1)
       .maybeSingle();
-    if (res) return { isGuest: false, resident: res };
+    if (res) return { isGuest: false, resident: { ...res, name: res.full_name, full_name: res.full_name } };
   }
 
   return { isGuest: true, resident: null };
@@ -258,17 +262,17 @@ exports.handler = async (event) => {
         recipientPhone = sanitizeInput(guestCheck.resident.phone) || recipientPhone;
         recipientEmail = sanitizeInput(guestCheck.resident.email);
       } else if (resident_id) {
-        const { data: resident } = await supabase
-          .from('residents')
-          .select('name, unit_number, phone, email')
+        const { data: customer } = await supabase
+          .from('customers')
+          .select('full_name, unit_number, phone, email')
           .eq('id', resident_id)
           .single();
 
-        if (resident) {
-          finalRecipient = sanitizeInput(resident.name);
-          unitNumber = sanitizeInput(resident.unit_number) || unitNumber;
-          recipientPhone = sanitizeInput(resident.phone) || recipientPhone;
-          recipientEmail = sanitizeInput(resident.email);
+        if (customer) {
+          finalRecipient = sanitizeInput(customer.full_name);
+          unitNumber = sanitizeInput(customer.unit_number) || unitNumber;
+          recipientPhone = sanitizeInput(customer.phone) || recipientPhone;
+          recipientEmail = sanitizeInput(customer.email);
           isGuest = false;
         }
       }

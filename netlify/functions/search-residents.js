@@ -1,4 +1,5 @@
-// PHILLY WAY: Search residents by phone (primary) or name prefix (fallback)
+// PHILLY WAY: Search customers by phone (primary) or name prefix (fallback)
+// Unified CRM: all person data lives in the single `customers` table.
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 
@@ -40,16 +41,17 @@ exports.handler = async (event) => {
         return json(400, { error: 'Unit must be 1-10 characters' });
       }
       const { data, error } = await supabase
-        .from('residents')
-        .select('id, name, unit_number, phone')
+        .from('customers')
+        .select('id, full_name, unit_number, phone')
         .ilike('unit_number', trimmed)
-        .order('name')
+        .order('full_name')
         .limit(5);
 
       if (error) throw error;
 
+      // Map full_name → name for backward-compatible API shape
       return json(200, {
-        results: data || [],
+        results: (data || []).map(r => ({ id: r.id, name: r.full_name, unit_number: r.unit_number, phone: r.phone })),
         count: data?.length || 0,
       });
     }
@@ -64,16 +66,16 @@ exports.handler = async (event) => {
 
       // Search by phone suffix (last N digits) to handle +1 prefix variations
       const { data, error } = await supabase
-        .from('residents')
-        .select('id, name, unit_number, phone')
+        .from('customers')
+        .select('id, full_name, unit_number, phone')
         .like('phone', `%${digits.slice(-10)}`)
-        .order('name')
+        .order('full_name')
         .limit(10);
 
       if (error) throw error;
 
       return json(200, {
-        results: data || [],
+        results: (data || []).map(r => ({ id: r.id, name: r.full_name, unit_number: r.unit_number, phone: r.phone })),
         count: data?.length || 0,
       });
     }
@@ -100,18 +102,18 @@ exports.handler = async (event) => {
 
     const safePrefix = escapeWildcards(sanitized);
 
-    // Search residents by name prefix (case-insensitive)
+    // Search customers by name prefix (case-insensitive)
     const { data, error } = await supabase
-      .from('residents')
-      .select('id, name, unit_number, phone')
-      .ilike('name', `${safePrefix}%`)
-      .order('name')
+      .from('customers')
+      .select('id, full_name, unit_number, phone')
+      .ilike('full_name', `${safePrefix}%`)
+      .order('full_name')
       .limit(10);
 
     if (error) throw error;
 
     return json(200, { 
-      results: data || [],
+      results: (data || []).map(r => ({ id: r.id, name: r.full_name, unit_number: r.unit_number, phone: r.phone })),
       count: data?.length || 0
     });
 

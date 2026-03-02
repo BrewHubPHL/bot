@@ -18,11 +18,11 @@ export default async function (req, context) {
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - (24 * 60 * 60 * 1000));
 
-    const [orders, parcelsIn, parcelsOut, residents] = await Promise.all([
+    const [orders, parcelsIn, parcelsOut, newCustomers] = await Promise.all([
       withSourceComment(supabase.from('orders').select('status, total_amount_cents').gte('created_at', startTime.toISOString()), 'pulse-orders'),
       withSourceComment(supabase.from('parcels').select('id', { count: 'exact', head: true }).eq('status', 'logged').gte('logged_at', startTime.toISOString()), 'pulse-parcels-inbound'),
       withSourceComment(supabase.from('parcels').select('id', { count: 'exact', head: true }).eq('status', 'picked_up').gte('picked_up_at', startTime.toISOString()), 'pulse-parcels-outbound'),
-      supabase.from('residents').select('*', { count: 'exact', head: true }).gte('created_at', startTime.toISOString())
+      supabase.from('customers').select('*', { count: 'exact', head: true }).gte('created_at', startTime.toISOString())
     ]);
 
     const rev = orders.data?.reduce((acc, o) => acc + (o.status === 'completed' ? o.total_amount_cents : 0), 0) || 0;
@@ -32,7 +32,7 @@ export default async function (req, context) {
 -------------------
 💰 Revenue: $${(rev / 100).toFixed(2)}
 📦 Parcels: ${parcelsIn.count} in / ${parcelsOut.count} out
-🌱 New Residents: ${residents.count}
+🌱 New Customers: ${newCustomers.count}
 `.trim();
 
     await client.messages.create({

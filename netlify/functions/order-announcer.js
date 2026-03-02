@@ -24,14 +24,14 @@ exports.handler = async (event) => {
 
   try {
     // Get the customer's name for logging (redacted)
-    const { data: profile } = await supabase
-      .from('profiles')
+    const { data: customer } = await supabase
+      .from('customers')
       .select('full_name')
       .eq('id', record.user_id)
       .single();
 
     // OA-1: redact PII — log initials only, never full name
-    const full = profile?.full_name || '';
+    const full = customer?.full_name || '';
     const initials = full
       ? full.split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('.')
       : 'G';

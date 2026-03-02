@@ -396,21 +396,21 @@ export default function ResidentPortal() {
   async function loadData(userId: string, userEmail: string) {
     setDataLoading(true);
     try {
-      // Step 1: Resolve resident's unit_number from the residents table
-      const { data: residentData, error: residentErr } = await supabase
-        .from("residents")
-        .select("unit_number")
+      // Step 1: Resolve customer's unit_number + loyalty from the customers table
+      const { data: customerData, error: customerErr } = await supabase
+        .from("customers")
+        .select("unit_number, loyalty_points")
         .eq("email", userEmail)
         .maybeSingle();
 
-      if (residentErr) {
-        console.error("Resident lookup error:", residentErr.message);
+      if (customerErr) {
+        console.error("Customer lookup error:", customerErr.message);
       }
 
-      const resolvedUnit = residentData?.unit_number ?? null;
+      const resolvedUnit = customerData?.unit_number ?? null;
       setUnitNumber(resolvedUnit);
 
-      // Step 2: Parallel fetch — parcels (by unit), orders, coffee queue, loyalty
+      // Step 2: Parallel fetch — parcels (by unit), orders, coffee queue
       const parcelPromise = resolvedUnit
         ? supabase
             .from("parcels")
@@ -420,7 +420,7 @@ export default function ResidentPortal() {
             .order("received_at", { ascending: false })
         : Promise.resolve({ data: [] as ParcelRow[], error: null });
 
-      const [parcelRes, orderRes, coffeeRes, loyaltyRes] = await Promise.all([
+      const [parcelRes, orderRes, coffeeRes] = await Promise.all([
         parcelPromise,
         supabase
           .from("orders")
@@ -434,16 +434,11 @@ export default function ResidentPortal() {
           .eq("user_id", userId)
           .in("status", ["preparing", "ready"])
           .order("created_at", { ascending: true }),
-        supabase
-          .from("customers")
-          .select("loyalty_points")
-          .eq("email", userEmail)
-          .maybeSingle(),
       ]);
 
       // If critical queries failed, surface maintenance mode
-      if (orderRes.error || loyaltyRes.error) {
-        console.error("Portal data load errors:", parcelRes.error?.message, orderRes.error?.message, loyaltyRes.error?.message);
+      if (orderRes.error) {
+        console.error("Portal data load errors:", parcelRes.error?.message, orderRes.error?.message);
         setIsMaintenanceMode(true);
         setDataLoading(false);
         return;
@@ -455,7 +450,7 @@ export default function ResidentPortal() {
         const fresh = (coffeeRes.data as CoffeeQueueOrder[]).filter((o) => isWithinTTL(o.created_at));
         setCoffeeQueue(fresh);
       }
-      if (loyaltyRes.data) setLoyalty({ points: loyaltyRes.data.loyalty_points });
+      if (customerData) setLoyalty({ points: customerData.loyalty_points });
     } catch (err: unknown) {
       console.error("Portal data load failed:", (err as Error)?.message);
       setIsMaintenanceMode(true);

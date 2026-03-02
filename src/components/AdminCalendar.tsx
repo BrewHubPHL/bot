@@ -7,6 +7,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import { supabase } from '@/lib/supabase';
 import { useOpsSession } from '@/components/OpsGate';
 import { toUserSafeMessage } from '@/lib/errorCatalog';
+import { fetchOps } from '@/utils/ops-api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ const MANAGER_ROLES = ['manager', 'admin'];
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function AdminCalendar() {
-  const { staff: sessionStaff } = useOpsSession();
+  const { staff: sessionStaff, token } = useOpsSession();
   const isManager = MANAGER_ROLES.includes(sessionStaff.role);
 
   // ── Data state ───────────────────────────────────────────────────────────
@@ -69,27 +70,28 @@ export default function AdminCalendar() {
   // ── Data fetching ────────────────────────────────────────────────────────
 
   const fetchShifts = useCallback(async () => {
-    // Use the pre-joined view (schema-63) instead of broken PostgREST join
-    const { data, error } = await supabase
-      .from('v_scheduled_shifts_with_staff')
-      .select('id, user_id, start_time, end_time, role_id, status, updated_at, employee_name');
-
-    if (error) {
-      setFetchError(toUserSafeMessage(error.message, 'Failed to load shifts.'));
-      return;
+    try {
+      const res = await fetchOps('/manage-schedule', { method: 'GET' }, token);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setFetchError(toUserSafeMessage(body.error || res.statusText, 'Failed to load shifts.'));
+        return;
+      }
+      const { shifts } = await res.json();
+      setEvents(
+        (shifts ?? []).map((s: Record<string, string | null>) => ({
+          id: s.id,
+          title: s.employee_name ?? 'Unknown',
+          start: s.start_time,
+          end: s.end_time,
+          extendedProps: { userId: s.user_id, updatedAt: s.updated_at },
+        })),
+      );
+      setFetchError(null);
+    } catch {
+      setFetchError('Network error loading shifts.');
     }
-
-    setEvents(
-      (data ?? []).map((s) => ({
-        id: s.id,
-        title: s.employee_name ?? 'Unknown',
-        start: s.start_time,
-        end: s.end_time,
-        extendedProps: { userId: s.user_id, updatedAt: s.updated_at },
-      })),
-    );
-    setFetchError(null);
-  }, []);
+  }, [token]);
 
   const fetchStaff = useCallback(async () => {
     // Fetch ALL staff for the dropdown (not filtered by is_working — managers
@@ -161,25 +163,32 @@ export default function AdminCalendar() {
       const { event, revert } = info;
       const prevUpdatedAt = event.extendedProps.updatedAt as string | null;
 
-      // Optimistic concurrency: only update if updated_at still matches
-      let query = supabase
-        .from('scheduled_shifts')
-        .update({ start_time: event.startStr, end_time: event.endStr })
-        .eq('id', event.id);
+      try {
+        const res = await fetchOps('/manage-schedule', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: event.id,
+            start_time: event.startStr,
+            end_time: event.endStr,
+            updated_at: prevUpdatedAt,
+          }),
+        }, token);
 
-      if (prevUpdatedAt) {
-        query = query.eq('updated_at', prevUpdatedAt);
-      }
-
-      const { data, error: updateErr } = await query.select('id').maybeSingle();
-
-      if (updateErr || !data) {
-        showToast(
-          updateErr
-            ? toUserSafeMessage(updateErr.message, 'Could not move shift.')
-            : 'Conflict — another manager changed this shift. Refreshing…',
-          'error',
-        );
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          showToast(
+            res.status === 409
+              ? 'Conflict — another manager changed this shift. Refreshing…'
+              : toUserSafeMessage(body.error || res.statusText, 'Could not move shift.'),
+            'error',
+          );
+          revert();
+          await fetchShifts();
+          return;
+        }
+      } catch {
+        showToast('Network error moving shift.', 'error');
         revert();
         await fetchShifts();
         return;
@@ -188,7 +197,7 @@ export default function AdminCalendar() {
       await fetchShifts();
       showToast('Shift moved', 'success');
     },
-    [isManager, showToast, fetchShifts],
+    [isManager, showToast, fetchShifts, token],
   );
 
   // ── Modal submissions ────────────────────────────────────────────────────
@@ -203,48 +212,66 @@ export default function AdminCalendar() {
     if (!employee) return;
 
     setSubmitting(true);
-    const { error } = await supabase.from('scheduled_shifts').insert({
-      user_id: employee.id,
-      role_id: employee.role,
-      start_time: selectedRange.start,
-      end_time: selectedRange.end,
-      location_id: 'brewhub_main',
-      status: 'scheduled',
-    });
-    setSubmitting(false);
+    try {
+      const res = await fetchOps('/manage-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: employee.id,
+          role_id: employee.role,
+          start_time: selectedRange.start,
+          end_time: selectedRange.end,
+          location_id: 'brewhub_main',
+        }),
+      }, token);
 
-    if (error) {
-      showToast(
-        toUserSafeMessage(error.message, 'Failed to create shift — may overlap an existing one.'),
-        'error',
-      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        showToast(
+          toUserSafeMessage(body.error || res.statusText, 'Failed to create shift — may overlap an existing one.'),
+          'error',
+        );
+        return;
+      }
+    } catch {
+      showToast('Network error creating shift.', 'error');
       return;
+    } finally {
+      setSubmitting(false);
     }
 
     setIsModalOpen(false);
     showToast('Shift created', 'success');
     await fetchShifts();
-  }, [selectedUser, staff, selectedRange, showToast, fetchShifts]);
+  }, [selectedUser, staff, selectedRange, showToast, fetchShifts, token]);
 
   const handleDeleteShift = useCallback(async () => {
     if (!selectedShiftId) return;
 
     setSubmitting(true);
-    const { error } = await supabase
-      .from('scheduled_shifts')
-      .delete()
-      .eq('id', selectedShiftId);
-    setSubmitting(false);
+    try {
+      const res = await fetchOps('/manage-schedule', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedShiftId }),
+      }, token);
 
-    if (error) {
-      showToast(toUserSafeMessage(error.message, 'Failed to delete shift.'), 'error');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        showToast(toUserSafeMessage(body.error || res.statusText, 'Failed to delete shift.'), 'error');
+        return;
+      }
+    } catch {
+      showToast('Network error deleting shift.', 'error');
       return;
+    } finally {
+      setSubmitting(false);
     }
 
     setIsModalOpen(false);
     showToast('Shift deleted', 'success');
     await fetchShifts();
-  }, [selectedShiftId, showToast, fetchShifts]);
+  }, [selectedShiftId, showToast, fetchShifts, token]);
 
   // ── Render ───────────────────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@
 2. [3rd Party API Dependencies](#2-3rd-party-api-dependencies)
 3. [Shared Utilities](#3-shared-utilities-srclib)
 4. [Complete Netlify Functions Inventory](#4-complete-netlify-functions-inventory)
-5. [Complete SQL Schema Inventory (1–79)](#5-complete-sql-schema-inventory-179)
+5. [Complete SQL Schema Inventory (1–79 + CRM)](#5-complete-sql-schema-inventory-179--crm)
 6. [Complete Frontend Page Inventory](#6-complete-frontend-page-inventory)
 7. [Frontend Components Inventory](#7-frontend-components-inventory)
 8. [Supabase Edge Functions](#8-supabase-edge-functions)
@@ -124,7 +124,7 @@
 
 ---
 
-## 5. Complete SQL Schema Inventory (1–79)
+## 5. Complete SQL Schema Inventory (1–79 + CRM)
 
 | Schema | Purpose |
 |---|---|
@@ -155,6 +155,8 @@
 | `schema-77-staff-status-view` | Dynamic `v_staff_status` VIEW, deprecating static `is_working` |
 | `schema-78-unified-pickup-view` | Unified `v_items_to_pickup` combining orders and parcels |
 | `schema-79_performance` | Embedded O(1) token versioning within PIN verifications |
+| `20260302_unified_crm` | Unified CRM: merges `profiles` + `residents` → single `customers` table with `auth_id`, `unit_number`, VIP, loyalty |
+| `20260302_crm_insights_rpc` | `crm_insights()` RPC: aggregated CRM stats for the manager dashboard |
 
 ---
 
@@ -208,6 +210,7 @@
 | `KdsSection.tsx` | `(site)/components/manager/` | KDS overview in dashboard |
 | `ManagerNav.tsx` | `(site)/components/manager/` | Manager dashboard navigation |
 | `PayrollSection.tsx` | `(site)/components/manager/` | Payroll management |
+| `CrmInsights.tsx` | `(site)/components/manager/` | Unified CRM breakdown (stat cards + top drinks) |
 
 *(Note: `StatsGrid.tsx`, `InventoryTable.tsx`, `RecentActivity.tsx`, and `MobileNav.tsx` were deprecated and removed during the refactor.)*
 
@@ -232,6 +235,8 @@
 | `register-apple-pay.js` | Register Apple Pay domain |
 | `rotate-secrets.mjs` | Rotate environment secrets |
 | `simulate-rush.js` | Fire simulated webhooks (dev only) |
+| `debug-imports.mjs` | Debug Next.js import resolution |
+| `regenerate_schema_and_diff.py` | Regenerate Supabase schema + diff |
 
 ---
 

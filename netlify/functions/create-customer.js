@@ -93,9 +93,10 @@ exports.handler = async (event) => {
       return respond(403, { error: 'Email mismatch' }, event);
     }
 
+    // Unified CRM: check for existing customer (walk-in upgrade or duplicate)
     const { data: existing, error: existingError } = await supabase
       .from('customers')
-      .select('id')
+      .select('id, auth_id')
       .eq('email', email)
       .single();
 
@@ -105,12 +106,32 @@ exports.handler = async (event) => {
     }
 
     if (existing) {
+      // "Account Upgrade" — walk-in now has an auth account. Link it.
+      if (!existing.auth_id) {
+        const { error: linkErr } = await supabase
+          .from('customers')
+          .update({
+            auth_id: authData.user.id,
+            full_name: fullName || undefined,
+            address_street: addressStreet || undefined,
+            phone: phone || undefined,
+            sms_opt_in: smsOptIn,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id);
+        if (linkErr) {
+          console.error('[CREATE-CUSTOMER] Account upgrade error:', linkErr?.message);
+          return respond(500, { error: 'Account upgrade failed' }, event);
+        }
+        return respond(200, { success: true, upgraded: true }, event);
+      }
       return respond(200, { success: true, alreadyExists: true }, event);
     }
 
     const { error } = await supabase
       .from('customers')
       .insert({
+        auth_id: authData.user.id,
         email,
         full_name: fullName,
         address_street: addressStreet,

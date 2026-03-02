@@ -5,7 +5,7 @@ import {
   Lock, LogIn, LogOut, Loader2, Clock, AlertCircle, User, CheckCircle2, Delete, Shield, ScanFace, Fingerprint, WifiOff
 } from "lucide-react";
 import { startRegistration, startAuthentication, browserSupportsWebAuthn } from "@simplewebauthn/browser";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import PinRotationModal from "./PinRotationModal";
 import ManagerChallengeModal from "./ManagerChallengeModal";
 import { StaffShiftProvider, broadcastShiftChange, useStaff as useStaffHook } from "@/context/StaffContext";
@@ -165,6 +165,7 @@ export default function OpsGate({ children, requireManager = false }: { children
   // In POS mode, WebAuthn/Face ID is hidden — PIN only for per-barista tracking.
   const [terminalMode, setTerminalMode] = useState(false);
   const opsRouter = useRouter();
+  const opsPathname = usePathname();
 
   // Hydration-safe mount — defer client-only rendering
   useEffect(() => {
@@ -687,13 +688,17 @@ export default function OpsGate({ children, requireManager = false }: { children
                 </button>
               )}
 
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-white text-xs transition-colors"
-                title="Lock screen"
-              >
-                <Lock className="w-3.5 h-3.5" /> Lock
-              </button>
+              {/* Hide Lock on /staff-hub — baristas must clock out to leave.
+                  Managers still see it on /pos, /kds, /manager, etc. */}
+              {opsPathname !== "/staff-hub" && (
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1 px-2 py-1 text-zinc-400 hover:text-white text-xs transition-colors"
+                  title="Lock screen"
+                >
+                  <Lock className="w-3.5 h-3.5" /> Lock
+                </button>
+              )}
             </div>
           </div>
 

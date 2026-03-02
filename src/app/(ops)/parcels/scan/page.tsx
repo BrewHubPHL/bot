@@ -53,7 +53,7 @@ interface RecentScan {
 }
 
 interface ResidentInfo {
-  id: number;
+  id: string;
   name: string;
   unit_number: string | null;
   phone: string | null;
@@ -215,7 +215,7 @@ export default function ParcelScanPage() {
       "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w",
       "x", "y", "z"];
 
-    const allResults = new Map<number, ResidentInfo>();
+    const allResults = new Map<string, ResidentInfo>();
 
     const batchSize = 6;
     for (let i = 0; i < prefixes.length; i += batchSize) {
@@ -394,7 +394,7 @@ export default function ParcelScanPage() {
       } else {
         // Known resident
         payload.recipient_name = resident?.name || undefined;
-        payload.resident_id = resident?.id ? String(resident.id) : undefined;
+        payload.resident_id = resident?.id ?? undefined;
       }
 
       const res = await fetchOps("/parcel-check-in", {

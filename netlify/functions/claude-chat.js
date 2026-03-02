@@ -568,52 +568,47 @@ async function executeTool(toolName, toolInput, supabase) {
         }
 
         try {
-            let profile = null;
+            let customer = null;
             let lookupEmail = email;
 
             if (supabase) {
-                // Look up by the authed user's verified email
+                // Unified CRM: single customers table
                 if (email) {
                     const { data } = await supabase
-                        .from('profiles')
+                        .from('customers')
                         .select('id, email, full_name, loyalty_points')
                         .eq('email', email.toLowerCase().trim())
                         .maybeSingle();
-                    profile = data;
+                    customer = data;
                     lookupEmail = email;
                 }
 
-                // If not found and phone provided, try residents table —
-                // but ONLY return results that match the authed user's email
-                if (!profile && phone) {
+                // If not found and phone provided, try phone lookup in same table
+                // ONLY return results that match the authed user's email
+                if (!customer && phone) {
                     const cleanPhone = phone.replace(/\D/g, '').slice(-10);
-                    const { data: resident } = await supabase
-                        .from('residents')
-                        .select('email, name')
-                        .or(`phone.ilike.%${cleanPhone}%,phone.ilike.%${cleanPhone.slice(-7)}%`)
+                    const { data: byPhone } = await supabase
+                        .from('customers')
+                        .select('id, email, full_name, loyalty_points')
+                        .like('phone', `%${cleanPhone}`)
                         .maybeSingle();
                     
                     // Cross-reference: only use phone lookup if the email matches the authed user
-                    if (resident?.email && resident.email.toLowerCase() === authedUser.email?.toLowerCase()) {
-                        lookupEmail = resident.email;
-                        const { data } = await supabase
-                            .from('profiles')
-                            .select('id, email, full_name, loyalty_points')
-                            .eq('email', resident.email.toLowerCase())
-                            .maybeSingle();
-                        profile = data;
+                    if (byPhone?.email && byPhone.email.toLowerCase() === authedUser.email?.toLowerCase()) {
+                        lookupEmail = byPhone.email;
+                        customer = byPhone;
                     }
                 }
             }
 
-            if (!profile) {
+            if (!customer) {
                 return {
                     found: false,
                     result: `I couldn't find a loyalty account for that ${email ? 'email' : 'phone number'}. You can sign up at brewhubphl.com/portal to start earning points!`
                 };
             }
 
-            const points = profile.loyalty_points || 0;
+            const points = customer.loyalty_points || 0;
             const pointsToReward = Math.max(0, 100 - (points % 100));
             const qrUrl = `https://brewhubphl.com/portal`;
             // CC-6: Use portal URL in QR data — never leak email to third-party QR service
@@ -664,7 +659,7 @@ async function executeTool(toolName, toolInput, supabase) {
             // Only return PII to the authenticated owner
             return {
                 found: true,
-                email: authedUser?.email === profile.email?.toLowerCase() ? profile.email : undefined,
+                email: authedUser?.email === customer.email?.toLowerCase() ? customer.email : undefined,
                 points,
                 points_to_next_reward: pointsToReward,
                 portal_url: qrUrl,

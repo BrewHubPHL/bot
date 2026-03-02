@@ -1,7 +1,11 @@
 "use client";
 
+import { useCallback } from "react";
 import Link from "next/link";
+import { LogOut } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { fetchOps } from "@/utils/ops-api";
+import { useOpsSessionOptional } from "@/components/OpsGate";
 
 export interface ManagerTab {
   key: string;
@@ -106,6 +110,22 @@ export default function ManagerNav() {
 
 /* ─── Quick links (shared) ── */
 export function ManagerQuickLinks() {
+  const session = useOpsSessionOptional();
+
+  const handleManagerLogout = useCallback(async () => {
+    try {
+      await fetchOps("/pin-logout", { method: "POST" }, session?.token);
+    } catch { /* best-effort */ }
+
+    try {
+      localStorage.removeItem("brewhub_cart");
+      localStorage.removeItem("brewhub_cafe_cart");
+      localStorage.removeItem("brewhub_email");
+    } catch { /* storage unavailable */ }
+
+    window.location.reload();
+  }, [session?.token]);
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center gap-3 min-h-[44px] text-xs text-stone-500">
       <Link href="/pos"       className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">POS</Link>
@@ -116,6 +136,13 @@ export function ManagerQuickLinks() {
       <Link href="/manager/calender"    className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Schedule</Link>
       <span className="text-stone-600" aria-hidden="true">|</span>
       <Link href="/"          className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Main Site</Link>
+      <span className="text-stone-600" aria-hidden="true">|</span>
+      <button
+        onClick={handleManagerLogout}
+        className="min-h-[44px] inline-flex items-center gap-1 text-red-400 hover:text-red-300 transition-colors font-medium"
+      >
+        <LogOut size={14} aria-hidden="true" /> Log Out
+      </button>
     </div>
   );
 }

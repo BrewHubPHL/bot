@@ -35,6 +35,8 @@ import ParcelsMonitor from "./ParcelsMonitor";
 import ParcelOpsPanel from "./ParcelOpsPanel";
 /* ─── Live Staff Pulse (persistent header badge) ───── */
 import LiveStaffPulse from "@/app/(site)/components/manager/LiveStaffPulse";
+/* ─── Unified CRM Insights (post-migration dashboard) ── */
+import CrmInsights from "@/app/(site)/components/manager/CrmInsights";
 /* ─── Tab definitions ────────────────────────────────────── */
 const TABS: ManagerTab[] = [
   { key: "overview",  label: "Overview",        icon: LayoutDashboard },
@@ -118,6 +120,7 @@ export default function ManagerDashboard() {
         {activeTab === "overview" && (
           <div className="space-y-6">
             <DashboardOverhaul />
+            <CrmInsights />
             <ReceiptRoll />
           </div>
         )}

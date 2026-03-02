@@ -1,7 +1,7 @@
 # SYSTEM-BLUEPRINT.md
 
 **Updated:** March 2026  
-**Scope:** Architecture, security layers, operational hardening, and all schema migrations (1–79)
+**Scope:** Architecture, security layers, operational hardening, and all schema migrations (1–79 + Unified CRM)
 
 ## Part 1: Core Systems
 
@@ -109,3 +109,34 @@
 - **WebAuthn Credentials (Schema 65)**: Tables to support passwordless, biometric staff login.
 - **Two-Phase Commit Race Fixes (Schema 72)**: Advanced double `FOR UPDATE` row-locks instituted during parcel intake to strictly prevent "Double Flip" notification glitches.
 - **Performance (Schema 79)**: Bound `token_version` directly into the `verify_staff_pin` out params to support instantaneous token revocations.
+
+---
+
+## Part 6: Unified CRM & Schedule Management (March 2026)
+
+### Unified CRM Migration (`20260302_unified_crm`)
+- **Single Customer Table**: Merged the legacy `profiles` and `residents` tables into a single `customers` table.
+  - `auth_id` (nullable UUID): Links to `auth.users` for app users; `NULL` for walk-ins.
+  - `unit_number`: Absorbs the residents mailbox field for mailbox renters.
+  - `is_vip`, `barcode_id`, `favorite_drink`, `total_orders`: Profile-originated fields backfilled and migrated.
+- **Trigger Rewrite**: `handle_new_user()` now targets `customers` directly on `auth.users` INSERT.
+- **RLS Rewrite**: All policies rewritten for the unified table; staff SELECT, manager writes, service-role bypass.
+- **FK Migration**: `orders`, `coffee_orders`, `vouchers` FKs all point to `customers.id`.
+- **Legacy Cleanup**: `profiles` and `residents` tables dropped after verified backfill.
+
+### CRM Insights RPC (`20260302_crm_insights_rpc`)
+- **`crm_insights()`**: Stable SECURITY DEFINER function returning a single JSONB row with:
+  - Total customers, app users, walk-ins, mailbox renters, VIPs, loyalty-active count
+  - Top 5 favorite drinks, 30-day active users, 7-day new signups, mailbox-cafe crossover rate
+
+### Manager CRM Dashboard (`CrmInsights.tsx`)
+- **Visual Breakdown**: Stat cards displaying CRM metrics with color-coded accents.
+- **Top Drinks**: Ranked list of favorite drinks across the customer base.
+- **Data Source**: Calls `get-crm-insights` Netlify function (manager-only, rate-limited).
+
+### Schedule Management (`manage-schedule.js`)
+- **Shift CRUD**: Full create/update/delete for `scheduled_shifts` via manager PIN auth.
+- **Calendar Integration**: `AdminCalendar.tsx` refactored to use server-side `manage-schedule` endpoint instead of direct Supabase calls, enforcing CSRF + rate limits.
+
+### Function Updates for Unified CRM
+- `create-customer.js`, `upsert-guest.js`, `search-residents.js`, `get-loyalty.js`, `get-staff-loyalty.js`, `process-quick-add.js`, `parcel-check-in.js`, `order-announcer.js`, `daily-pulse.js`: All updated to query `customers` instead of `profiles`/`residents`.

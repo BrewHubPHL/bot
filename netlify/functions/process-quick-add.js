@@ -1,9 +1,11 @@
 /**
- * process-quick-add.js — UPSERT a ghost/quick-add resident into the residents table.
+ * process-quick-add.js — UPSERT a walk-in / quick-add customer into the customers table.
  *
- * Called from the POS Parcel Scanner when a "Ghost Resident" is quick-added.
+ * Called from the POS Parcel Scanner when a "Ghost" customer is quick-added.
  * Uses UPSERT (ON CONFLICT phone DO UPDATE unit_number) to prevent duplicate
- * resident records when the same phone number is scanned on multiple packages.
+ * customer records when the same phone number is scanned on multiple packages.
+ *
+ * Unified CRM: all person data lives in the single `customers` table.
  *
  * Auth: Staff PIN session (requirePin: true)
  * Method: POST
@@ -83,12 +85,12 @@ exports.handler = async (event) => {
 
     // ══════════════════════════════════════════════════════════════
     // IDENTITY HIJACK GUARD: Prevent cross-unit phone reassignment
-    // If this phone already belongs to a resident in a DIFFERENT unit,
+    // If this phone already belongs to a customer in a DIFFERENT unit,
     // block the upsert to prevent identity overwrite attacks.
     // ══════════════════════════════════════════════════════════════
     const { data: existing, error: lookupErr } = await supabase
-      .from('residents')
-      .select('id, name, unit_number, email, phone')
+      .from('customers')
+      .select('id, full_name, unit_number, email, phone, auth_id')
       .eq('phone', phone)
       .limit(1)
       .maybeSingle();
@@ -99,12 +101,12 @@ exports.handler = async (event) => {
     }
 
     if (existing && existing.unit_number && unit_number && existing.unit_number !== unit_number) {
-      // Phone belongs to a different unit — check if they are a registered user
-      const isRegistered = !!(existing.email);
+      // Phone belongs to a different unit — check if they are an auth-linked user
+      const isRegistered = !!(existing.auth_id);
 
       if (isRegistered) {
-        // Hard block: registered residents cannot be silently reassigned
-        console.warn(`[QUICK-ADD] BLOCKED cross-unit move for registered resident id=${existing.id} phone=***${phone.slice(-4)} from unit=${existing.unit_number} to unit=${unit_number}`);
+        // Hard block: registered customers cannot be silently reassigned
+        console.warn(`[QUICK-ADD] BLOCKED cross-unit move for registered customer id=${existing.id} phone=***${phone.slice(-4)} from unit=${existing.unit_number} to unit=${unit_number}`);
         return {
           statusCode: 409,
           headers: corsHeaders,
@@ -116,10 +118,10 @@ exports.handler = async (event) => {
         };
       }
 
-      // Unregistered ghost resident — allow move ONLY if caller is a manager
+      // Walk-in customer — allow move ONLY if caller is a manager
       const isManager = auth.role === 'manager' || auth.role === 'admin';
       if (!isManager) {
-        console.warn(`[QUICK-ADD] BLOCKED cross-unit ghost move by non-manager: id=${existing.id} phone=***${phone.slice(-4)} from unit=${existing.unit_number} to unit=${unit_number}`);
+        console.warn(`[QUICK-ADD] BLOCKED cross-unit move by non-manager: id=${existing.id} phone=***${phone.slice(-4)} from unit=${existing.unit_number} to unit=${unit_number}`);
         return {
           statusCode: 409,
           headers: corsHeaders,
@@ -132,37 +134,39 @@ exports.handler = async (event) => {
       }
 
       // Manager approved — log the override and allow the upsert to proceed
-      console.warn(`[QUICK-ADD] MANAGER OVERRIDE: Reassigning ghost id=${existing.id} phone=***${phone.slice(-4)} from unit=${existing.unit_number} to unit=${unit_number} by ${auth.user?.email || 'unknown'}`);
+      console.warn(`[QUICK-ADD] MANAGER OVERRIDE: Reassigning customer id=${existing.id} phone=***${phone.slice(-4)} from unit=${existing.unit_number} to unit=${unit_number} by ${auth.user?.email || 'unknown'}`);
     }
 
     // ── UPSERT: ON CONFLICT (phone) DO UPDATE SET unit_number ──
-    // If a resident with this phone already exists, just update their unit.
-    // This prevents duplicate rows when the same ghost is quick-added repeatedly.
+    // If a customer with this phone already exists, just update their unit.
+    // This prevents duplicate rows when the same walk-in is quick-added repeatedly.
     const { data, error } = await supabase
-      .from('residents')
+      .from('customers')
       .upsert(
-        { name, phone, unit_number },
+        { full_name: name, phone, unit_number },
         { onConflict: 'phone', ignoreDuplicates: false }
       )
-      .select('id, name, phone, unit_number')
+      .select('id, full_name, phone, unit_number')
       .single();
 
     if (error) {
       console.error('[QUICK-ADD] Upsert error:', error.message);
-      return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: 'Failed to upsert resident' }) };
+      return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: 'Failed to upsert customer' }) };
     }
 
-    console.log(`[QUICK-ADD] Upserted resident id=${data.id} phone=***${phone.slice(-4)} unit=${unit_number}`);
+    console.log(`[QUICK-ADD] Upserted customer id=${data.id} phone=***${phone.slice(-4)} unit=${unit_number}`);
 
     return {
       statusCode: 200,
       headers: corsHeaders,
       body: JSON.stringify({
         success: true,
-        resident_id: data.id,
-        name: data.name,
+        customer_id: data.id,
+        resident_id: data.id,  // backward compat — prefer customer_id
+        full_name: data.full_name,
+        name: data.full_name,  // backward compat — prefer full_name
         unit_number: data.unit_number,
-        message: `Resident "${data.name}" saved (Unit ${data.unit_number || 'N/A'}).`,
+        message: `Customer "${data.full_name}" saved (Unit ${data.unit_number || 'N/A'}).`,
       }),
     };
   } catch (err) {

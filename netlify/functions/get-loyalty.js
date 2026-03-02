@@ -101,45 +101,38 @@ exports.handler = async (event) => {
       });
     }
 
-    let profile = null;
+    let customer = null;
     let lookupEmail = email;
 
-    // Look up by email first
+    // Unified CRM: single customers table lookup
     if (email) {
       const normalized = String(email).toLowerCase().trim();
       const { data } = await supabase
-        .from('profiles')
-        .select('id, email, loyalty_points')
+        .from('customers')
+        .select('id, email, full_name, loyalty_points')
         .eq('email', normalized)
         .maybeSingle();
-      profile = data;
+      customer = data;
       lookupEmail = normalized;
     }
 
-    // If not found and phone provided, try residents table
-    // GL-2: Use separate .ilike() filters instead of string interpolation in .or()
-    if (!profile && phone) {
+    // If not found by email, try phone lookup in the same table
+    if (!customer && phone) {
       const cleanPhone = phone.replace(/\D/g, '').slice(-10);
       if (cleanPhone.length >= 7) {
-        const { data: resident } = await supabase
-          .from('residents')
-          .select('email, name')
-          .or(`phone.ilike.%${cleanPhone}%,phone.ilike.%${cleanPhone.slice(-7)}%`)
+        const { data } = await supabase
+          .from('customers')
+          .select('id, email, full_name, loyalty_points')
+          .like('phone', `%${cleanPhone}`)
           .maybeSingle();
-        
-        if (resident?.email) {
-          lookupEmail = resident.email;
-          const { data } = await supabase
-            .from('profiles')
-            .select('id, email, full_name, loyalty_points')
-            .eq('email', resident.email.toLowerCase())
-            .maybeSingle();
-          profile = data;
+        if (data) {
+          customer = data;
+          lookupEmail = data.email;
         }
       }
     }
 
-    if (!profile) {
+    if (!customer) {
       return json(404, {
         success: false,
         found: false,
@@ -147,11 +140,11 @@ exports.handler = async (event) => {
       });
     }
 
-    const points = profile.loyalty_points || 0;
+    const points = customer.loyalty_points || 0;
     const pointsToReward = Math.max(0, 100 - (points % 100));
     const portalUrl = 'https://brewhubphl.com/portal';
     // GL-1 / API-H6: Use opaque customer ID instead of email in QR URL
-    const qrDataUrl = `${portalUrl}?cid=${encodeURIComponent(profile.id)}`;
+    const qrDataUrl = `${portalUrl}?cid=${encodeURIComponent(customer.id)}`;
     const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrDataUrl)}`;
 
     // Send SMS if requested — via TCPA-compliant gateway
@@ -177,14 +170,14 @@ exports.handler = async (event) => {
     }
 
     // API-H6: Mask PII — return customer_id (UUID) instead of raw email/name
-    const maskedEmail = profile.email
-      ? profile.email.replace(/^(.).+(@.+)$/, '$1***$2')
+    const maskedEmail = customer.email
+      ? customer.email.replace(/^(.).+(@.+)$/, '$1***$2')
       : null;
 
     return json(200, {
       success: true,
       found: true,
-      customer_id: profile.id,
+      customer_id: customer.id,
       email_masked: maskedEmail,
       points,
       points_to_next_reward: pointsToReward,
