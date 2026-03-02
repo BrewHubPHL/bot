@@ -62,7 +62,7 @@ function deriveDeviceFingerprint(event) {
   const clientIp =
     event.headers?.['x-nf-client-connection-ip']
     || (xff ? xff.split(',')[0].trim() : null)
-    || 'unknown';
+    || '127.0.0.1';
   const raw = `${ua}|${accept}|${clientIp}`;
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
 }

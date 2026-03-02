@@ -39,7 +39,7 @@ exports.handler = async (event) => {
   if (csrfBlock) return { ...csrfBlock, headers: { ...csrfBlock.headers, ...corsHeaders } };
 
   // Authenticate (requires PIN token, not JWT)
-  const auth = await authorize(event, { requirePin: true });
+  const auth = await authorize(event, { requirePin: true, allowManagerIPBypass: true });
   if (!auth.ok) {
     return { ...auth.response, headers: { ...auth.response.headers, ...corsHeaders } };
   }

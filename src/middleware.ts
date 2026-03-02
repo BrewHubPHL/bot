@@ -55,7 +55,7 @@ async function deriveDeviceFingerprint(request: NextRequest): Promise<string> {
   const clientIp =
     request.headers.get("x-nf-client-connection-ip")
     || (xff ? xff.split(",")[0].trim() : null)
-    || "unknown";
+    || "127.0.0.1";
 
   const raw = `${ua}|${accept}|${clientIp}`;
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
