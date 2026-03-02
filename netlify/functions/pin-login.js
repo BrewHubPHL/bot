@@ -143,10 +143,14 @@ exports.handler = async (event) => {
         isProduction ? 'Secure' : '',
       ].filter(Boolean).join('; ');
 
+      console.log(`[PIN-LOGIN] Admin login OK — setting cookie (production=${isProduction}, flags=${cookieFlags.substring(0, 60)}...)`);
+
       return {
         statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        multiValueHeaders: { 'Set-Cookie': [cookieFlags] },
+        headers: {
+          'Content-Type': 'application/json',
+          'Set-Cookie': cookieFlags,
+        },
         body: JSON.stringify({
           token,
           role: 'admin',
@@ -240,10 +244,14 @@ exports.handler = async (event) => {
       isProduction ? 'Secure' : '',
     ].filter(Boolean).join('; ');
 
+    console.log(`[PIN-LOGIN] Staff login OK (${staffRole}) — setting cookie (production=${isProduction}, flags=${cookieFlags.substring(0, 60)}...)`);
+
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      multiValueHeaders: { 'Set-Cookie': [cookieFlags] },
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': cookieFlags,
+      },
       body: JSON.stringify({
         token,
         role: staffRole,
