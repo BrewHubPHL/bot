@@ -28,6 +28,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useOpsSession } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 import BarcodeScanner from "@/components/BarcodeScanner";
 import { detectCarrier, type Carrier } from "@/lib/detectCarrier";
 import { useParcelSync } from "@/hooks/useParcelSync";
@@ -59,10 +60,7 @@ const CARRIER_BORDER: Record<Carrier, string> = {
   OTHER: "border-stone-600",
 };
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 type SubmitStatus = "idle" | "submitting" | "success" | "error" | "duplicate";
 
@@ -213,19 +211,15 @@ export default function MobileScanPage() {
         residentId: null,
       });
 
-      const res = await fetch(`${API_BASE}/parcel-check-in`, {
+      const res = await fetchOps("/parcel-check-in", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tracking_number: trimmedTracking,
           carrier,
           value_tier: "standard",
         }),
-      });
+      }, token);
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Check-in failed" }));

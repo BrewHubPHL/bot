@@ -152,6 +152,7 @@ async function authorize(event, options = {}) {
       //
       // Device fingerprint is still enforced to prevent token
       // theft/replay from a different device.
+      // Token version is checked when the admin has a staff_directory row.
       // ═══════════════════════════════════════════════════════════
       if (payload.role === 'admin') {
         if (payload.dfp) {
@@ -159,6 +160,18 @@ async function authorize(event, options = {}) {
           if (payload.dfp !== currentFp) {
             console.warn(`[AUTH BLOCKED] Device fingerprint mismatch for admin token: token=${payload.dfp} current=${currentFp}`);
             return { ok: false, response: json(401, { error: 'Session bound to a different device. Please log in again.', code: 'DEVICE_MISMATCH' }) };
+          }
+        }
+        // If the admin token carries a token_version, verify it against the DB
+        if (typeof payload.token_version === 'number' && email) {
+          const { data: adminRow } = await getSupabase()
+            .from('staff_directory')
+            .select('token_version')
+            .eq('email', email)
+            .single();
+          if (adminRow && adminRow.token_version !== payload.token_version) {
+            console.warn(`[AUTH BLOCKED] Admin token_version mismatch: token=${payload.token_version} db=${adminRow.token_version}`);
+            return { ok: false, response: json(401, { error: 'Session invalidated', code: 'TOKEN_VERSION_MISMATCH' }) };
           }
         }
         return {
@@ -171,16 +184,22 @@ async function authorize(event, options = {}) {
       }
 
       const staffLookupQuery = withSourceComment(
-        getSupabase().from('staff_directory').select('role, version_updated_at').eq('email', email),
+        getSupabase().from('staff_directory').select('role, token_version, version_updated_at').eq('email', email),
         'auth-authorize-guard'
       );
       const { data: staff, error } = await staffLookupQuery.single();
       if (error || !staff) return { ok: false, response: json(403, { error: 'Staff not found' }) };
 
-      if (staff.version_updated_at && payload.iat) {
+      // Primary defense: integer token_version comparison (O(1), no clock skew)
+      if (typeof payload.token_version === 'number' && staff.token_version !== payload.token_version) {
+        console.warn(`[AUTH BLOCKED] token_version mismatch for ${email}: token=${payload.token_version} db=${staff.token_version}`);
+        return { ok: false, response: json(401, { error: 'Session invalidated', code: 'TOKEN_VERSION_MISMATCH' }) };
+      }
+      // Fallback for legacy tokens minted before token_version was embedded
+      if (typeof payload.token_version !== 'number' && staff.version_updated_at && payload.iat) {
         const versionTime = new Date(staff.version_updated_at).getTime();
         if (versionTime > payload.iat) {
-          console.warn(`[AUTH BLOCKED] Token version mismatch: ${email}`);
+          console.warn(`[AUTH BLOCKED] Legacy token version mismatch (timestamp): ${email}`);
           return { ok: false, response: json(401, { error: 'Session invalidated', code: 'TOKEN_VERSION_MISMATCH' }) };
         }
       }
@@ -286,7 +305,7 @@ async function authorize(event, options = {}) {
 
     const email = (data.user.email || '').toLowerCase();
     const staffLookupQuery = withSourceComment(
-      getSupabase().from('staff_directory').select('role, version_updated_at').eq('email', email),
+      getSupabase().from('staff_directory').select('role, token_version, version_updated_at').eq('email', email),
       'auth-authorize-guard'
     );
     const { data: staff, error: staffErr } = await staffLookupQuery.single();
@@ -295,11 +314,12 @@ async function authorize(event, options = {}) {
       return { ok: false, response: json(403, { error: 'Forbidden' }) };
     }
 
+    // Supabase JWTs don't carry token_version, so fall back to timestamp check
     if (staff.version_updated_at) {
       const versionTime = new Date(staff.version_updated_at).getTime();
       const iat = getJwtIat(token);
       if (iat && versionTime > iat * 1000) {
-        console.warn(`[AUTH BLOCKED] Token version mismatch: ${email}`);
+        console.warn(`[AUTH BLOCKED] Token version mismatch (timestamp): ${email}`);
         return { ok: false, response: json(401, { error: 'Session invalidated', code: 'TOKEN_VERSION_MISMATCH' }) };
       }
     }

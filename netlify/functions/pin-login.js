@@ -112,7 +112,7 @@ exports.handler = async (event) => {
       const adminLookupQuery = withSourceComment(
         adminSupabase
         .from('v_staff_status')
-        .select('id, name, full_name, email, role, is_working, is_active')
+        .select('id, name, full_name, email, role, is_working, is_active, token_version')
         .eq('email', adminEmail),
         'auth-staff-status-lookup'
       );
@@ -126,17 +126,18 @@ exports.handler = async (event) => {
       const adminStaffId = adminRow?.id || null;
       const adminName = adminRow?.full_name || adminRow?.name || 'Admin';
       const adminIsWorking = adminRow?.is_working ?? false;
+      const adminTokenVersion = adminRow?.token_version ?? 1;
 
-      const token = signToken({ role: 'admin', email: adminEmail, staffId: adminStaffId, status: 'active', dfp });
+      const token = signToken({ role: 'admin', email: adminEmail, staffId: adminStaffId, status: 'active', dfp, token_version: adminTokenVersion });
 
       // Set HttpOnly session cookie so middleware recognizes the session
       const isProduction = !['localhost', '127.0.0.1'].includes(
         (event.headers?.host || '').split(':')[0]
       );
       const cookieFlags = [
-        `hub_staff_session=${token}`,
+        `hub_staff_session=${encodeURIComponent(token)}`,
         'HttpOnly',
-        'SameSite=Strict',
+        'SameSite=Lax',
         'Path=/',
         `Max-Age=${8 * 60 * 60}`,
         isProduction ? 'Secure' : '',
@@ -144,7 +145,8 @@ exports.handler = async (event) => {
 
       return {
         statusCode: 200,
-        headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookieFlags },
+        headers: { 'Content-Type': 'application/json' },
+        multiValueHeaders: { 'Set-Cookie': [cookieFlags] },
         body: JSON.stringify({
           token,
           role: 'admin',
@@ -181,6 +183,7 @@ exports.handler = async (event) => {
     const staffRole = staff.staff_role;
     const isWorking = staff.is_working ?? false;
     const needsPinRotation = staff.needs_pin_rotation ?? false;
+    const tokenVersion = staff.token_version ?? 1;
 
     // 🌐 3. Network Check for Staff
     const { data: settings, error: settingsError } = await supabase
@@ -221,6 +224,7 @@ exports.handler = async (event) => {
       email: staffEmail,
       status: 'active',
       dfp,
+      token_version: tokenVersion,
     });
 
     // Set HttpOnly session cookie so middleware recognizes the session
@@ -228,9 +232,9 @@ exports.handler = async (event) => {
       (event.headers?.host || '').split(':')[0]
     );
     const cookieFlags = [
-      `hub_staff_session=${token}`,
+      `hub_staff_session=${encodeURIComponent(token)}`,
       'HttpOnly',
-      'SameSite=Strict',
+      'SameSite=Lax',
       'Path=/',
       `Max-Age=${8 * 60 * 60}`,
       isProduction ? 'Secure' : '',
@@ -238,7 +242,8 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookieFlags },
+      headers: { 'Content-Type': 'application/json' },
+      multiValueHeaders: { 'Set-Cookie': [cookieFlags] },
       body: JSON.stringify({
         token,
         role: staffRole,

@@ -189,13 +189,14 @@ describe('_auth.js', () => {
       const payload = {
         email: 'staff@brewhub.com',
         staffId: 'staff-123',
+        token_version: 1,
         iat: Date.now(),
         exp: Date.now() + 3600000
       };
       const token = createPINToken(payload);
 
       mockSingle.mockResolvedValue({
-        data: { role: 'staff', version_updated_at: null },
+        data: { role: 'staff', token_version: 1, version_updated_at: null },
         error: null
       });
 
@@ -232,7 +233,40 @@ describe('_auth.js', () => {
       expect(result.response.statusCode).toBe(401);
     });
 
-    it('should reject PIN token with version mismatch', async () => {
+    it('should reject PIN token with token_version mismatch', async () => {
+      const payload = {
+        email: 'staff@brewhub.com',
+        staffId: 'staff-123',
+        token_version: 1,
+        iat: Date.now() - 3600000,
+        exp: Date.now() + 3600000
+      };
+      const token = createPINToken(payload);
+
+      mockSingle.mockResolvedValue({
+        data: {
+          role: 'staff',
+          token_version: 2,
+          version_updated_at: new Date().toISOString()
+        },
+        error: null
+      });
+
+      const event = {
+        headers: {
+          'x-nf-client-connection-ip': '127.0.0.1',
+          authorization: `Bearer ${token}`
+        }
+      };
+
+      const result = await authorize(event);
+      expect(result.ok).toBe(false);
+      expect(result.response.statusCode).toBe(401);
+      const body = JSON.parse(result.response.body);
+      expect(body.code).toBe('TOKEN_VERSION_MISMATCH');
+    });
+
+    it('should reject legacy PIN token via timestamp fallback', async () => {
       const payload = {
         email: 'staff@brewhub.com',
         staffId: 'staff-123',
@@ -244,6 +278,7 @@ describe('_auth.js', () => {
       mockSingle.mockResolvedValue({
         data: {
           role: 'staff',
+          token_version: 2,
           version_updated_at: new Date(Date.now() - 1800000).toISOString()
         },
         error: null
@@ -299,7 +334,7 @@ describe('_auth.js', () => {
       mockSingle
         .mockResolvedValueOnce({ data: null, error: { code: 'PGRST116' } }) // revoked_users check
         .mockResolvedValueOnce({
-          data: { role: 'staff', version_updated_at: null },
+          data: { role: 'staff', token_version: 1, version_updated_at: null },
           error: null
         }); // staff_directory check
 

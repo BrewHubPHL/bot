@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOpsSession } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 
 /* ── Types ──────────────────────────────────────────────── */
 interface StaffParcel {
@@ -33,11 +34,7 @@ interface StaffParcel {
   is_stale: boolean;
 }
 
-/* ── Config ─────────────────────────────────────────────── */
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "—";
@@ -65,11 +62,7 @@ export default function ParcelOpsPanel({ onLaunchBoard }: ParcelOpsPanelProps) {
 
   const fetchParcels = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/get-arrived-parcels`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
+      const res = await fetchOps("/get-arrived-parcels", {}, token);
       if (!res.ok) {
         setError("Failed to load parcels");
         return;

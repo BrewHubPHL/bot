@@ -1,14 +1,12 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 import { Download, RefreshCw, X, Clock, AlertTriangle, Pencil, Info } from "lucide-react";
 import ManagerChallengeModal from "@/components/ManagerChallengeModal";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
@@ -259,9 +257,10 @@ export default function PayrollSection() {
     if (!token) { setSummaryLoading(false); return; }
     setSummaryLoading(true);
     try {
-      const res = await fetch(
-        `${API_BASE}/get-payroll?view=summary&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const res = await fetchOps(
+        `/get-payroll?view=summary&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`,
+        {},
+        token,
       );
       if (res.status === 429) {
         payrollBackoffRef.current = Math.min(payrollBackoffRef.current * 2, 300_000);
@@ -324,12 +323,10 @@ export default function PayrollSection() {
     const reason = fixReason.trim();
 
     try {
-      const res = await fetch(`${API_BASE}/fix-clock`, {
+      const res = await fetchOps("/fix-clock", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
           ...(challengeNonce ? { "x-brewhub-challenge": challengeNonce } : {}),
         },
         body: JSON.stringify({
@@ -338,7 +335,7 @@ export default function PayrollSection() {
           reason,
           ...(challengeNonce ? { _challenge_nonce: challengeNonce } : {}),
         }),
-      });
+      }, token);
 
       const data = await res.json();
 
@@ -374,12 +371,10 @@ export default function PayrollSection() {
     setFixBusy(true);
     setFixError("");
     try {
-      const res = await fetch(`${API_BASE}/fix-clock`, {
+      const res = await fetchOps("/fix-clock", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
           "x-brewhub-challenge": nonce,
         },
         body: JSON.stringify({
@@ -388,7 +383,7 @@ export default function PayrollSection() {
           reason: pendingAction.reason,
           _challenge_nonce: nonce,
         }),
-      });
+      }, token);
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Fix failed after challenge");
@@ -420,12 +415,10 @@ export default function PayrollSection() {
     setAdjustSuccess("");
 
     try {
-      const res = await fetch(`${API_BASE}/update-hours`, {
+      const res = await fetchOps("/update-hours", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
           ...(challengeNonce ? { "x-brewhub-challenge": challengeNonce } : {}),
         },
         body: JSON.stringify({
@@ -434,7 +427,7 @@ export default function PayrollSection() {
           reason,
           ...(challengeNonce ? { _challenge_nonce: challengeNonce } : {}),
         }),
-      });
+      }, token);
 
       const data = await res.json();
 
@@ -471,12 +464,10 @@ export default function PayrollSection() {
     setAdjustBusy(true);
     setAdjustError("");
     try {
-      const res = await fetch(`${API_BASE}/update-hours`, {
+      const res = await fetchOps("/update-hours", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
           "x-brewhub-challenge": nonce,
         },
         body: JSON.stringify({
@@ -485,7 +476,7 @@ export default function PayrollSection() {
           reason: pendingAdjust.reason,
           _challenge_nonce: nonce,
         }),
-      });
+      }, token);
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Adjustment failed after challenge");

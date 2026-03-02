@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useOpsSession } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 import {
   Coffee, CupSoda, Croissant, ShoppingCart, Plus, X,
   ChevronRight, CheckCircle2, Loader2, CreditCard, Monitor,
@@ -372,15 +373,11 @@ export default function POSPage() {
       try {
         const token = getAccessToken();
         if (!token) return;
-        const res = await fetch("/.netlify/functions/offline-session", {
+        const res = await fetchOps("/offline-session", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            "X-BrewHub-Action": "true",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "open" }),
-        });
+        }, token);
         if (res.ok) {
           const data = await res.json();
           setOfflineSessionId(data.session_id);
@@ -418,15 +415,11 @@ export default function POSPage() {
         try {
           const token = getAccessToken();
           if (token) {
-            const closeRes = await fetch("/.netlify/functions/offline-session", {
+            const closeRes = await fetchOps("/offline-session", {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-                "X-BrewHub-Action": "true",
-              },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ action: "close", session_id: offlineSessionId }),
-            });
+            }, token);
             if (closeRes.ok) {
               const data = await closeRes.json();
               if (data.session_id) {
@@ -454,13 +447,9 @@ export default function POSPage() {
         const token = getAccessToken();
         for (const order of pending) {
           try {
-            await fetch("/.netlify/functions/cafe-checkout", {
+            await fetchOps("/cafe-checkout", {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-                "X-BrewHub-Action": "true",
-              },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 items: order.items.map((i) => ({
                   product_id: i.product_id,
@@ -471,7 +460,7 @@ export default function POSPage() {
                 offline_created_at: order.created_at,
                 payment_method: order.payment_method,
               }),
-            });
+            }, token);
             await markOrderSynced(order.id);
           } catch (err: unknown) {
             console.error("[POS] Failed to sync offline order:", order.id, (err as Error)?.message);
@@ -510,19 +499,15 @@ export default function POSPage() {
       try {
         const token = getAccessToken();
         if (token) {
-          const capRes = await fetch("/.netlify/functions/offline-session", {
+          const capRes = await fetchOps("/offline-session", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-              "X-BrewHub-Action": "true",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               action: "record_sale",
               session_id: offlineSessionId,
               amount_cents: total,
             }),
-          });
+          }, token);
 
           if (capRes.status === 403) {
             // Cap reached — block the order
@@ -759,15 +744,11 @@ export default function POSPage() {
     }
     try {
       const token = getAccessToken();
-      await fetch("/.netlify/functions/cancel-order", {
+      await fetchOps("/cancel-order", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: createdOrderId }),
-      });
+      }, token);
     } catch (e: unknown) {
       console.error("[POS] Failed to cancel order:", (e as Error)?.message);
     } finally {
@@ -925,15 +906,11 @@ export default function POSPage() {
 
     try {
       const token = getAccessToken();
-      const resp = await fetch("/.netlify/functions/get-staff-loyalty", {
+      const resp = await fetchOps("/get-staff-loyalty", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
-      });
+      }, token);
 
       const result = await resp.json();
 
@@ -999,15 +976,11 @@ export default function POSPage() {
 
       // Call cafe-checkout to create the order in Supabase
       // This creates both the orders row AND coffee_orders line items
-      const resp = await fetch("/.netlify/functions/cafe-checkout", {
+      const resp = await fetchOps("/cafe-checkout", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(checkoutBody),
-      });
+      }, token);
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -1041,15 +1014,11 @@ export default function POSPage() {
     setIsSubmitting(true);
     try {
       const token = getAccessToken();
-      const resp = await fetch("/.netlify/functions/cafe-checkout", {
+      const resp = await fetchOps("/cafe-checkout", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(checkoutBody),
-      });
+      }, token);
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -1186,15 +1155,11 @@ export default function POSPage() {
         const token = getAccessToken();
         if (!token) return;
 
-        const res = await fetch("/.netlify/functions/poll-terminal-payment", {
+        const res = await fetchOps("/poll-terminal-payment", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            "X-BrewHub-Action": "true",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ orderId }),
-        });
+        }, token);
 
         if (!res.ok) return; // Silently retry next interval
 
@@ -1267,19 +1232,15 @@ export default function POSPage() {
     try {
       const token = getAccessToken();
 
-      const resp = await fetch("/.netlify/functions/collect-payment", {
+      const resp = await fetchOps("/collect-payment", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orderId: createdOrderId,
           idempotencyKey: paymentIdempotencyKeyRef.current,
         }),
         signal: controller.signal,
-      });
+      }, token);
 
       clearTimeout(timeout);
 
@@ -1381,15 +1342,11 @@ export default function POSPage() {
         checkoutBody.customer_name = guestName;
       }
 
-      const resp = await fetch("/.netlify/functions/cafe-checkout", {
+      const resp = await fetchOps("/cafe-checkout", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(checkoutBody),
-      });
+      }, token);
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -1427,15 +1384,11 @@ export default function POSPage() {
     try {
       const token = getAccessToken();
       // Use process-comp with verify_only flag — does NOT create a session/cookie
-      const resp = await fetch("/.netlify/functions/process-comp", {
+      const resp = await fetchOps("/process-comp", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ manager_pin: compManagerPin, verify_only: true }),
-      });
+      }, token);
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -1524,15 +1477,11 @@ export default function POSPage() {
 
       // Call process-comp endpoint — re-verifies manager PIN, creates comped order,
       // logs audit trail with manager_id as the authorizing actor.
-      const resp = await fetch("/.netlify/functions/process-comp", {
+      const resp = await fetchOps("/process-comp", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(compBody),
-      });
+      }, token);
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -1604,19 +1553,15 @@ export default function POSPage() {
 
     try {
       const token = getAccessToken();
-      const resp = await fetch("/.netlify/functions/update-order-status", {
+      const resp = await fetchOps("/update-order-status", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orderId: createdOrderId,
           status: "preparing",
           paymentMethod: "cash",
         }),
-      });
+      }, token);
 
       if (!resp.ok) {
         // 409 = order already moved past pending — check if safe
@@ -1671,15 +1616,11 @@ export default function POSPage() {
     setReprintLoading(true);
     try {
       const token = getAccessToken();
-      const resp = await fetch("/.netlify/functions/get-receipts", {
+      const resp = await fetchOps("/get-receipts", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: createdOrderId }),
-      });
+      }, token);
       if (resp.ok) {
         const data = await resp.json();
         if (data.receipt_text) {
@@ -1729,20 +1670,16 @@ export default function POSPage() {
 
     try {
       const token = getAccessToken();
-      const resp = await fetch("/.netlify/functions/redeem-voucher", {
+      const resp = await fetchOps("/redeem-voucher", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code,
           orderId: createdOrderId,
           managerOverride: false,
         }),
         signal: controller.signal,
-      });
+      }, token);
 
       clearTimeout(timeout);
 

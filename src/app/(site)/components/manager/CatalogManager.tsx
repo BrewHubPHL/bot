@@ -1,6 +1,7 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import { RefreshCw } from "lucide-react";
 
@@ -41,10 +42,7 @@ const TRUSTED_HOSTNAMES = [
   'i.imgur.com',
 ];
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -263,19 +261,15 @@ function ImageDropZone({
           new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
         );
 
-        const res = await fetch(`${API_BASE}/upload-menu-image`, {
+        const res = await fetchOps("/upload-menu-image", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            "X-BrewHub-Action": "true",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             fileBase64: base64,
             contentType: file.type,
             fileName: file.name,
           }),
-        });
+        }, token);
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -411,9 +405,7 @@ export default function CatalogManager() {
     if (!token) { setLoading(false); return; }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/manage-catalog`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchOps("/manage-catalog", {}, token);
       if (!res.ok) throw new Error("Catalog fetch failed");
       const data = await res.json();
       setProducts(sanitizeProducts(data.products ?? []));
@@ -431,15 +423,11 @@ export default function CatalogManager() {
   const handleDelete = async (productId: string) => {
     if (!confirm("Archive this product? It can be restored later from the Archived tab.")) return;
     try {
-      const res = await fetch(`${API_BASE}/manage-catalog`, {
+      const res = await fetchOps("/manage-catalog", {
         method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: productId }),
-      });
+      }, token);
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || "Delete failed");
@@ -453,15 +441,11 @@ export default function CatalogManager() {
   /* --- Restore archived product ---------------------------------- */
   const handleRestore = async (productId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/manage-catalog`, {
+      const res = await fetchOps("/manage-catalog", {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: productId, archived_at: null, is_active: true }),
-      });
+      }, token);
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || "Restore failed");
@@ -476,15 +460,11 @@ export default function CatalogManager() {
   const handleToggleActive = async (productId: string, currentlyActive: boolean) => {
     const newStatus = !currentlyActive;
     try {
-      const res = await fetch(`${API_BASE}/manage-catalog`, {
+      const res = await fetchOps("/manage-catalog", {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: productId, is_active: newStatus }),
-      });
+      }, token);
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || "Update failed");
@@ -568,26 +548,18 @@ export default function CatalogManager() {
       let res: Response;
       if (form.id) {
         // Update
-        res = await fetch(`${API_BASE}/manage-catalog`, {
+        res = await fetchOps("/manage-catalog", {
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            "X-BrewHub-Action": "true",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: form.id, ...row }),
-        });
+        }, token);
       } else {
         // Create
-        res = await fetch(`${API_BASE}/manage-catalog`, {
+        res = await fetchOps("/manage-catalog", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            "X-BrewHub-Action": "true",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(row),
-        });
+        }, token);
       }
 
       if (!res.ok) {
@@ -635,20 +607,16 @@ export default function CatalogManager() {
     }
     setShrinkageSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/log-shrinkage`, {
+      const res = await fetchOps("/log-shrinkage", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           product_id: shrinkageTarget.id,
           category: shrinkageCategory,
           quantity: qty,
           reason: shrinkageReason.trim(),
         }),
-      });
+      }, token);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || "Failed to record shrinkage");

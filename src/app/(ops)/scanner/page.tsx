@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSession } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 import { toUserSafeMessage, toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import {
   Camera, CameraOff, Package, Heart, ScanLine, Plus, Minus,
@@ -235,9 +236,7 @@ export default function ScannerPage() {
     setStatusMsg(`Looking up: ${v.sanitized}`);
 
     try {
-      const resp = await fetch(`/.netlify/functions/inventory-lookup?barcode=${encodeURIComponent(v.sanitized!)}`, {
-        headers: { Authorization: `Bearer ${opsToken}` },
-      });
+      const resp = await fetchOps(`/inventory-lookup?barcode=${encodeURIComponent(v.sanitized!)}`, {}, opsToken);
       const result = await resp.json();
 
       if (!resp.ok || !result.found) {
@@ -270,15 +269,11 @@ export default function ScannerPage() {
     setStatusMsg("Looking up loyalty…");
 
     try {
-      const resp = await fetch("/.netlify/functions/get-staff-loyalty", {
+      const resp = await fetchOps("/get-staff-loyalty", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${opsToken}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: safeEmail }),
-      });
+      }, opsToken);
 
       const result = await resp.json();
 
@@ -323,20 +318,16 @@ export default function ScannerPage() {
     setViewState("saving");
 
     try {
-      const resp = await fetch("/.netlify/functions/adjust-inventory", {
+      const resp = await fetchOps("/adjust-inventory", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${opsToken}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           itemId: currentItem.id,
           itemName: currentItem.item_name,
           barcode: currentItem.barcode,
           delta,
         }),
-      });
+      }, opsToken);
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));

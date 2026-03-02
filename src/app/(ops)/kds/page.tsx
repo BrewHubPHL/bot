@@ -2,16 +2,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOpsSession } from '@/components/OpsGate';
+import { fetchOps } from '@/utils/ops-api';
 import { useConnection } from '@/lib/useConnection';
 import OfflineBanner from '@/components/OfflineBanner';
 import LiveClock from '@/components/LiveClock';
 import { KdsGrid } from '@/components/KdsGrid';
 import type { KdsGridState } from '@/components/KdsGrid';
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 /* ─── Types ────────────────────────────────────────────────────────── */
 interface HistoryOrder {
@@ -50,9 +48,7 @@ export default function KDS() {
     try {
       const t = session.token;
       if (!t) throw new Error("No PIN session");
-      const res = await fetch(`${API_BASE}/get-kds-orders?history=true`, {
-        headers: { Authorization: `Bearer ${t}` },
-      });
+      const res = await fetchOps("/get-kds-orders?history=true", {}, t);
       if (!res.ok) throw new Error("Failed to fetch history");
       const { orders } = await res.json() as { orders: HistoryOrder[] };
       setRecentHistory(orders || []);
@@ -77,15 +73,11 @@ export default function KDS() {
     try {
       const t = session.token;
       if (!t) throw new Error("No PIN session");
-      const res = await fetch(`${API_BASE}/update-order-status`, {
+      const res = await fetchOps("/update-order-status", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${t}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId, status: "preparing", completed_at: null, ready_at: null }),
-      });
+      }, t);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string })?.error || "Undo failed");

@@ -32,6 +32,7 @@ import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import { supabase } from "@/lib/supabase";
 import { useOpsSession } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface ShippingAddress {
@@ -65,10 +66,7 @@ interface FulfillmentOrder {
 type ViewTab = "pending" | "history";
 
 /* ── Helpers ───────────────────────────────────────────────── */
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
@@ -122,9 +120,7 @@ export default function FulfillmentDashboard() {
 
       try {
         const qs = activeTab === "history" ? "?include_shipped=true" : "";
-        const res = await fetch(`${API_BASE}/get-fulfillment-orders${qs}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
+        const res = await fetchOps(`/get-fulfillment-orders${qs}`, {}, token);
 
         if (!res.ok) {
           const info = await getErrorInfoFromResponse(res, "Failed to load fulfillment orders");
@@ -204,15 +200,11 @@ export default function FulfillmentDashboard() {
     setOrders((prev) => prev.filter((o) => o.id !== orderId));
 
     try {
-      const res = await fetch(`${API_BASE}/update-order-status`, {
+      const res = await fetchOps("/update-order-status", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId, status: "shipped" }),
-      });
+      }, token);
 
       if (!res.ok) {
         const info = await getErrorInfoFromResponse(res, "Failed to mark order as shipped");

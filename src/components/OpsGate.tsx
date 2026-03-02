@@ -378,6 +378,7 @@ export default function OpsGate({ children, requireManager = false }: { children
           Authorization: `Bearer ${session.token}`,
           "X-BrewHub-Action": "true",
         },
+        credentials: "include",
         body: JSON.stringify({ action }),
       });
 

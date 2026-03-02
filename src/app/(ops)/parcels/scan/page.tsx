@@ -31,6 +31,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useOpsSession } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 import { useParcelSync } from "@/hooks/useParcelSync";
 import { detectCarrier, type Carrier } from "@/lib/detectCarrier";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
@@ -73,10 +74,7 @@ const CARRIER_COLORS: Record<Carrier, string> = {
   OTHER: "text-stone-400",
 };
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 /* ─── Haptic helper ────────────────────────────────────────────── */
 function haptic(pattern: "tap" | "success" | "error" | "warning") {
@@ -224,14 +222,10 @@ export default function ParcelScanPage() {
       const batch = prefixes.slice(i, i + batchSize);
       const results = await Promise.allSettled(
         batch.map(async (p) => {
-          const res = await fetch(
-            `${API_BASE}/search-residents?prefix=${encodeURIComponent(p)}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "X-BrewHub-Action": "true",
-              },
-            },
+          const res = await fetchOps(
+            `/search-residents?prefix=${encodeURIComponent(p)}`,
+            {},
+            token,
           );
           if (!res.ok) return [];
           const d = await res.json();
@@ -403,15 +397,11 @@ export default function ParcelScanPage() {
         payload.resident_id = resident?.id ? String(resident.id) : undefined;
       }
 
-      const res = await fetch(`${API_BASE}/parcel-check-in`, {
+      const res = await fetchOps("/parcel-check-in", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
+      }, token);
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: "Check-in failed" }));

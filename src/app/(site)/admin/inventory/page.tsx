@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useOpsSession } from '@/components/OpsGate';
+import { fetchOps } from '@/utils/ops-api';
 import { toUserSafeMessage } from '@/lib/errorCatalog';
 import { Barcode, Package, Save, Trash2, Search, RefreshCw, Loader2 } from 'lucide-react';
 
@@ -30,9 +31,7 @@ export default function InventoryScanner() {
   const loadInventory = useCallback(async () => {
     setLoadError(false);
     try {
-      const res = await fetch('/.netlify/functions/get-inventory', {
-        headers: { 'Authorization': `Bearer ${token}`, 'X-BrewHub-Action': 'true' },
-      });
+      const res = await fetchOps('/get-inventory', {}, token);
       if (!res.ok) throw new Error('Failed to load');
       const data = await res.json();
       const items: InventoryItem[] = Array.isArray(data) ? data : (data.inventory ?? []);
@@ -64,15 +63,11 @@ export default function InventoryScanner() {
     setStatus("Saving…");
 
     try {
-      const res = await fetch('/.netlify/functions/adjust-inventory', {
+      const res = await fetchOps('/adjust-inventory', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'X-BrewHub-Action': 'true',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemId: item.id, delta, itemName: item.item_name }),
-      });
+      }, token);
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Save failed' }));

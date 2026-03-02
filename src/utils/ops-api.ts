@@ -50,6 +50,7 @@ export async function fetchOps(
   const res = await fetch(`${OPS_API_BASE}${path}`, {
     ...init,
     headers,
+    credentials: "include",
   });
 
   // Global 401 handler — session expired / fingerprint mismatch / revoked

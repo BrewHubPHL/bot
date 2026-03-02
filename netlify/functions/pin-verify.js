@@ -22,7 +22,8 @@ exports.handler = async (event) => {
   const corsHeaders = {
     'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-BrewHub-Action',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Credentials': 'true',
   };
 
   if (event.httpMethod === 'OPTIONS') {

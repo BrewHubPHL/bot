@@ -22,6 +22,7 @@ import type { KdsOrder } from "@/components/KdsOrderCard";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
+import { fetchOps } from "@/utils/ops-api";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                                */
@@ -77,10 +78,7 @@ export interface KdsGridProps {
 /* Helpers                                                              */
 /* ------------------------------------------------------------------ */
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 function haptic(pattern: "tap" | "success" | "error") {
   if (typeof navigator === "undefined" || !navigator.vibrate) return;
@@ -192,9 +190,7 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
     try {
       const t = token;
       if (!t) { console.warn("KdsGrid: No auth token"); return; }
-      const res = await fetch(`${API_BASE}/get-kds-orders`, {
-        headers: { Authorization: `Bearer ${t}` },
-      });
+      const res = await fetchOps("/get-kds-orders", {}, t);
       if (!res.ok) {
         const info = await getErrorInfoFromResponse(res, "Failed to load orders");
         setAuthzState(info.authz);
@@ -391,15 +387,11 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
     try {
       const t = token;
       if (!t) throw new Error("No PIN session");
-      const res = await fetch(`${API_BASE}/update-order-status`, {
+      const res = await fetchOps("/update-order-status", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${t}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: id, status: nextStatus }),
-      });
+      }, t);
       if (!res.ok) {
         const info = await getErrorInfoFromResponse(res, "Status update failed");
         if (info.authz) setAuthzState(info.authz);
@@ -432,15 +424,11 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
     try {
       const t = token;
       if (!t) throw new Error("No PIN session");
-      const res = await fetch(`${API_BASE}/update-item-status`, {
+      const res = await fetchOps("/update-item-status", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${t}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemId }),
-      });
+      }, t);
       if (!res.ok) {
         const info = await getErrorInfoFromResponse(res, "Item update failed");
         throw new Error(info.message);

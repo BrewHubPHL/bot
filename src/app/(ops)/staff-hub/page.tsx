@@ -2,16 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useOpsSession } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 import Link from "next/link";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
-
-/* ─── API base ─── */
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
 
 /* ─── Staff Hub Page ─── */
 export default function StaffHubPage() {
@@ -62,15 +57,11 @@ export default function StaffHubPage() {
     const action = isWorking ? "out" : "in";
 
     try {
-      const res = await fetch(`${API_BASE}/pin-clock`, {
+      const res = await fetchOps("/pin-clock", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
-      });
+      }, token);
 
       if (!res.ok) {
         const info = await getErrorInfoFromResponse(res, `Failed to clock ${action}`);

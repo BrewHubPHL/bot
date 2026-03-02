@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOpsSession } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
@@ -27,10 +28,7 @@ interface PickupFormState {
   success: string | null;
 }
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 const EMPTY_FORM: PickupFormState = {
   pickupCode: "",
@@ -70,12 +68,7 @@ export default function ParcelsPickupPage() {
   const loadParcels = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/get-arrived-parcels`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
-      });
+      const res = await fetchOps("/get-arrived-parcels", {}, token);
 
       if (!res.ok) {
         const info = await getErrorInfoFromResponse(res, "Unable to load arrived parcels right now.");
@@ -136,15 +129,11 @@ export default function ParcelsPickupPage() {
         payload.id_last4 = form.idLast4.trim();
       }
 
-      const res = await fetch(`${API_BASE}/parcel-pickup`, {
+      const res = await fetchOps("/parcel-pickup", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
+      }, token);
 
       if (!res.ok) {
         if (res.status === 422) {
