@@ -6,6 +6,7 @@ import {
   UtensilsCrossed,
   DollarSign,
   Users,
+  UsersRound,
   MonitorPlay,
   Package,
   Truck,
@@ -37,12 +38,17 @@ import ParcelOpsPanel from "./ParcelOpsPanel";
 import LiveStaffPulse from "@/app/(site)/components/manager/LiveStaffPulse";
 /* ─── Unified CRM Insights (post-migration dashboard) ── */
 import CrmInsights from "@/app/(site)/components/manager/CrmInsights";
+/* ─── Export Orders CSV ─────────────────────────────────── */
+import ExportOrdersButton from "./ExportOrdersButton";
+/* ─── Staff directory (interactive table) ────────────────── */
+import StaffSection from "./components/StaffSection";
 /* ─── Tab definitions ────────────────────────────────────── */
 const TABS: ManagerTab[] = [
   { key: "overview",  label: "Overview",        icon: LayoutDashboard },
   { key: "catalog",   label: "Menu & Catalog",  icon: UtensilsCrossed },
   { key: "payroll",   label: "Payroll",         icon: DollarSign },
   { key: "hiring",    label: "Hiring",          icon: Users },
+  { key: "team",      label: "Team",            icon: UsersRound },
   { key: "queue",     label: "Queue Monitor",   icon: MonitorPlay },
   { key: "parcels",   label: "Parcel Board",    icon: Package },
 ];
@@ -119,6 +125,10 @@ export default function ManagerDashboard() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 pb-28 md:pb-8">
         {activeTab === "overview" && (
           <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-stone-200">Overview</h2>
+              <ExportOrdersButton />
+            </div>
             <DashboardOverhaul />
             <CrmInsights />
             <ReceiptRoll />
@@ -130,6 +140,8 @@ export default function ManagerDashboard() {
         {activeTab === "payroll" && <PayrollSection />}
 
         {activeTab === "hiring" && <HiringViewer />}
+
+        {activeTab === "team" && <StaffSection />}
 
         {activeTab === "queue" && <QueueMonitor onBack={() => setActiveTab("overview")} />}
 

@@ -1,24 +1,41 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
-import { supabase } from '@/lib/supabase';
 import { useOpsSession } from '@/components/OpsGate';
 import { toUserSafeMessage } from '@/lib/errorCatalog';
 import { fetchOps } from '@/utils/ops-api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface ShiftEvent {
+interface RawShift {
+  id: string;
+  user_id: string;
+  employee_name: string;
+  start_time: string;
+  end_time: string;
+  updated_at: string | null;
+}
+
+interface EmployeeInShift {
+  shiftId: string;
+  userId: string;
+  name: string;
+  updatedAt: string | null;
+}
+
+interface GroupedShiftEvent {
   id: string;
   title: string;
   start: string;
   end: string;
+  backgroundColor: string;
+  borderColor: string;
+  textColor: string;
   extendedProps: {
-    userId: string;
-    updatedAt: string | null;
+    employees: EmployeeInShift[];
   };
 }
 
@@ -34,6 +51,68 @@ type ToastState = { msg: string; type: 'success' | 'error' } | null;
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const MANAGER_ROLES = ['manager', 'admin'];
+const MAX_VISIBLE_PILLS = 3;
+
+const PILL_COLORS = [
+  'bg-blue-100 text-blue-800',
+  'bg-emerald-100 text-emerald-800',
+  'bg-purple-100 text-purple-800',
+  'bg-amber-100 text-amber-800',
+  'bg-rose-100 text-rose-800',
+  'bg-cyan-100 text-cyan-800',
+  'bg-indigo-100 text-indigo-800',
+  'bg-orange-100 text-orange-800',
+];
+
+// ─── Utilities ───────────────────────────────────────────────────────────────
+
+function getInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join('');
+}
+
+function getEmployeeColor(userId: string): string {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = (hash << 5) - hash + userId.charCodeAt(i);
+    hash |= 0;
+  }
+  return PILL_COLORS[Math.abs(hash) % PILL_COLORS.length];
+}
+
+/** Group individual shift rows by matching (start, end) into single calendar events */
+function groupShiftsBySlot(rawShifts: RawShift[]): GroupedShiftEvent[] {
+  const groups = new Map<string, RawShift[]>();
+  for (const shift of rawShifts) {
+    const key = `${shift.start_time}|${shift.end_time}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(shift);
+  }
+
+  return Array.from(groups.entries()).map(([, shifts]) => {
+    const employees: EmployeeInShift[] = shifts.map((s) => ({
+      shiftId: s.id,
+      userId: s.user_id,
+      name: s.employee_name || 'Unknown',
+      updatedAt: s.updated_at,
+    }));
+
+    return {
+      id: shifts.map((s) => s.id).sort().join('|'),
+      title: employees.map((e) => e.name).join(', '),
+      start: shifts[0].start_time,
+      end: shifts[0].end_time,
+      backgroundColor: '#f8fafc',
+      borderColor: '#3b82f6',
+      textColor: '#1e293b',
+      extendedProps: { employees },
+    };
+  });
+}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -42,22 +121,33 @@ export default function AdminCalendar() {
   const isManager = MANAGER_ROLES.includes(sessionStaff.role);
 
   // ── Data state ───────────────────────────────────────────────────────────
-  const [events, setEvents] = useState<ShiftEvent[]>([]);
+  const [rawShifts, setRawShifts] = useState<RawShift[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // ── Derived: grouped events for FullCalendar ───────────────────────────
+  const events = useMemo(() => groupShiftsBySlot(rawShifts), [rawShifts]);
+
   // ── Modal state ──────────────────────────────────────────────────────────
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'delete'>('create');
+  const [modalMode, setModalMode] = useState<'create' | 'manage'>('create');
   const [selectedRange, setSelectedRange] = useState({ start: '', end: '' });
-  const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
-  const [selectedUser, setSelectedUser] = useState('');
+  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
+  const [selectedGroup, setSelectedGroup] = useState<EmployeeInShift[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // ── Tooltip state ────────────────────────────────────────────────────────
+  const [tooltip, setTooltip] = useState<{
+    x: number;
+    y: number;
+    employees: EmployeeInShift[];
+  } | null>(null);
 
   // ── Toast state ──────────────────────────────────────────────────────────
   const [toast, setToast] = useState<ToastState>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventDropLockRef = useRef(false);
 
   // ── Toast helper ─────────────────────────────────────────────────────────
 
@@ -78,13 +168,14 @@ export default function AdminCalendar() {
         return;
       }
       const { shifts } = await res.json();
-      setEvents(
+      setRawShifts(
         (shifts ?? []).map((s: Record<string, string | null>) => ({
-          id: s.id,
-          title: s.employee_name ?? 'Unknown',
-          start: s.start_time,
-          end: s.end_time,
-          extendedProps: { userId: s.user_id, updatedAt: s.updated_at },
+          id: s.id as string,
+          user_id: s.user_id as string,
+          employee_name: (s.employee_name ?? 'Unknown') as string,
+          start_time: s.start_time as string,
+          end_time: s.end_time as string,
+          updated_at: s.updated_at,
         })),
       );
       setFetchError(null);
@@ -96,12 +187,15 @@ export default function AdminCalendar() {
   const fetchStaff = useCallback(async () => {
     // Fetch ALL staff for the dropdown (not filtered by is_working — managers
     // schedule people who aren't currently on the clock)
-    const { data, error } = await supabase
-      .from('staff_directory_safe')
-      .select('id, name, full_name, role');
-
-    if (!error && data) setStaff(data as StaffMember[]);
-  }, []);
+    try {
+      const res = await fetchOps('/manage-schedule?type=staff', { method: 'GET' }, token);
+      if (!res.ok) return;
+      const { staff } = await res.json();
+      if (staff) setStaff(staff as StaffMember[]);
+    } catch {
+      // Silent — staff dropdown just stays empty
+    }
+  }, [token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +220,17 @@ export default function AdminCalendar() {
     return () => window.removeEventListener('keydown', handler);
   }, [isModalOpen]);
 
+  // ── Multi-select toggle ──────────────────────────────────────────────────
+
+  const toggleUser = useCallback((userId: string) => {
+    setSelectedUsers((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }, []);
+
   // ── Calendar handlers (manager-only at prop level + runtime guard) ───────
 
   const handleDateSelect = useCallback(
@@ -133,7 +238,7 @@ export default function AdminCalendar() {
       if (!isManager) return;
       setSelectedRange({ start: info.startStr, end: info.endStr });
       setModalMode('create');
-      setSelectedUser('');
+      setSelectedUsers(new Set());
       setIsModalOpen(true);
       info.view.calendar.unselect();
     },
@@ -141,10 +246,11 @@ export default function AdminCalendar() {
   );
 
   const handleEventClick = useCallback(
-    (info: { event: { id: string } }) => {
+    (info: { event: { extendedProps: Record<string, unknown> } }) => {
       if (!isManager) return;
-      setSelectedShiftId(info.event.id);
-      setModalMode('delete');
+      const employees = info.event.extendedProps.employees as EmployeeInShift[];
+      setSelectedGroup([...employees]);
+      setModalMode('manage');
       setIsModalOpen(true);
     },
     [isManager],
@@ -152,26 +258,36 @@ export default function AdminCalendar() {
 
   const handleEventDrop = useCallback(
     async (info: {
-      event: { id: string; startStr: string; endStr: string; extendedProps: Record<string, unknown> };
+      event: {
+        id: string;
+        startStr: string;
+        endStr: string;
+        extendedProps: Record<string, unknown>;
+      };
       revert: () => void;
     }) => {
       if (!isManager) {
         info.revert();
         return;
       }
+      if (eventDropLockRef.current) {
+        info.revert();
+        return;
+      }
+      eventDropLockRef.current = true;
 
       const { event, revert } = info;
-      const prevUpdatedAt = event.extendedProps.updatedAt as string | null;
+      const employees = event.extendedProps.employees as EmployeeInShift[];
+      const shiftIds = employees.map((e) => e.shiftId);
 
       try {
         const res = await fetchOps('/manage-schedule', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            id: event.id,
+            shift_ids: shiftIds,
             start_time: event.startStr,
             end_time: event.endStr,
-            updated_at: prevUpdatedAt,
           }),
         }, token);
 
@@ -192,6 +308,8 @@ export default function AdminCalendar() {
         revert();
         await fetchShifts();
         return;
+      } finally {
+        eventDropLockRef.current = false;
       }
 
       await fetchShifts();
@@ -203,13 +321,12 @@ export default function AdminCalendar() {
   // ── Modal submissions ────────────────────────────────────────────────────
 
   const handleCreateShift = useCallback(async () => {
-    if (!selectedUser) {
-      showToast('Please select an employee.', 'error');
+    if (selectedUsers.size === 0) {
+      showToast('Please select at least one employee.', 'error');
       return;
     }
 
-    const employee = staff.find((s) => s.id === selectedUser);
-    if (!employee) return;
+    const userIds = Array.from(selectedUsers);
 
     setSubmitting(true);
     try {
@@ -217,8 +334,7 @@ export default function AdminCalendar() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: employee.id,
-          role_id: employee.role,
+          user_ids: userIds,
           start_time: selectedRange.start,
           end_time: selectedRange.end,
           location_id: 'brewhub_main',
@@ -228,50 +344,143 @@ export default function AdminCalendar() {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         showToast(
-          toUserSafeMessage(body.error || res.statusText, 'Failed to create shift — may overlap an existing one.'),
+          toUserSafeMessage(body.error || res.statusText, 'Failed to create shift(s) — may overlap existing ones.'),
           'error',
         );
         return;
       }
     } catch {
-      showToast('Network error creating shift.', 'error');
+      showToast('Network error creating shift(s).', 'error');
       return;
     } finally {
       setSubmitting(false);
     }
 
     setIsModalOpen(false);
-    showToast('Shift created', 'success');
+    const count = selectedUsers.size;
+    showToast(`${count} shift${count !== 1 ? 's' : ''} created`, 'success');
     await fetchShifts();
-  }, [selectedUser, staff, selectedRange, showToast, fetchShifts, token]);
+  }, [selectedUsers, selectedRange, showToast, fetchShifts, token]);
 
-  const handleDeleteShift = useCallback(async () => {
-    if (!selectedShiftId) return;
+  const handleRemoveFromGroup = useCallback(
+    async (shiftId: string) => {
+      setSubmitting(true);
+      try {
+        const res = await fetchOps('/manage-schedule', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: shiftId }),
+        }, token);
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          showToast(
+            toUserSafeMessage(body.error || res.statusText, 'Failed to remove employee.'),
+            'error',
+          );
+          return;
+        }
+      } catch {
+        showToast('Network error removing employee.', 'error');
+        return;
+      } finally {
+        setSubmitting(false);
+      }
+
+      const remaining = selectedGroup.filter((e) => e.shiftId !== shiftId);
+      setSelectedGroup(remaining);
+      showToast('Employee removed from shift', 'success');
+      await fetchShifts();
+
+      if (remaining.length === 0) {
+        setIsModalOpen(false);
+      }
+    },
+    [showToast, fetchShifts, token, selectedGroup],
+  );
+
+  const handleDeleteAllInGroup = useCallback(async () => {
+    const ids = selectedGroup.map((e) => e.shiftId);
+    if (ids.length === 0) return;
 
     setSubmitting(true);
     try {
       const res = await fetchOps('/manage-schedule', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedShiftId }),
+        body: JSON.stringify({ ids }),
       }, token);
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        showToast(toUserSafeMessage(body.error || res.statusText, 'Failed to delete shift.'), 'error');
+        showToast(
+          toUserSafeMessage(body.error || res.statusText, 'Failed to delete shifts.'),
+          'error',
+        );
         return;
       }
     } catch {
-      showToast('Network error deleting shift.', 'error');
+      showToast('Network error deleting shifts.', 'error');
       return;
     } finally {
       setSubmitting(false);
     }
 
     setIsModalOpen(false);
-    showToast('Shift deleted', 'success');
+    showToast('All shifts deleted', 'success');
     await fetchShifts();
-  }, [selectedShiftId, showToast, fetchShifts, token]);
+  }, [selectedGroup, showToast, fetchShifts, token]);
+
+  // ── Tooltip handlers ─────────────────────────────────────────────────────
+
+  const handleEventMouseEnter = useCallback(
+    (info: { el: HTMLElement; event: { extendedProps: Record<string, unknown> } }) => {
+      const employees = info.event.extendedProps.employees as EmployeeInShift[];
+      if (employees.length <= 1) return; // No tooltip needed for single employee
+      const rect = info.el.getBoundingClientRect();
+      const tooltipWidth = 220;
+      const x =
+        rect.right + 8 + tooltipWidth > window.innerWidth
+          ? rect.left - tooltipWidth - 8
+          : rect.right + 8;
+      setTooltip({ x, y: rect.top, employees });
+    },
+    [],
+  );
+
+  const handleEventMouseLeave = useCallback(() => {
+    setTooltip(null);
+  }, []);
+
+  // ── Custom event content renderer ────────────────────────────────────────
+
+  const renderEventContent = useCallback(
+    (arg: { event: { extendedProps: Record<string, unknown> } }) => {
+      const employees = arg.event.extendedProps.employees as EmployeeInShift[];
+      const visible = employees.slice(0, MAX_VISIBLE_PILLS);
+      const overflow = employees.length - MAX_VISIBLE_PILLS;
+
+      return (
+        <div className="flex flex-wrap gap-1 p-1 overflow-hidden w-full h-full items-start">
+          {visible.map((emp) => (
+            <span
+              key={emp.shiftId}
+              className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold leading-tight whitespace-nowrap ${getEmployeeColor(emp.userId)}`}
+              title={emp.name}
+            >
+              {employees.length === 1 ? emp.name : getInitials(emp.name)}
+            </span>
+          ))}
+          {overflow > 0 && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-gray-200 text-gray-600">
+              +{overflow}
+            </span>
+          )}
+        </div>
+      );
+    },
+    [],
+  );
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -319,6 +528,7 @@ export default function AdminCalendar() {
         .fc .fc-timegrid-col.fc-day-today {
           background-color: rgba(255, 248, 220, 0.4);
         }
+        .fc-event-main { padding: 0 !important; }
         ${
           !isManager
             ? `
@@ -337,6 +547,7 @@ export default function AdminCalendar() {
           initialView="timeGridWeek"
           timeZone="America/New_York"
           events={events}
+          eventContent={renderEventContent}
           /* ── RBAC: conditionally enable interaction ── */
           editable={isManager}
           selectable={isManager}
@@ -349,6 +560,9 @@ export default function AdminCalendar() {
           eventClick={isManager ? handleEventClick : undefined}
           eventDrop={isManager ? handleEventDrop : undefined}
           eventResize={isManager ? handleEventDrop : undefined}
+          /* ── Tooltip peek on hover ── */
+          eventMouseEnter={handleEventMouseEnter}
+          eventMouseLeave={handleEventMouseLeave}
           headerToolbar={{
             left: 'prev,next today',
             center: 'title',
@@ -361,6 +575,28 @@ export default function AdminCalendar() {
         />
       </div>
 
+      {/* ── Hover tooltip ── */}
+      {tooltip && (
+        <div
+          className="fixed z-[60] bg-gray-900 text-white rounded-lg shadow-xl py-2.5 px-3.5 pointer-events-none"
+          style={{ top: tooltip.y, left: tooltip.x, minWidth: 160 }}
+        >
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+            Staff on Shift
+          </div>
+          {tooltip.employees.map((emp) => (
+            <div key={emp.shiftId} className="flex items-center gap-2 py-0.5">
+              <span
+                className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold ${getEmployeeColor(emp.userId)}`}
+              >
+                {getInitials(emp.name)}
+              </span>
+              <span className="text-sm">{emp.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── Modal (managers only — defense-in-depth) ── */}
       {isModalOpen && isManager && (
         <div
@@ -371,35 +607,75 @@ export default function AdminCalendar() {
           aria-label={modalMode === 'create' ? 'Assign New Shift' : 'Manage Shift'}
         >
           <div
-            className="bg-white p-6 rounded-lg shadow-xl w-96 border border-gray-300"
+            className="bg-white p-6 rounded-lg shadow-xl w-[420px] max-w-[95vw] border border-gray-300"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-4">
               {modalMode === 'create' ? 'Assign New Shift' : 'Manage Shift'}
             </h2>
 
+            {/* ── Create mode: multi-select checkboxes ── */}
             {modalMode === 'create' && (
               <div className="mb-6">
-                <label
-                  htmlFor="shift-staff-select"
-                  className="block text-sm font-semibold text-gray-700 mb-2"
-                >
-                  Select Employee
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Select Employees
                 </label>
-                <select
-                  id="shift-staff-select"
-                  className="w-full border border-gray-300 p-3 rounded-md text-lg"
-                  value={selectedUser}
-                  onChange={(e) => setSelectedUser(e.target.value)}
-                  disabled={submitting}
-                >
-                  <option value="">-- Choose Staff --</option>
+                <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-100">
                   {staff.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.full_name || s.name} ({s.role})
-                    </option>
+                    <label
+                      key={s.id}
+                      className="flex items-center gap-3 px-3 py-2.5 hover:bg-blue-50 cursor-pointer transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedUsers.has(s.id)}
+                        onChange={() => toggleUser(s.id)}
+                        disabled={submitting}
+                        className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-medium text-gray-800">
+                        {s.full_name || s.name}
+                      </span>
+                      <span className="text-xs text-gray-500 ml-auto">{s.role}</span>
+                    </label>
                   ))}
-                </select>
+                </div>
+                {selectedUsers.size > 0 && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    {selectedUsers.size} employee{selectedUsers.size !== 1 ? 's' : ''} selected
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* ── Manage mode: employee list with remove buttons ── */}
+            {modalMode === 'manage' && (
+              <div className="mb-4">
+                <p className="text-sm text-gray-600 mb-3">Employees on this shift:</p>
+                <div className="space-y-2">
+                  {selectedGroup.map((emp) => (
+                    <div
+                      key={emp.shiftId}
+                      className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-md"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold ${getEmployeeColor(emp.userId)}`}
+                        >
+                          {getInitials(emp.name)}
+                        </span>
+                        <span className="text-sm font-medium">{emp.name}</span>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveFromGroup(emp.shiftId)}
+                        disabled={submitting}
+                        className="text-red-500 hover:text-red-700 text-xs font-semibold disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -415,18 +691,20 @@ export default function AdminCalendar() {
               {modalMode === 'create' ? (
                 <button
                   onClick={handleCreateShift}
-                  disabled={submitting || !selectedUser}
+                  disabled={submitting || selectedUsers.size === 0}
                   className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-bold disabled:opacity-50"
                 >
-                  {submitting ? 'Creating…' : 'Create Shift'}
+                  {submitting
+                    ? 'Creating…'
+                    : `Confirm${selectedUsers.size > 1 ? ` (${selectedUsers.size})` : ''}`}
                 </button>
               ) : (
                 <button
-                  onClick={handleDeleteShift}
-                  disabled={submitting}
+                  onClick={handleDeleteAllInGroup}
+                  disabled={submitting || selectedGroup.length === 0}
                   className="px-6 py-2 bg-red-600 text-white rounded hover:bg-red-700 font-bold disabled:opacity-50"
                 >
-                  {submitting ? 'Deleting…' : 'Delete Shift'}
+                  {submitting ? 'Deleting…' : `Delete All (${selectedGroup.length})`}
                 </button>
               )}
             </div>

@@ -87,7 +87,10 @@ exports.handler = async (event) => {
   if (new Date(storedState.expires_at) < new Date()) {
     console.error('[OAUTH] State token expired');
     // Clean up expired state
-    await supabase.from('shop_settings').delete().eq('id', 'oauth_state');
+    const { error: deleteExpiredErr } = await supabase.from('shop_settings').delete().eq('id', 'oauth_state');
+    if (deleteExpiredErr) {
+      console.error('[OAUTH] Failed to delete expired state:', deleteExpiredErr.message);
+    }
     return {
       statusCode: 400,
       body: JSON.stringify({ error: "Authorization expired. Please restart the flow." })
@@ -104,7 +107,10 @@ exports.handler = async (event) => {
   }
 
   // State is valid — consume it (one-time use)
-  await supabase.from('shop_settings').delete().eq('id', 'oauth_state');
+  const { error: deleteStateErr } = await supabase.from('shop_settings').delete().eq('id', 'oauth_state');
+  if (deleteStateErr) {
+    console.error('[OAUTH] Failed to delete consumed state token:', deleteStateErr.message);
+  }
 
   try {
     // Initialize Square client for production (per-request)

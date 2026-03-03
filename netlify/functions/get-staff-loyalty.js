@@ -97,11 +97,15 @@ exports.handler = async (event) => {
     // ── Fetch unredeemed vouchers (if customer found) ─────────
     let vouchers = [];
     if (customer?.id) {
-      const { data: vData } = await supabase
+      const { data: vData, error: vErr } = await supabase
         .from('vouchers')
         .select('id, code')
         .eq('user_id', customer.id)
         .eq('is_redeemed', false);
+      if (vErr) {
+        console.error('[GET-STAFF-LOYALTY] Voucher query failed:', vErr.message);
+        return { statusCode: 502, headers: corsHeaders, body: JSON.stringify({ error: 'Voucher lookup failed' }) };
+      }
       vouchers = (vData || []).map(v => ({ id: v.id, masked_code: maskCode(v.code) }));
     }
 

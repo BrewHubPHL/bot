@@ -109,11 +109,16 @@ async function confirmPayment({ supabase, orderId, paymentId, paidAmountCents, c
   }
 
   // 3b. Payment ID reuse on another order?
-  const { data: existingPayment } = await supabase
+  const { data: existingPayment, error: paymentLookupError } = await supabase
     .from('orders')
     .select('id')
     .eq('payment_id', paymentId)
-    .single();
+    .maybeSingle();
+
+  if (paymentLookupError) {
+    console.error(`${tag} Payment reuse check failed:`, paymentLookupError.message);
+    return { ok: false, reason: 'db_error' };
+  }
 
   if (existingPayment) {
     console.error(`${tag} Payment ${paymentId} already used on order ${existingPayment.id}!`);
@@ -126,10 +131,13 @@ async function confirmPayment({ supabase, orderId, paymentId, paidAmountCents, c
 
   if (Math.abs(paidAmountCents - expectedAmount) > AMOUNT_TOLERANCE_CENTS) {
     console.error(`${tag} Amount mismatch: expected ${expectedAmount}, got ${paidAmountCents}`);
-    await supabase.from('orders').update({
+    const { error: mismatchUpdateError } = await supabase.from('orders').update({
       status: 'amount_mismatch',
       notes: `Paid: ${paidAmountCents}, Expected: ${expectedAmount}`
     }).eq('id', orderId);
+    if (mismatchUpdateError) {
+      console.error(`${tag} Failed to flag amount_mismatch on order ${orderId}:`, mismatchUpdateError.message);
+    }
     return { ok: false, reason: 'amount_mismatch' };
   }
 
@@ -181,13 +189,15 @@ async function confirmPayment({ supabase, orderId, paymentId, paidAmountCents, c
 
   // ── 5. Receipt generation (non-fatal) ─────────────────────
   try {
-    const { data: fullOrder } = await supabase
+    const { data: fullOrder, error: fullOrderError } = await supabase
       .from('orders')
       .select('*, coffee_orders(drink_name, price)')
       .eq('id', orderId)
       .single();
 
-    if (fullOrder) {
+    if (fullOrderError) {
+      console.error(`${tag} Receipt: failed to fetch order ${orderId}:`, fullOrderError.message);
+    } else if (fullOrder) {
       const lineItems = fullOrder.coffee_orders || [];
       delete fullOrder.coffee_orders;
       const receiptText = generateReceiptString(fullOrder, lineItems);
@@ -227,7 +237,7 @@ async function confirmPayment({ supabase, orderId, paymentId, paidAmountCents, c
 
         // Store only the cryptographic hash + a masked preview; do not persist plaintext
         const masked = '****' + newVoucherCode.slice(-4);
-        await supabase.from('vouchers').insert([{
+        const { error: voucherInsertError } = await supabase.from('vouchers').insert([{
           user_id: userId,
           code_hash: codeHash,
           masked_code: masked,
@@ -236,7 +246,11 @@ async function confirmPayment({ supabase, orderId, paymentId, paidAmountCents, c
           created_at: new Date().toISOString()
         }]);
 
-        console.log(`${tag} Voucher issued ${masked} → user ${userId}`);
+        if (voucherInsertError) {
+          console.error(`${tag} Failed to insert voucher for user ${userId}:`, voucherInsertError.message);
+        } else {
+          console.log(`${tag} Voucher issued ${masked} → user ${userId}`);
+        }
       }
     }
   } catch (loyaltyErr) {

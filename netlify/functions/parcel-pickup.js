@@ -270,7 +270,7 @@ exports.handler = async (event) => {
 /** Log a pickup attempt to the immutable audit table */
 async function logPickupAttempt(parcel, type, staffUser, collectorName, idLast4, reason, ip) {
   try {
-    await supabase.from('parcel_pickup_log').insert({
+    const { error: insertErr } = await supabase.from('parcel_pickup_log').insert({
       parcel_id: parcel.id,
       tracking_number: parcel.tracking_number,
       attempt_type: type,
@@ -281,8 +281,11 @@ async function logPickupAttempt(parcel, type, staffUser, collectorName, idLast4,
       value_tier: parcel.estimated_value_tier || 'standard',
       ip_address: hashIP(String(ip || '')),
     });
+    if (insertErr) {
+      console.error('[PICKUP] Audit log insert failed (Supabase):', insertErr.message);
+    }
   } catch (e) {
-    console.error('[PICKUP] Audit log insert failed:', e?.message);
+    console.error('[PICKUP] Audit log insert exception:', e?.message);
   }
 }
 

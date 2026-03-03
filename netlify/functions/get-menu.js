@@ -103,13 +103,17 @@ exports.handler = async (event) => {
 
   try {
     // Check if cafe is open/enabled
-    const { data: settingsData } = await supabase
+    const { data: settingsData, error: settingsError } = await supabase
       .from('site_settings')
       .select('value')
       .eq('key', 'cafe_enabled')
       .single();
 
-    const cafeEnabled = settingsData?.value !== false;
+    // On DB error, treat cafe as CLOSED to prevent accepting orders during outages
+    if (settingsError) {
+      console.error('[GET-MENU] Failed to fetch cafe_enabled setting:', settingsError.message);
+    }
+    const cafeEnabled = settingsError ? false : (settingsData?.value !== false);
 
     // Fetch active menu items
     const { data: products, error } = await supabase

@@ -45,6 +45,7 @@ export default function CareersPage() {
   const [success, setSuccess] = useState(false);
   const loadTimeRef = useRef(Date.now());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const submittingRef = useRef(false);
 
   /* Capture mount timestamp for timing-based bot defense */
   useEffect(() => {
@@ -90,6 +91,8 @@ export default function CareersPage() {
     if (!form.vibe_check.trim())
       return setError("Please answer the quick check question.");
 
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
 
     try {
@@ -100,6 +103,7 @@ export default function CareersPage() {
         /* ── FIX 1: strict client-side size guard before any network call ── */
         if (resumeFile.size > MAX_FILE_SIZE) {
           setLoading(false);
+          submittingRef.current = false;
           alert("File is too large. Please upload a PDF under 5 MB.");
           return;
         }
@@ -175,6 +179,7 @@ export default function CareersPage() {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     }
     setLoading(false);
+    submittingRef.current = false;
   }
 
   return (

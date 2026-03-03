@@ -227,6 +227,9 @@ async function handleRefund(body, supabase) {
     return { statusCode: 500, body: 'Idempotency check failed' };
   }
 
+  // Track whether we acquired the refund lock so we can release it in `finally`
+  let refundLockAcquired = false;
+
   try {
     // 1. Find the original order (include amounts for proportional loyalty revocation)
     const { data: order, error: findError } = await supabase
@@ -242,17 +245,28 @@ async function handleRefund(body, supabase) {
 
     // 2. Create a "Refund Lock" to prevent concurrent race conditions
     // This prevents a user from redeeming a voucher WHILE the refund is processing.
-    await supabase.from('refund_locks').upsert({ 
+    const { error: lockError } = await supabase.from('refund_locks').upsert({ 
       payment_id: paymentId, 
       user_id: order.user_id,
       locked_at: new Date().toISOString()
     }, { onConflict: 'payment_id' });
 
+    if (lockError) {
+      console.error('[REFUND] Failed to acquire refund lock:', lockError.message);
+      throw new Error(`Refund lock failed: ${lockError.message}`);
+    }
+    refundLockAcquired = true;
+
     // 3. Mark order as refunded
-    await supabase
+    const { error: refundUpdateError } = await supabase
       .from('orders')
       .update({ status: 'refunded' })
       .eq('id', order.id);
+
+    if (refundUpdateError) {
+      console.error(`[REFUND] Failed to mark order ${order.id} as refunded:`, refundUpdateError.message);
+      throw new Error(`Database error: ${refundUpdateError.message}`);
+    }
     
     console.log(`[REFUND] Order ${order.id} marked as refunded.`);
 
@@ -279,7 +293,7 @@ async function handleRefund(body, supabase) {
        }
 
        // 5. Delete the most recent unused voucher (The "Infinite Coffee" prevention)
-       const { data: vouchers } = await supabase
+       const { data: vouchers, error: voucherFetchError } = await supabase
           .from('vouchers')
           .select('id, code')
           .eq('user_id', order.user_id)
@@ -287,10 +301,16 @@ async function handleRefund(body, supabase) {
           .order('created_at', { ascending: false })
           .limit(1);
 
-       if (vouchers && vouchers.length > 0) {
+       if (voucherFetchError) {
+         console.error('[REFUND] Failed to query vouchers:', voucherFetchError.message);
+       } else if (vouchers && vouchers.length > 0) {
           const voucher = vouchers[0];
-          await supabase.from('vouchers').delete().eq('id', voucher.id);
-          console.log(`[REFUND] Revoked farmed voucher: ${voucher.code}`);
+          const { error: voucherDeleteError } = await supabase.from('vouchers').delete().eq('id', voucher.id);
+          if (voucherDeleteError) {
+            console.error(`[REFUND] Failed to revoke voucher ${voucher.id}:`, voucherDeleteError.message);
+          } else {
+            console.log(`[REFUND] Revoked farmed voucher: ${voucher.code}`);
+          }
        }
     }
 
@@ -307,15 +327,21 @@ async function handleRefund(body, supabase) {
         console.log('[REFUND] Inventory restored:', JSON.stringify(restoreResult));
       }
     }
-
-    // 7. Release Lock
-    await supabase.from('refund_locks').delete().eq('payment_id', paymentId);
     
     return { statusCode: 200, body: "Refund processed: Points revoked, inventory restored." };
 
   } catch (err) {
     console.error('[REFUND ERROR]', err?.message);
     return { statusCode: 500, body: "Refund processing failed" };
+  } finally {
+    // 7. ALWAYS release refund lock — even if processing threw an error.
+    // A permanently locked order would block all future refund/voucher ops.
+    if (refundLockAcquired) {
+      const { error: unlockError } = await supabase.from('refund_locks').delete().eq('payment_id', paymentId);
+      if (unlockError) {
+        console.error(`[REFUND] CRITICAL: Failed to release refund lock for ${paymentId}:`, unlockError.message);
+      }
+    }
   }
 }
 
@@ -457,17 +483,17 @@ async function handleOfflineDecline(body, supabase) {
 
   // If we have a linked order, mark it as failed
   if (orderId && orderId !== 'undefined') {
-    try {
-      await supabase
-        .from('orders')
-        .update({
-          status: 'cancelled',
-          notes: `Offline batch decline: ${declineReason} (${cardBrand || '?'} ****${cardLast4 || '????'})`,
-        })
-        .eq('id', orderId)
-        .eq('status', 'pending');
-    } catch (orderErr) {
-      console.error('[GHOST-REVENUE] Failed to cancel declined order:', orderErr.message);
+    const { error: cancelErr } = await supabase
+      .from('orders')
+      .update({
+        status: 'cancelled',
+        notes: `Offline batch decline: ${declineReason} (${cardBrand || '?'} ****${cardLast4 || '????'})`,
+      })
+      .eq('id', orderId)
+      .eq('status', 'pending');
+
+    if (cancelErr) {
+      console.error('[GHOST-REVENUE] Failed to cancel declined order:', cancelErr.message);
     }
   }
 

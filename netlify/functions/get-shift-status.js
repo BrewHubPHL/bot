@@ -108,7 +108,7 @@ exports.handler = async (event) => {
 
     // If clocked in, fetch active shift details for the response contract
     if (isClockedIn) {
-      const { data: shiftData } = await withSourceComment(
+      const { data: shiftData, error: shiftErr } = await withSourceComment(
         supabase
           .from('time_logs')
           .select('id, clock_in')
@@ -119,6 +119,14 @@ exports.handler = async (event) => {
           .limit(1),
         'polling-staff-shift-detail'
       );
+      if (shiftErr) {
+        console.error('[GET-SHIFT-STATUS] time_logs query failed:', shiftErr.message);
+        return {
+          statusCode: 502,
+          headers: corsHeaders,
+          body: JSON.stringify({ error: 'Failed to fetch shift details' }),
+        };
+      }
       if (shiftData?.[0]) {
         shiftId = shiftData[0].id;
         clockIn = shiftData[0].clock_in;

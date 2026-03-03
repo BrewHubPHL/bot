@@ -20,6 +20,7 @@ import { Minus, Plus, Trash2 } from "lucide-react";
 interface Modifier {
   name: string;
   price_cents: number;
+  quantity: number;
 }
 
 interface CartItemData {
@@ -54,7 +55,7 @@ export default function SwipeCartItem({
   const startRef = useRef<{ x: number; y: number; locked: boolean } | null>(null);
 
   const lineTotal =
-    (item.price_cents + item.modifiers.reduce((s, m) => s + m.price_cents, 0)) * item.quantity;
+    (item.price_cents + item.modifiers.reduce((s, m) => s + m.price_cents * m.quantity, 0)) * item.quantity;
 
   /* ---- Touch handlers ---- */
   const onTouchStart = useCallback(
@@ -158,7 +159,7 @@ export default function SwipeCartItem({
             <p className="font-semibold text-sm text-stone-200">{item.name}</p>
             {item.modifiers.length > 0 && (
               <p className="text-xs text-amber-500/70 mt-0.5">
-                {item.modifiers.map((m) => m.name).join(", ")}
+                {item.modifiers.map((m) => m.quantity > 1 ? `${m.name} (x${m.quantity})` : m.name).join(", ")}
               </p>
             )}
           </div>

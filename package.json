@@ -9,6 +9,10 @@
     "start": "next start",
     "lint": "eslint",
     "test": "jest",
+    "test:unit": "vitest run -c tests/vitest.config.ts",
+    "test:functions": "jest --config tests/jest.config.functions.js",
+    "test:e2e": "npx playwright test",
+    "test:all": "npm run test:unit && npm run test:functions && npm run test:e2e",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "dev:legacy": "echo 'local-server.js removed — use netlify dev'"

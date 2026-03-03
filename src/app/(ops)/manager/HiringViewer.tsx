@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useOpsSession } from "@/components/OpsGate";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
@@ -80,6 +80,8 @@ export default function HiringViewer() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const statusLockRef = useRef(false);
 
   const fetchApplicants = useCallback(async () => {
     setLoading(true);
@@ -110,6 +112,10 @@ export default function HiringViewer() {
 
   /* ── Status update ─────────────────────────────────────── */
   async function updateStatus(id: string, newStatus: string) {
+    if (statusLockRef.current) return;
+    statusLockRef.current = true;
+    setUpdatingId(id);
+
     const prevApplicants = [...applicants];
     let hadAuthzError = false;
 
@@ -143,6 +149,9 @@ export default function HiringViewer() {
         alert(toUserSafeMessageFromUnknown(err, "Unable to update application status right now."));
       }
       setApplicants(prevApplicants);
+    } finally {
+      statusLockRef.current = false;
+      setUpdatingId(null);
     }
   }
 
@@ -322,7 +331,8 @@ export default function HiringViewer() {
                         <button
                           key={s}
                           onClick={() => updateStatus(a.id, s)}
-                          className={`px-3 py-1 rounded-full text-xs font-medium border transition hover:opacity-80 ${
+                          disabled={updatingId === a.id}
+                          className={`px-3 py-1 rounded-full text-xs font-medium border transition hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed ${
                             STATUS_STYLE[s]
                           }`}
                         >

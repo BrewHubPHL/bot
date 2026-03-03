@@ -252,10 +252,14 @@ async function authorize(event, options = {}) {
         }
         // Verify + consume the nonce atomically
         try {
-          const { data: nonceResult } = await getSupabase().rpc('consume_challenge_nonce', {
+          const { data: nonceResult, error: nonceError } = await getSupabase().rpc('consume_challenge_nonce', {
             p_nonce: challengeNonce,
             p_staff_email: email,
           });
+          if (nonceError) {
+            console.error('[AUTH] consume_challenge_nonce RPC failed:', nonceError.message);
+            return { ok: false, response: json(500, { error: 'Challenge verification failed' }) };
+          }
           const row = nonceResult?.[0] || nonceResult;
           if (!row?.valid) {
             console.warn(`[AUTH BLOCKED] Invalid/expired challenge nonce for ${email}`);

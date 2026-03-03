@@ -243,7 +243,7 @@ exports.handler = async (event) => {
 
     // ── Schema 47: Immutable manager override audit log ────
     try {
-      await supabase.from('manager_override_log').insert({
+      const { error: auditErr } = await supabase.from('manager_override_log').insert({
         action_type: 'adjust_hours',
         manager_email: managerEmail,
         manager_staff_id: managerRow.id,
@@ -259,8 +259,11 @@ exports.handler = async (event) => {
         ip_address: hashIP(clientIP),
         challenge_method: 'totp',
       });
+      if (auditErr) {
+        console.error('[UPDATE-HOURS] Override audit log failed (non-fatal, Supabase):', auditErr.message);
+      }
     } catch (auditLogErr) {
-      console.error('[UPDATE-HOURS] Override audit log failed (non-fatal):', auditLogErr?.message || 'unknown');
+      console.error('[UPDATE-HOURS] Override audit log exception (non-fatal):', auditLogErr?.message || 'unknown');
     }
 
     const origin = validateOrigin(event.headers || {});

@@ -39,7 +39,7 @@ async function logSystemError(supabase, params) {
 
   // 1. Write to system_errors table
   try {
-    await supabase.from('system_errors').insert({
+    const { error: insertErr } = await supabase.from('system_errors').insert({
       error_type,
       severity,
       source_function,
@@ -49,8 +49,11 @@ async function logSystemError(supabase, params) {
       error_message: String(error_message).slice(0, 2000),
       context,
     });
+    if (insertErr) {
+      console.error('[SYSTEM-ERRORS] Failed to write to system_errors table:', insertErr.message);
+    }
   } catch (dbErr) {
-    console.error('[SYSTEM-ERRORS] Failed to write to system_errors table:', dbErr?.message);
+    console.error('[SYSTEM-ERRORS] Exception writing to system_errors table:', dbErr?.message);
   }
 
   // 2. Fire Discord webhook for real-time alerting (non-blocking)

@@ -169,6 +169,12 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
   const ordersRef    = useRef(orders);
   ordersRef.current  = orders;
 
+  // KDS double-tap guard: Set of order IDs with in-flight mutations
+  const mutatingIdsRef = useRef<Set<string>>(new Set());
+
+  // Toast timer ref for cleanup on unmount
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Bubble state up to parent whenever any of the three values change
   const onStateChangeRef = useRef(onStateChange);
   onStateChangeRef.current = onStateChange;
@@ -179,8 +185,8 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
   /* ── Toast ──────────────────────────────────────────────────── */
   const showToast = useCallback((msg: string, type: "success" | "error") => {
     setToast({ msg, type });
-    const id = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(id);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
   /* ── Fetch orders ───────────────────────────────────────────── */
@@ -343,6 +349,7 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
       .subscribe();
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       supabase.removeChannel(channel);
     };
   }, [fetchOrders, debouncedFetch]);
@@ -361,6 +368,10 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
 
   /* ── Optimistic status update with rollback ─────────────────── */
   async function updateStatus(id: string, nextStatus: string) {
+    // Double-tap guard: if this order already has an in-flight mutation, bail
+    if (mutatingIdsRef.current.has(id)) return;
+    mutatingIdsRef.current.add(id);
+
     setUpdating(id);
     setError(null);
 
@@ -416,6 +427,7 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
       setTimeout(() => setError(null), 5000);
     } finally {
       setUpdating(null);
+      mutatingIdsRef.current.delete(id);
     }
   }
 

@@ -162,11 +162,14 @@ async function sendSMS(opts) {
       // Twilio says this number opted out at the carrier level
       // Record it in our DB so we never try again
       console.warn(`[SMS] Twilio 21610 (blacklisted): ${maskPhone(phoneE164)} — recording opt-out`);
-      await supabase.rpc('record_sms_opt_out', {
+      const { error: optOutErr } = await supabase.rpc('record_sms_opt_out', {
         p_phone_e164: phoneE164,
         p_source: 'carrier_block',
         p_source_detail: `Twilio error 21610: ${data.message}`,
       });
+      if (optOutErr) {
+        console.error(`[SMS] record_sms_opt_out RPC failed for ${maskPhone(phoneE164)}:`, optOutErr.message);
+      }
       await logDelivery(phoneE164, messageType, sourceFunction, staffEmail, 'blocked_optout', 'twilio_21610');
       return { sent: false, blocked: true, reason: 'carrier_block' };
     }
@@ -187,7 +190,7 @@ async function sendSMS(opts) {
  */
 async function logDelivery(phone, messageType, sourceFunction, staffEmail, status, blockedReason, twilioSid) {
   try {
-    await supabase.from('sms_delivery_log').insert({
+    const { error: insertErr } = await supabase.from('sms_delivery_log').insert({
       phone_e164: phone,
       message_type: messageType || 'unknown',
       twilio_sid: twilioSid || null,
@@ -196,9 +199,12 @@ async function logDelivery(phone, messageType, sourceFunction, staffEmail, statu
       source_function: sourceFunction || 'unknown',
       staff_email: staffEmail || null,
     });
+    if (insertErr) {
+      console.error('[SMS] Delivery log insert failed (Supabase):', insertErr.message);
+    }
   } catch (logErr) {
     // Non-fatal — log attempt shouldn't block sending
-    console.error('[SMS] Delivery log insert failed:', logErr.message);
+    console.error('[SMS] Delivery log insert exception:', logErr.message);
   }
 }
 

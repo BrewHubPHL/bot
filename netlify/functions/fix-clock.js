@@ -168,26 +168,25 @@ exports.handler = async (event) => {
     const clientIP = event.headers['x-nf-client-connection-ip']
       || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
       || 'unknown';
-    try {
-      await supabase.from('manager_override_log').insert({
-        action_type: 'fix_clock',
-        manager_email: managerEmail,
-        manager_staff_id: managerId,
-        target_entity: 'time_logs',
-        target_id: openLog.id,
-        target_employee: employee_email.toLowerCase().trim(),
-        details: {
-          clock_in: openLog.clock_in,
-          corrected_clock_out: clockOutDate.toISOString(),
-          shift_minutes: shiftMinutes,
-          reason: reason.trim(),
-        },
-        device_fingerprint: auth.deviceFingerprint || null,
-        ip_address: clientIP,
-        challenge_method: 'totp',
-      });
-    } catch (auditLogErr) {
-      console.error('[FIX-CLOCK] Override audit log failed (non-fatal):', auditLogErr.message);
+    const { error: overrideLogErr } = await supabase.from('manager_override_log').insert({
+      action_type: 'fix_clock',
+      manager_email: managerEmail,
+      manager_staff_id: managerId,
+      target_entity: 'time_logs',
+      target_id: openLog.id,
+      target_employee: employee_email.toLowerCase().trim(),
+      details: {
+        clock_in: openLog.clock_in,
+        corrected_clock_out: clockOutDate.toISOString(),
+        shift_minutes: shiftMinutes,
+        reason: reason.trim(),
+      },
+      device_fingerprint: auth.deviceFingerprint || null,
+      ip_address: clientIP,
+      challenge_method: 'totp',
+    });
+    if (overrideLogErr) {
+      console.error(`[FIX-CLOCK] Override audit log failed for log ${openLog.id} (non-fatal):`, overrideLogErr.message);
     }
 
     return cors(200, {

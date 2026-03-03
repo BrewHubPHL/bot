@@ -107,28 +107,32 @@ function playClack() {
 function SplitFlapChar({ char, delay = 0 }: { char: string; delay?: number }) {
   const [displayed, setDisplayed] = useState(" ");
   const [flipping, setFlipping] = useState(true);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let step = 0;
     const maxSteps = 6 + Math.floor(Math.random() * 4);
 
-    const timeout = setTimeout(() => {
-      const interval = setInterval(() => {
+    timeoutRef.current = setTimeout(() => {
+      intervalRef.current = setInterval(() => {
         step++;
         if (step >= maxSteps) {
           setDisplayed(char);
           setFlipping(false);
-          clearInterval(interval);
+          if (intervalRef.current) clearInterval(intervalRef.current);
+          intervalRef.current = null;
           return;
         }
         setDisplayed(chars[Math.floor(Math.random() * chars.length)]);
       }, 40);
-
-      return () => clearInterval(interval);
     }, delay);
 
-    return () => clearTimeout(timeout);
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [char, delay]);
 
   return (
@@ -416,8 +420,9 @@ export default function ParcelDashboardPage() {
       setHistory((prev) => [entry, ...prev].slice(0, 100));
       setSessionCount((c) => c + 1);
 
-      // Send success confirmation back to iPhone
-      sendResult({ success: true, parcelId: entry.id });
+      // Send success confirmation back to iPhone (include residentId so
+      // the mobile-scan device can attach it to its /parcel-check-in call)
+      sendResult({ success: true, parcelId: entry.id, residentId: String(found.id), residentName: found.name });
 
       // Clear animation flag after it completes
       setTimeout(() => {

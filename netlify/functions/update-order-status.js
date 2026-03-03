@@ -65,7 +65,7 @@ function generateErrorId() {
 async function logSyncError(source, detail, extra = {}) {
   const errorId = generateErrorId();
   try {
-    await supabase.from('system_sync_logs').insert({
+    const { error: insertErr } = await supabase.from('system_sync_logs').insert({
       source,
       detail: `[${errorId}] ${detail}`,
       severity: extra.severity || 'error',
@@ -73,8 +73,11 @@ async function logSyncError(source, detail, extra = {}) {
       email: extra.email || null,
       sql_state: extra.sqlState || null,
     });
+    if (insertErr) {
+      console.error(`[LOG-SYNC] Failed to write sync log ${errorId} (Supabase):`, insertErr.message);
+    }
   } catch (logErr) {
-    console.error(`[LOG-SYNC] Failed to write sync log ${errorId}:`, logErr.message);
+    console.error(`[LOG-SYNC] Exception writing sync log ${errorId}:`, logErr.message);
   }
   return errorId;
 }
@@ -235,9 +238,11 @@ exports.handler = async (event) => {
       // Generate receipt if cash/comp (may have been missed on the earlier transition)
       if (paymentMethod && ['cash', 'comp'].includes(paymentMethod)) {
         try {
-          const { data: existingReceipt } = await supabase
-            .from('receipt_queue').select('id').eq('order_id', orderId).limit(1).single();
-          if (!existingReceipt) {
+          const { data: existingReceipt, error: receiptCheckErr } = await supabase
+            .from('receipt_queue').select('id').eq('order_id', orderId).limit(1).maybeSingle();
+          if (receiptCheckErr) {
+            console.error('[RECEIPT] Non-fatal receipt lookup error:', receiptCheckErr.message);
+          } else if (!existingReceipt) {
             const fullOrder = await fetchPayloadOnce();
             if (fullOrder) {
               const { coffee_orders: lineItems = [], ...orderPayload } = fullOrder;
@@ -271,9 +276,11 @@ exports.handler = async (event) => {
         && currentOrder.status !== status) {
       // Backfill receipt if missing
       try {
-        const { data: existingReceipt } = await supabase
-          .from('receipt_queue').select('id').eq('order_id', orderId).limit(1).single();
-        if (!existingReceipt) {
+        const { data: existingReceipt, error: receiptCheckErr } = await supabase
+          .from('receipt_queue').select('id').eq('order_id', orderId).limit(1).maybeSingle();
+        if (receiptCheckErr) {
+          console.error('[RECEIPT] Non-fatal receipt lookup error:', receiptCheckErr.message);
+        } else if (!existingReceipt) {
           const fullOrder = await fetchPayloadOnce();
           if (fullOrder) {
             const { coffee_orders: lineItems = [], ...orderPayload } = fullOrder;
@@ -286,12 +293,15 @@ exports.handler = async (event) => {
       }
       // Backfill paid_at if not already set
       try {
-        await supabase.from('orders')
+        const { error: paidBackfillErr } = await supabase.from('orders')
           .update({ paid_at: new Date().toISOString(), paid_amount_cents: currentOrder.total_amount_cents || 0 })
           .eq('id', orderId)
           .is('paid_at', null);
+        if (paidBackfillErr) {
+          console.error('[UPDATE-ORDER] Non-fatal paid_at backfill error:', paidBackfillErr.message);
+        }
       } catch (paidErr) {
-        console.error('[UPDATE-ORDER] Non-fatal paid_at backfill error:', paidErr.message);
+        console.error('[UPDATE-ORDER] Non-fatal paid_at backfill exception:', paidErr.message);
       }
       return {
         statusCode: 200,
@@ -353,7 +363,7 @@ exports.handler = async (event) => {
 
       // Write audit row (non-fatal — don't block the comp if logging fails)
       try {
-        await supabase.from('comp_audit').insert({
+        const { error: auditInsertErr } = await supabase.from('comp_audit').insert({
           order_id:     orderId,
           staff_id:     auth.user?.id || null,
           staff_email:  auth.user?.email || 'unknown',
@@ -362,9 +372,13 @@ exports.handler = async (event) => {
           reason:       compReason.slice(0, 500), // cap length
           is_manager:   isManager,
         });
-        console.log(`[COMP AUDIT] ${auth.user?.email} (${auth.role}) comped order ${orderId} ($${(orderCents/100).toFixed(2)}): ${compReason}`);
+        if (auditInsertErr) {
+          console.error('[COMP AUDIT] Non-fatal audit insert error:', auditInsertErr.message);
+        } else {
+          console.log(`[COMP AUDIT] ${auth.user?.email} (${auth.role}) comped order ${orderId} ($${(orderCents/100).toFixed(2)}): ${compReason}`);
+        }
       } catch (auditErr) {
-        console.error('[COMP AUDIT] Non-fatal audit insert error:', auditErr.message);
+        console.error('[COMP AUDIT] Non-fatal audit insert exception:', auditErr.message);
       }
     }
 
@@ -426,12 +440,15 @@ exports.handler = async (event) => {
     // Non-fatal — don't block the status update if claiming fails.
     if (status === 'preparing' && auth.user?.id) {
       try {
-        await supabase.rpc('claim_order', {
+        const { error: claimErr } = await supabase.rpc('claim_order', {
           p_order_id: orderId,
           p_staff_id: auth.user.id,
         });
-      } catch (claimErr) {
-        console.error('[CLAIM] Non-fatal claim_order error:', claimErr?.message);
+        if (claimErr) {
+          console.error('[CLAIM] Non-fatal claim_order error:', claimErr.message);
+        }
+      } catch (claimException) {
+        console.error('[CLAIM] Non-fatal claim_order exception:', claimException?.message);
       }
     }
 
@@ -456,18 +473,21 @@ exports.handler = async (event) => {
         const paidAt = new Date().toISOString();
         const paidAmountCents = currentOrder.total_amount_cents || 0;
         // Only stamp paid_at if not already set (idempotent on retry)
-        const { data: paidUpdate } = await supabase
+        const { data: paidUpdate, error: paidStampErr } = await supabase
           .from('orders')
           .update({ paid_at: paidAt, paid_amount_cents: paidAmountCents })
           .eq('id', orderId)
           .is('paid_at', null)
           .select('paid_at, paid_amount_cents')
           .maybeSingle();
+        if (paidStampErr) {
+          console.error('[UPDATE-ORDER] Non-fatal paid_at stamp error:', paidStampErr.message);
+        }
         // Update local copy for receipt generation
         data[0].paid_at = paidUpdate?.paid_at || data[0].paid_at || paidAt;
         data[0].paid_amount_cents = paidUpdate?.paid_amount_cents || data[0].paid_amount_cents || paidAmountCents;
       } catch (paidErr) {
-        console.error('[UPDATE-ORDER] Non-fatal paid_at stamp error:', paidErr.message);
+        console.error('[UPDATE-ORDER] Non-fatal paid_at stamp exception:', paidErr.message);
       }
     }
 

@@ -26,6 +26,7 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 ### B. AI & Chatbot Liability
 * **Prompt Injection (Allergens):** An impenetrable pre-LLM and pre-Database regex block intercepts medical/allergen terms. It immediately aborts the tool execution and returns a canned safety disclaimer.
 * **Denial of Wallet (DoW):** Expensive APIs (ElevenLabs, Claude) are shielded by a dual-layer rate limit: an in-memory IP Token Bucket (`_token-bucket.js`) for burst protection, and a persistent DB daily quota.
+* **Parcel Privacy (Physical Security Model):** The chatbot `check_parcels` tool does not require authentication — packages are physically secured behind mailbox keys / ButterflyMX credentials. The tool returns only carrier and arrival time; tracking numbers, sender details, recipient names, and unit numbers are never exposed to the LLM. The system prompt instructs the bot to remind users they need physical credentials to access their mailbox.
 
 ### C. Financial & Point-of-Sale
 * **Square Webhook Idempotency:** Webhooks write to a `processed_webhooks` table before executing logic. Duplicate events hit a Postgres Unique Constraint and gracefully exit.
@@ -45,3 +46,32 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 * **Transport:** All authenticated operational calls are routed through the central `fetchOps()` wrapper to rigidly enforce `credentials: "include"`.
 * **CORS:** Strict origin allowlisting (`process.env.SITE_URL`, `brewhubphl.com`).
 * **IP Gating:** Staff clock-in operations enforce an `ALLOWED_IPS` check to guarantee staff are physically on the shop's Wi-Fi network.
+
+---
+
+## 4. March 2026 Security Hardening
+
+### A. Supabase Error Handling Compliance Sweep
+* **Scope:** 25+ Netlify functions audited and patched. Supabase JS does not throw on query failures — many functions previously used bare `await` or relied solely on `try/catch`, silently swallowing DB errors.
+* **Fix:** Every Supabase call now destructures `{ data, error }` and explicitly checks `if (error)`. All catch paths call `logSystemError()` for persistent tracking.
+* **Impact:** Eliminates an entire class of silent-failure vulnerabilities where database errors (permission denied, constraint violations, RLS denials) were invisible to monitoring.
+
+### B. PostgREST Filter Injection Prevention
+* **Vulnerability:** The `claude-chat.js` chatbot used `.or()` filter composition with user-supplied input, which could allow PostgREST filter injection (manipulating query logic via crafted strings).
+* **Fix:** Replaced `.or()` with separate parameterized queries. Input sanitized: LIKE wildcards (`%`, `_`) stripped, 2-char minimum enforced for name searches.
+
+### C. Square Webhook Refund Lock Safety
+* **Vulnerability:** If refund processing threw an exception, the Postgres advisory lock was never released — permanently locking the order and blocking all future operations on it.
+* **Fix:** Lock release moved to a `finally` block, guaranteeing cleanup regardless of processing outcome.
+
+### D. Queue Processor Failure Isolation
+* **Before:** Sequential loop — one failed notification blocked the entire batch.
+* **After:** `Promise.allSettled()` concurrent pipeline with per-task success/failure tracking. Failed tasks are recorded via `fail_notification` RPC for automatic retry; successful tasks proceed independently.
+
+### E. Payment & Receipt Safety
+* **`.single()` → `.maybeSingle()`:** Receipt lookups and payment reuse checks no longer throw on zero results (e.g., when a receipt hasn't been generated yet).
+* **Rollback error capture:** Compensation operations (`orders.delete`, `coffee_orders.delete`) now log Supabase errors instead of silently discarding them.
+
+### F. Double-Tap Prevention (POS)
+* **`payingRef` lock:** Prevents concurrent Square Terminal payment calls from the POS if a barista double-taps the Pay button.
+* **`clockLockRef` lock:** Prevents concurrent clock-in/out calls from the Staff Hub.

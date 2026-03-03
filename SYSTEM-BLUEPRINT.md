@@ -59,6 +59,7 @@
 - **Row Level Security**: Deny-all by default, scoped SELECT for authenticated staff.
   - **Staff SELECT Policies**: Authenticated users can access operational tables via `is_brewhub_staff()`.
   - **Manager Write Policies**: `is_brewhub_manager()` gates writes on merch_products, payroll_runs.
+  - **merch_products extended columns**: `long_description` (TEXT) for origin stories / tasting notes; `allowed_modifiers` (JSONB, default `[]`) for per-item modifier group keys (`milks`, `sweeteners`, `standard_syrups`, `specialty_addins`).
   - **Service Role**: Backend functions bypass RLS for INSERT/UPDATE/DELETE.
 
 ### Parcel View Logic
@@ -136,7 +137,105 @@
 
 ### Schedule Management (`manage-schedule.js`)
 - **Shift CRUD**: Full create/update/delete for `scheduled_shifts` via manager PIN auth.
-- **Calendar Integration**: `AdminCalendar.tsx` refactored to use server-side `manage-schedule` endpoint instead of direct Supabase calls, enforcing CSRF + rate limits.
+- **Batch Operations**: POST, PATCH, and DELETE all support batch mode — `user_ids[]` for creating multiple shifts, `shift_ids[]` for moving grouped shifts, and `ids[]` for batch deletion. Single-item backward compatibility maintained.
+- **Server-Side Role Lookup**: Batch POST looks up each employee's role from `staff_directory` rather than trusting client-provided `role_id`.
+- **Date-Windowed GET**: Accepts optional `start_date` and `end_date` query params; defaults to now → +30 days. Hard limit of 500 rows prevents unbounded result sets.
+- **Error Logging**: All catch paths call `logSystemError()` for persistent error tracking.
+- **Calendar Integration**: `AdminCalendar.tsx` uses server-side `manage-schedule` endpoint with CSRF + rate limits. Shifts sharing the same time slot are grouped into a single calendar event with pill-based employee badges.
+- **Multi-Employee Scheduling**: Managers can assign multiple employees to a single time slot in one action via checkbox multi-select in the shift creation modal.
+- **Pill Rendering**: Overlapping shifts render as compact colored pills (initials for 2+ employees, full name for solo). A "+X more" badge appears when a slot has more than 3 assignees.
+- **Hover Peek**: Hovering over a multi-employee shift block displays a tooltip with the full roster, avoiding the need to open the edit modal.
+
+### Scheduled Shifts FK Repair (`20260302_scheduled_shifts_staff_fk`)
+- **Constraint Correction**: Drops the incorrect `scheduled_shifts_user_id_fkey` pointing at `auth.users`.
+- **Data Cleanup**: Removes orphaned `scheduled_shifts` rows where `user_id` has no matching record in `staff_directory`.
+- **Safe Re-bind**: Re-adds `scheduled_shifts_user_id_fkey` to `staff_directory(id)` with `ON DELETE CASCADE`.
 
 ### Function Updates for Unified CRM
 - `create-customer.js`, `upsert-guest.js`, `search-residents.js`, `get-loyalty.js`, `get-staff-loyalty.js`, `process-quick-add.js`, `parcel-check-in.js`, `order-announcer.js`, `daily-pulse.js`: All updated to query `customers` instead of `profiles`/`residents`.
+
+---
+
+## Part 7: Error Handling Hardening, Specialty Menu & Staff Management (March 2026)
+
+### Supabase Error Handling Compliance Sweep
+- **Scope:** 25+ Netlify functions audited and patched to enforce the #1 architectural non-negotiable: explicit `if (error)` checks after every Supabase query.
+- **Problem:** Supabase JS does not throw on query failures. Many functions used bare `await` or relied solely on `try/catch`, silently swallowing database errors.
+- **Fix Pattern:** Every Supabase call now destructures `{ data, error }` and explicitly checks `if (error)` before proceeding. All catch paths call `logSystemError()` for persistent tracking.
+- **Functions patched:** `_auth.js`, `_process-payment.js`, `_sms.js`, `_system-errors.js`, `cafe-checkout.js`, `claude-chat.js`, `daily-pulse.js`, `fix-clock.js`, `get-arrived-parcels.js`, `get-loyalty.js`, `get-manager-stats.js`, `get-menu.js`, `get-shift-status.js`, `get-staff-loyalty.js`, `manage-catalog.js`, `manage-schedule.js`, `manager-challenge.js`, `oauth/callback.js`, `parcel-check-in.js`, `parcel-pickup.js`, `process-merch-payment.js`, `queue-processor.js`, `reconcile-pending-payments.js`, `square-webhook.js`, `update-hours.js`, `update-order-status.js`.
+- **Key pattern changes:**
+  - `.single()` → `.maybeSingle()` where zero results are valid (receipts, payment reuse checks).
+  - Rollback operations (`orders.delete`, `coffee_orders.delete`) now capture and log errors instead of silently discarding.
+  - Comp audit inserts converted from `try/catch` to explicit `{ error }` destructuring.
+
+### Square Webhook Refund Lock Safety
+- **Problem:** If refund processing threw an exception, the advisory lock was never released, permanently locking the order.
+- **Fix:** Refund lock release moved to `finally` block in `square-webhook.js`, guaranteeing cleanup regardless of processing outcome.
+- **Additional:** All Supabase operations in `handleRefund` and `handleOfflineDecline` now check `if (error)` explicitly.
+
+### Queue Processor Concurrent Pipeline (`queue-processor.js`)
+- **Before:** Sequential `for` loop processing one notification at a time.
+- **After:** 4-phase concurrent pipeline:
+  1. **Phase 1 — Send:** `Promise.allSettled()` fires all notifications concurrently.
+  2. **Phase 2 — Batch Update:** Single `.in()` query updates all successful parcels (replaces per-task updates).
+  3. **Phase 3 — Complete:** Concurrent `complete_notification` RPC calls for succeeded tasks.
+  4. **Phase 4 — Fail:** Records failures via `fail_notification` RPC for automatic retry.
+- **Impact:** Throughput scales linearly with notification volume; one failure no longer blocks the entire batch.
+
+### Claude Chat — `check_parcels` Tool + Security Hardening (`claude-chat.js`)
+- **New Tool:** `check_parcels` searches the `parcels` table by resident name (fuzzy `ilike`) and/or unit number (exact `eq`).
+  - Input sanitized: LIKE wildcards (`%`, `_`) stripped, 2-char minimum for name searches.
+  - Separate parameterized queries prevent PostgREST filter injection (previously used vulnerable `.or()` composition).
+  - Returns only carrier + arrival time — no PII (tracking numbers, sender details, recipient names, unit numbers never exposed to the LLM).
+- **System Prompt:** Updated with `check_parcels` usage instructions and ButterflyMX physical-access reminder.
+- All Supabase queries (loyalty lookups, order rollbacks, coffee_orders cancellation) now check `if (error)` explicitly.
+
+### Specialty Coffee Menu (`20260302_specialty_coffee_menu`)
+- **New Columns:** `long_description` (TEXT) and `allowed_modifiers` (JSONB, default `[]`) added to `merch_products`.
+- **Legacy Archival:** All existing `category='menu'` items set to `is_active = false` before inserting new curated items.
+- **7 Curated Items:** Alfaro Master Roast, Coffee Balam Congo, Coffee Balam Coyote Cold Brew, Gran Crema Espresso, Mocha, Gusto Classico Cortado, Coffee Balam Cornizuelo Latte.
+- **Modifier Groups:** Each item specifies its allowed modifier groups (`milks`, `sweeteners`, `standard_syrups`, `specialty_addins`) via the JSONB column.
+
+### POS Modifier System (`(ops)/pos/page.tsx`)
+- **Modifier Groups:** New `MODIFIER_GROUPS` constant defines 4 groups with per-modifier pricing (`milks`, `sweeteners`, `standard_syrups`, `specialty_addins`).
+- **Quantity-Aware:** Cart modifiers carry a `quantity` field; totals multiply `price_cents * quantity`. Display renders "Sugar (x3)" notation.
+- **Per-Item Resolution:** `getModifiersForItem()` reads the item's `allowed_modifiers` JSONB and resolves to a flat modifier list, so items only show relevant customizations.
+- **Double-Tap Prevention:** `payingRef` lock prevents concurrent payment calls.
+- **Memory Leak Prevention:** Timer refs (`orderSuccessTimerRef`, `recoveryTimerRef`) with proper `useEffect` cleanup.
+- **Cancel Safety:** Cart only clears on successful cancel to prevent ghost KDS cards.
+
+### ShopClient Specialty Menu Overhaul (`ShopClient.tsx`)
+- Extended `Product` type with `long_description` and `allowed_modifiers`.
+- Cart items track `base_price_cents` + `customizations[]` with per-modifier quantity.
+- Modifier group definitions mirror the POS system for consistency.
+
+### Staff Phone Migration (`20260302_add_staff_phone`)
+- Adds nullable `phone TEXT` column to `staff_directory`.
+- Automatically inherited by the `v_staff_status` view (uses `sd.*`).
+
+### CRM Customer Endpoint (`get-crm-customers.js`)
+- **New:** Manager-only, rate-limited GET endpoint returning filtered `customers` rows.
+- **8 Filter Modes:** `all`, `app_users`, `walk_in`, `mailbox`, `vip`, `loyalty`, `active_30d`, `new_7d`.
+- **Guards:** Origin-validated CORS, 500-row page limit, 15-second cache, CSRF + rate limiting.
+
+### Staff Management UI
+- **StaffSection.tsx:** Data-fetching wrapper loading staff from `v_staff_status` view (respects the "never read `is_working` directly" rule).
+- **StaffTable.tsx:** ~470-line interactive staff directory table with search, role filtering (Manager/Barista/Admin/Owner), portal-based action menus, colored role badges, working-status indicators.
+- **CustomerTable.tsx:** ~465-line CRM customer table with 8 filter presets, deferred search (`useDeferredValue`), portal-based action menus (Check-in Package, Add Loyalty, Log Manual Order), VIP/loyalty badges.
+- **ExportOrdersButton.tsx:** Client-side CSV export of `coffee_orders` — fetches from Supabase, builds CSV, triggers browser download.
+
+### Admin Dashboard — `fetchOps` Migration
+- Replaced 4 raw `fetch()` calls with `fetchOps()` for `/sales-report`, `/get-manager-stats`, `/get-inventory`, `/get-payroll`.
+- Functions converted to `useCallback` for correct dependency tracking.
+
+### Cafe Page Removal
+- `src/app/(site)/cafe/page.tsx` deleted — ordering consolidated into `/shop`.
+
+### ESLint Flat Config Migration
+- `.eslintignore` file deleted; entries migrated into `globalIgnores()` in `eslint.config.mjs`.
+- Added `.netlify/**`, `node_modules/**`, `dist/**` to ignored patterns.
+
+### Test Infrastructure
+- **New npm scripts:** `test:unit` (vitest), `test:functions` (jest), `test:e2e` (playwright), `test:all` (runs all three).
+- **New config:** `tests/jest.config.functions.js` — dedicated Jest config for Netlify function tests.
+- Updated `tests/vitest.config.ts` and `tests/setup-tests.ts`.

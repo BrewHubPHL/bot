@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useOpsSession } from "@/components/OpsGate";
 import { fetchOps } from "@/utils/ops-api";
 import Link from "next/link";
@@ -18,6 +18,9 @@ export default function StaffHubPage() {
   const [clockLoading, setClockLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
+
+  // Timer ref for showMessage auto-dismiss (memory leak prevention)
+  const messageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Clock display
   useEffect(() => {
@@ -47,12 +50,24 @@ export default function StaffHubPage() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const showMessage = useCallback((text: string, type: "success" | "error") => {
-    setMessage({ text, type });
-    setTimeout(() => setMessage(null), 4000);
+  // Cleanup message timer on unmount
+  useEffect(() => {
+    return () => {
+      if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
+    };
   }, []);
 
+  const showMessage = useCallback((text: string, type: "success" | "error") => {
+    setMessage({ text, type });
+    if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
+    messageTimerRef.current = setTimeout(() => setMessage(null), 4000);
+  }, []);
+
+  const clockLockRef = useRef(false);
+
   const toggleClock = useCallback(async () => {
+    if (clockLockRef.current) return;
+    clockLockRef.current = true;
     setClockLoading(true);
     const action = isWorking ? "out" : "in";
 
@@ -102,6 +117,7 @@ export default function StaffHubPage() {
       const msg = toUserSafeMessageFromUnknown(err, "Unable to update clock status right now.");
       showMessage(msg, "error");
     } finally {
+      clockLockRef.current = false;
       setClockLoading(false);
     }
   }, [isWorking, token, showMessage]);
@@ -192,6 +208,22 @@ export default function StaffHubPage() {
           )}
         </div>
 
+        {/* Manager Dashboard — prominent call-to-action for managers/admins */}
+        {isManager && (
+          <Link
+            href="/manager"
+            className="group flex items-center justify-center gap-3 w-full max-w-xl py-5 rounded-2xl
+                       text-white no-underline border-2 border-amber-400/60
+                       transition-all hover:-translate-y-1 hover:border-amber-400 hover:shadow-[0_8px_32px_rgba(243,156,18,0.35)]"
+            style={{ background: "linear-gradient(135deg, rgba(243,156,18,0.2) 0%, rgba(243,156,18,0.08) 100%)", backdropFilter: "blur(10px)" }}
+          >
+            <span className="text-3xl">📊</span>
+            <span className="text-base font-bold uppercase tracking-widest text-amber-400 group-hover:text-amber-300">
+              Manager Dashboard
+            </span>
+          </Link>
+        )}
+
         {/* Quick Links Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 w-full max-w-xl">
           <Link href="/pos" className="group rounded-2xl p-6 text-center text-white no-underline border border-white/10
@@ -230,14 +262,6 @@ export default function StaffHubPage() {
             <div className="text-3xl mb-2">📅</div>
             <div className="text-xs font-semibold uppercase tracking-widest group-hover:text-amber-400">My Schedule</div>
           </Link>
-          {isManager && (
-            <Link href="/manager" className="group rounded-2xl p-6 text-center text-white no-underline
-                                              border border-amber-400/40 transition-all hover:-translate-y-1 hover:border-amber-400"
-              style={{ background: "rgba(243,156,18,0.15)" }}>
-              <div className="text-3xl mb-2">📊</div>
-              <div className="text-xs font-semibold uppercase tracking-widest text-amber-400">Manager Dashboard</div>
-            </Link>
-          )}
         </div>
       </main>
     </div>

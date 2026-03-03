@@ -39,17 +39,19 @@ export default async function ShopPage() {
     name: string;
     price_cents: number;
     description: string;
+    long_description: string | null;
     image_url: string;
     checkout_url: string;
     sort_order: number;
     category?: string;
+    allowed_modifiers: string[] | null;
   }[] = [];
 
   if (shopEnabled && !isMaintenanceMode) {
     try {
       const { data, error } = await supabase
         .from('merch_products')
-        .select('id, name, price_cents, description, image_url, checkout_url, sort_order, category')
+        .select('id, name, price_cents, description, long_description, image_url, checkout_url, sort_order, category, allowed_modifiers')
         .eq('is_active', true)
         .is('archived_at', null)
         .order('sort_order', { ascending: true })

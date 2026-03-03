@@ -131,51 +131,101 @@ exports.handler = async (event, context) => {
       return { statusCode: 200, body: JSON.stringify({ message: 'No pending tasks' }) };
     }
 
-    let processed = 0;
-    for (const task of tasks) {
-      try {
+    // ── Phase 1: Send notifications concurrently ────────────────────
+    // Each task resolves/rejects independently so one failure doesn't block others.
+    const notificationResults = await Promise.allSettled(
+      tasks.map(async (task) => {
         if (task.task_type === 'parcel_arrived') {
           await sendParcelNotification(task.payload);
         }
+      })
+    );
 
-        await withTimeout(
-          supabase.rpc('complete_notification', { p_task_id: task.id }),
-          10000,
-          'complete_notification'
-        ).catch((e) => {
-          console.error('[QUEUE-PROCESSOR] complete_notification RPC failed:', String((e && e.message) || e));
-          return null;
-        });
-
-        if (task.source_table === 'parcels' && task.source_id) {
-          await withTimeout(
-            supabase
-              .from('parcels')
-              .update({ status: 'arrived', notified_at: new Date().toISOString() })
-              .eq('id', task.source_id),
-            10000,
-            'parcels.update'
-          ).catch((e) => {
-            console.error('[QUEUE-PROCESSOR] parcels.update failed for id:', String(task.source_id).slice(-8), String((e && e.message) || e));
-            return null;
-          });
-        }
-
-        processed++;
-      } catch (taskErr) {
-              const safeErr = sanitizeInput(String((taskErr && taskErr.message) || taskErr || 'Unknown error')).slice(0, 1000);
-              console.error(`[QUEUE-PROCESSOR] Task ${String(task.id).slice(-8)} failed:`, safeErr);
-              await withTimeout(
-                supabase.rpc('fail_notification', {
-                  p_task_id: task.id,
-                  p_error: safeErr
-                }),
-                5000,
-                'fail_notification'
-              ).catch(() => null);
+    // Partition tasks into succeeded vs failed based on notification outcome
+    const succeededTasks = [];
+    const failedTasks = [];
+    for (let i = 0; i < tasks.length; i++) {
+      if (notificationResults[i].status === 'fulfilled') {
+        succeededTasks.push(tasks[i]);
+      } else {
+        failedTasks.push({ task: tasks[i], reason: notificationResults[i].reason });
       }
     }
 
+    // ── Phase 2: Batch-update parcels in a single query ──────────
+    // Run BEFORE completing notifications so we don't orphan parcels
+    // if the update fails.
+    const parcelIds = succeededTasks
+      .filter((t) => t.source_table === 'parcels' && t.source_id)
+      .map((t) => t.source_id);
+
+    if (parcelIds.length > 0) {
+      const { error: bulkUpdateError } = await withTimeout(
+        supabase
+          .from('parcels')
+          .update({ status: 'arrived', notified_at: new Date().toISOString() })
+          .in('id', parcelIds),
+        10000,
+        'parcels.bulk-update'
+      );
+
+      if (bulkUpdateError) {
+        console.error(
+          '[QUEUE-PROCESSOR] Bulk parcels.update failed:',
+          bulkUpdateError.message || String(bulkUpdateError)
+        );
+      }
+    }
+
+    // ── Phase 3: Complete notifications via concurrent RPC calls ──
+    if (succeededTasks.length > 0) {
+      const completeResults = await Promise.allSettled(
+        succeededTasks.map(async (task) => {
+          const { error } = await withTimeout(
+            supabase.rpc('complete_notification', { p_task_id: task.id }),
+            10000,
+            'complete_notification'
+          );
+          if (error) throw error;
+        })
+      );
+
+      completeResults.forEach((result, idx) => {
+        if (result.status === 'rejected') {
+          console.error(
+            '[QUEUE-PROCESSOR] complete_notification RPC failed for task:',
+            String(succeededTasks[idx].id).slice(-8),
+            String(result.reason?.message || result.reason)
+          );
+        }
+      });
+    }
+
+    // ── Phase 4: Record failures so they can be retried ──────────
+    if (failedTasks.length > 0) {
+      await Promise.allSettled(
+        failedTasks.map(({ task, reason }) => {
+          const safeErr = sanitizeInput(
+            String((reason && reason.message) || reason || 'Unknown error')
+          ).slice(0, 1000);
+          console.error(`[QUEUE-PROCESSOR] Task ${String(task.id).slice(-8)} failed:`, safeErr);
+          return withTimeout(
+            supabase.rpc('fail_notification', {
+              p_task_id: task.id,
+              p_error: safeErr,
+            }),
+            5000,
+            'fail_notification'
+          ).then(({ error: failErr }) => {
+            if (failErr) {
+              console.error(`[QUEUE-PROCESSOR] fail_notification RPC error for task ${String(task.id).slice(-8)}:`, failErr.message);
+            }
+          }).catch(() => null);
+        })
+      );
+    }
+
+    const processed = succeededTasks.length;
     return {
       statusCode: 200,
       body: JSON.stringify({ via: 'direct', processed })

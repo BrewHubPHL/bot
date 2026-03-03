@@ -50,6 +50,7 @@ function ResidentRegisterInner() {
   const [inviteExpired, setInviteExpired] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const formLoadedAt = useRef(Date.now());
+  const submittingRef = useRef(false);
 
   /* ── Auto-populate unit & phone from URL params (invite link flow) ── */
   /* If the URL contains a `sig` param, verify it server-side before    */
@@ -121,6 +122,8 @@ function ResidentRegisterInner() {
       setError("Please slow down and try again.");
       return;
     }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
 
     // Cap inputs
@@ -156,6 +159,7 @@ function ResidentRegisterInner() {
             "Please contact building management at the front desk or email help@brewhubphl.com to resolve this."
           );
           setLoading(false);
+          submittingRef.current = false;
           return;
         }
 
@@ -165,6 +169,7 @@ function ResidentRegisterInner() {
             "A resident with this phone number already exists. Please log in from the portal instead."
           );
           setLoading(false);
+          submittingRef.current = false;
           return;
         }
 
@@ -190,32 +195,15 @@ function ResidentRegisterInner() {
         setError("Registration failed. Please try again.");
       }
       setLoading(false);
+      submittingRef.current = false;
       return;
     }
-    // 2. Upsert into customers table (ON CONFLICT phone → update unit_number)
-    // This safely handles the case where a ghost record was quick-added by staff
-    // and the resident is now completing full registration.
-    const { error: customerError } = await supabase.from("customers").upsert(
-      {
-        full_name: safeName,
-        unit_number: safeUnit,
-        email: safeEmail,
-        phone: safePhone,
-      },
-      { onConflict: "phone", ignoreDuplicates: false }
-    );
-    if (customerError) {
-      console.error("Customer upsert error:", customerError.message);
-      if (customerError.code === "23505") {
-        setError("This email or phone is already registered. Please sign in from the portal.");
-      } else {
-        setError("Registration failed. Please try again.");
-      }
-      setLoading(false);
-      return;
-    }
+    // Backend trigger (handle_new_user) on auth.users INSERT automatically
+    // creates/merges the customers row using the metadata we passed above.
+    // No client-side customers upsert needed (blocked by RLS anyway).
     setSuccess(true);
     setLoading(false);
+    submittingRef.current = false;
   }
 
   return (

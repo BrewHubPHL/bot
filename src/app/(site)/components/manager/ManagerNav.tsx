@@ -127,19 +127,19 @@ export function ManagerQuickLinks() {
   }, [session?.token]);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center gap-3 min-h-[44px] text-xs text-stone-500">
-      <Link href="/pos"       className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">POS</Link>
-      <Link href="/kds"       className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">KDS</Link>
-      <Link href="/scanner"   className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Scanner</Link>
-      <Link href="/staff-hub" className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Staff Hub</Link>
-      <Link href="/manager/fulfillment" className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Fulfillment</Link>
-      <Link href="/manager/calender"    className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Schedule</Link>
-      <span className="text-stone-600" aria-hidden="true">|</span>
-      <Link href="/"          className="min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Main Site</Link>
-      <span className="text-stone-600" aria-hidden="true">|</span>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center gap-3 min-h-[44px] text-xs text-stone-500 overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      <Link href="/pos"       className="shrink-0 min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">POS</Link>
+      <Link href="/kds"       className="shrink-0 min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">KDS</Link>
+      <Link href="/scanner"   className="shrink-0 min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Scanner</Link>
+      <Link href="/staff-hub" className="shrink-0 min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Staff Hub</Link>
+      <Link href="/manager/fulfillment" className="shrink-0 min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Fulfillment</Link>
+      <Link href="/manager/calender"    className="shrink-0 min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Schedule</Link>
+      <span className="shrink-0 text-stone-600" aria-hidden="true">|</span>
+      <Link href="/"          className="shrink-0 min-h-[44px] inline-flex items-center hover:text-amber-400 transition-colors">Main Site</Link>
+      <span className="shrink-0 text-stone-600" aria-hidden="true">|</span>
       <button
         onClick={handleManagerLogout}
-        className="min-h-[44px] inline-flex items-center gap-1 text-red-400 hover:text-red-300 transition-colors font-medium"
+        className="shrink-0 min-h-[44px] inline-flex items-center gap-1 text-red-400 hover:text-red-300 transition-colors font-medium"
       >
         <LogOut size={14} aria-hidden="true" /> Log Out
       </button>

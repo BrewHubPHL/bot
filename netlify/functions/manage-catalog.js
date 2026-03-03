@@ -74,7 +74,7 @@ exports.handler = async (event) => {
 
     // ─── CREATE ──────────────────────────────────────────
     if (event.httpMethod === 'POST') {
-      const { name, description, price_cents, image_url, is_active, category, stock_quantity } = body;
+      const { name, description, long_description, price_cents, image_url, is_active, category, stock_quantity, allowed_modifiers } = body;
 
       if (!name || typeof name !== 'string' || !name.trim()) {
         return corsJson(422, { error: 'Name is required' });
@@ -93,6 +93,13 @@ exports.handler = async (event) => {
         }
       }
 
+      // allowed_modifiers: must be an array of strings if provided
+      if (allowed_modifiers !== undefined && allowed_modifiers !== null) {
+        if (!Array.isArray(allowed_modifiers) || !allowed_modifiers.every(m => typeof m === 'string')) {
+          return corsJson(422, { error: 'allowed_modifiers must be an array of strings' });
+        }
+      }
+
       // Validate image_url if provided — must be our Supabase storage
       if (image_url) {
         if (typeof image_url !== 'string' || image_url.length > 2048) {
@@ -104,17 +111,20 @@ exports.handler = async (event) => {
 
       const safeName = sanitizeInput(name.trim()).slice(0, 200);
       const safeDesc = description ? sanitizeInput(String(description).trim()).slice(0, 2000) : null;
+      const safeLongDesc = long_description ? sanitizeInput(String(long_description).trim()).slice(0, 5000) : null;
 
       const { data, error } = await supabase
         .from('merch_products')
         .insert({
           name: safeName,
           description: safeDesc,
+          long_description: safeLongDesc,
           price_cents,
           image_url: image_url || null,
           is_active: is_active !== false,
           category: category || 'menu',
           stock_quantity: stock_quantity !== undefined ? stock_quantity : null,
+          allowed_modifiers: Array.isArray(allowed_modifiers) ? allowed_modifiers : [],
           updated_at: new Date().toISOString(),
         })
         .select()
@@ -156,13 +166,19 @@ exports.handler = async (event) => {
       }
 
       // Whitelist allowed columns
-      const allowed = ['name', 'description', 'price_cents', 'image_url', 'is_active', 'category', 'archived_at', 'stock_quantity'];
+      const allowed = ['name', 'description', 'long_description', 'price_cents', 'image_url', 'is_active', 'category', 'archived_at', 'stock_quantity', 'allowed_modifiers'];
       const row = { updated_at: new Date().toISOString() };
       for (const key of allowed) {
         if (key in updates) row[key] = updates[key];
       }
       if ('name' in row) row.name = sanitizeInput(row.name.trim()).slice(0, 200);
       if ('description' in row) row.description = row.description ? sanitizeInput(String(row.description).trim()).slice(0, 2000) : null;
+      if ('long_description' in row) row.long_description = row.long_description ? sanitizeInput(String(row.long_description).trim()).slice(0, 5000) : null;
+      if ('allowed_modifiers' in row) {
+        if (!Array.isArray(row.allowed_modifiers) || !row.allowed_modifiers.every(m => typeof m === 'string')) {
+          return corsJson(422, { error: 'allowed_modifiers must be an array of strings' });
+        }
+      }
 
       const { data, error } = await supabase
         .from('merch_products')

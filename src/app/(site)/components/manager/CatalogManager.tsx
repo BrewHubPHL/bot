@@ -52,6 +52,7 @@ interface MerchProduct {
   name: string;
   price_cents: number;
   description: string | null;
+  long_description: string | null;
   image_url: string | null;
   checkout_url: string | null;
   is_active: boolean;
@@ -61,28 +62,41 @@ interface MerchProduct {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  allowed_modifiers: string[];
 }
 
 interface FormState {
   id: string | null;
   name: string;
   description: string;
+  long_description: string;
   price: string; // dollars string e.g. "4.50"
   image_url: string;
   is_active: boolean;
   category: "menu" | "merch";
   stock_quantity: string; // "" = unlimited (NULL), digits = tracked
+  allowed_modifiers: string[];
 }
+
+/** Available modifier group keys for the checkboxes */
+const MODIFIER_GROUP_OPTIONS: { key: string; label: string }[] = [
+  { key: "milks", label: "Milks (Oat, Almond)" },
+  { key: "sweeteners", label: "Sweeteners (Sugar)" },
+  { key: "standard_syrups", label: "Standard Syrups (Vanilla, Caramel)" },
+  { key: "specialty_addins", label: "Specialty Add-Ins (Chocolate, Extra Shot, Iced)" },
+];
 
 const EMPTY_FORM: FormState = {
   id: null,
   name: "",
   description: "",
+  long_description: "",
   price: "",
   image_url: "",
   is_active: true,
   category: "menu",
   stock_quantity: "",
+  allowed_modifiers: [],
 };
 
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -384,6 +398,7 @@ export default function CatalogManager() {
   const token = useOpsSessionOptional()?.token ?? "";
   const [products, setProducts] = useState<MerchProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -404,6 +419,7 @@ export default function CatalogManager() {
   const fetchProducts = useCallback(async () => {
     if (!token) { setLoading(false); return; }
     setLoading(true);
+    setCatalogError(null);
     try {
       const res = await fetchOps("/manage-catalog", {}, token);
       if (!res.ok) throw new Error("Catalog fetch failed");
@@ -411,6 +427,7 @@ export default function CatalogManager() {
       setProducts(sanitizeProducts(data.products ?? []));
     } catch (err: unknown) {
       console.error("Catalog fetch failed");
+      setCatalogError("Unable to load catalog. Please try again.");
     }
     setLoading(false);
   }, [token]);
@@ -419,9 +436,14 @@ export default function CatalogManager() {
     fetchProducts();
   }, [fetchProducts]);
 
+  // Synchronous lock to prevent double-tap on catalog mutations
+  const catalogMutationLockRef = useRef(false);
+
   /* --- Delete (archive) product ---------------------------------- */
   const handleDelete = async (productId: string) => {
     if (!confirm("Archive this product? It can be restored later from the Archived tab.")) return;
+    if (catalogMutationLockRef.current) return;
+    catalogMutationLockRef.current = true;
     try {
       const res = await fetchOps("/manage-catalog", {
         method: "DELETE",
@@ -435,11 +457,15 @@ export default function CatalogManager() {
       setProducts((prev) => prev.filter((p) => p.id !== productId));
     } catch (err: unknown) {
       alert(toUserSafeMessageFromUnknown(err, "Unable to archive this product right now."));
+    } finally {
+      catalogMutationLockRef.current = false;
     }
   };
 
   /* --- Restore archived product ---------------------------------- */
   const handleRestore = async (productId: string) => {
+    if (catalogMutationLockRef.current) return;
+    catalogMutationLockRef.current = true;
     try {
       const res = await fetchOps("/manage-catalog", {
         method: "PATCH",
@@ -453,11 +479,15 @@ export default function CatalogManager() {
       await fetchProducts();
     } catch (err: unknown) {
       alert(toUserSafeMessageFromUnknown(err, "Unable to restore this product right now."));
+    } finally {
+      catalogMutationLockRef.current = false;
     }
   };
 
   /* --- Toggle active/hidden -------------------------------------- */
   const handleToggleActive = async (productId: string, currentlyActive: boolean) => {
+    if (catalogMutationLockRef.current) return;
+    catalogMutationLockRef.current = true;
     const newStatus = !currentlyActive;
     try {
       const res = await fetchOps("/manage-catalog", {
@@ -476,6 +506,8 @@ export default function CatalogManager() {
       );
     } catch (err: unknown) {
       alert(toUserSafeMessageFromUnknown(err, "Unable to update this product right now."));
+    } finally {
+      catalogMutationLockRef.current = false;
     }
   };
 
@@ -491,6 +523,7 @@ export default function CatalogManager() {
       id: p.id,
       name: p.name,
       description: p.description ?? "",
+      long_description: p.long_description ?? "",
       price: centsToDollars(p.price_cents),
       image_url: p.image_url ?? "",
       is_active: p.is_active,
@@ -498,6 +531,7 @@ export default function CatalogManager() {
       stock_quantity: p.stock_quantity !== null && p.stock_quantity !== undefined
         ? String(p.stock_quantity)
         : "",
+      allowed_modifiers: Array.isArray(p.allowed_modifiers) ? p.allowed_modifiers : [],
     });
     setSaveError(null);
     setDrawerOpen(true);
@@ -538,11 +572,13 @@ export default function CatalogManager() {
       const row: Record<string, unknown> = {
         name: trimmedName,
         description: form.description.trim() || null,
+        long_description: form.long_description.trim() || null,
         price_cents: cents,
         image_url: form.image_url || null,
         is_active: form.is_active,
         category: form.category,
         stock_quantity: parsedStock,
+        allowed_modifiers: form.allowed_modifiers,
       };
 
       let res: Response;
@@ -703,6 +739,20 @@ export default function CatalogManager() {
                   className="bg-stone-900 border border-stone-800 rounded-xl animate-pulse aspect-square"
                 />
               ))}
+            </div>
+          );
+        }
+        if (catalogError) {
+          return (
+            <div className="flex items-center gap-2 py-12 justify-center text-red-400 text-sm">
+              <RefreshCw size={16} className="shrink-0" />
+              {catalogError}
+              <button
+                onClick={() => fetchProducts()}
+                className="ml-2 underline hover:text-red-300"
+              >
+                Retry
+              </button>
             </div>
           );
         }
@@ -946,7 +996,7 @@ export default function CatalogManager() {
           {/* Description */}
           <div>
             <label htmlFor="catalog-desc" className="block text-sm text-stone-400 mb-1">
-              Description
+              Short Description
             </label>
             <textarea
               id="catalog-desc"
@@ -959,6 +1009,67 @@ export default function CatalogManager() {
               placeholder="A smooth espresso with oat milk…"
             />
           </div>
+
+          {/* Long Description (Origin Story / Tasting Notes) */}
+          {form.category === "menu" && (
+            <div>
+              <label htmlFor="catalog-long-desc" className="block text-sm text-stone-400 mb-1">
+                Origin Story &amp; Tasting Notes
+              </label>
+              <textarea
+                id="catalog-long-desc"
+                rows={5}
+                maxLength={2000}
+                value={form.long_description}
+                onChange={(e) => setField("long_description", e.target.value)}
+                className="w-full bg-stone-900 border border-stone-800 rounded-lg px-3 py-2 text-sm
+                           text-stone-100 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Honey-processed for a smooth, balanced cup. Notes of red fruit, caramel…"
+              />
+              <p className="text-xs text-stone-500 mt-1">
+                Shown in the customer info modal. Include ICAFE scores, Blue Zone origins, etc.
+              </p>
+            </div>
+          )}
+
+          {/* Allowed Modifiers (checkboxes) */}
+          {form.category === "menu" && (
+            <div>
+              <label className="block text-sm text-stone-400 mb-2">
+                Allowed Modifiers
+              </label>
+              <div className="space-y-2">
+                {MODIFIER_GROUP_OPTIONS.map((group) => (
+                  <label
+                    key={group.key}
+                    className="flex items-center gap-3 cursor-pointer select-none"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.allowed_modifiers.includes(group.key)}
+                      onChange={() => {
+                        setForm((prev) => {
+                          const has = prev.allowed_modifiers.includes(group.key);
+                          return {
+                            ...prev,
+                            allowed_modifiers: has
+                              ? prev.allowed_modifiers.filter((k) => k !== group.key)
+                              : [...prev.allowed_modifiers, group.key],
+                          };
+                        });
+                      }}
+                      className="w-4 h-4 rounded border-stone-700 bg-stone-900 text-amber-500
+                                 focus:ring-amber-500 focus:ring-2"
+                    />
+                    <span className="text-sm text-stone-300">{group.label}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-stone-500 mt-2">
+                Leave all unchecked for items served strictly as-is (no customization).
+              </p>
+            </div>
+          )}
 
           {/* Price */}
           <div>

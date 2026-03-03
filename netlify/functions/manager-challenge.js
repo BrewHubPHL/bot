@@ -145,12 +145,16 @@ exports.handler = async (event) => {
       }
 
       // Rate limit: max 5 challenge requests per manager per 5 minutes
-      const { data: velocityCheck } = await supabase.rpc('check_manager_action_velocity', {
+      const { data: velocityCheck, error: velocityErr } = await supabase.rpc('check_manager_action_velocity', {
         p_manager_email: managerEmail,
         p_action_type: action_type,
         p_window_minutes: 5,
         p_max_actions: 20,
       });
+      if (velocityErr) {
+        console.error(`[CHALLENGE] Velocity check RPC failed for ${managerEmail}:`, velocityErr.message);
+        return cors(500, { error: 'Security check failed. Please try again.' });
+      }
       const velocity = velocityCheck?.[0] || velocityCheck;
       if (velocity?.is_anomalous) {
         console.warn(`[CHALLENGE] Anomalous challenge velocity for ${managerEmail}: ${velocity.action_count} in 5m`);

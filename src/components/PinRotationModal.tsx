@@ -37,9 +37,16 @@ export default function PinRotationModal({
   const [confirmPin, setConfirmPin] = useState("");
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup success timer on unmount
+  useEffect(() => {
+    return () => { if (successTimerRef.current) clearTimeout(successTimerRef.current); };
+  }, []);
 
   useEffect(() => {
-    setTimeout(() => inputRef.current?.focus(), 100);
+    const t = setTimeout(() => inputRef.current?.focus(), 100);
+    return () => clearTimeout(t);
   }, [step]);
 
   const activePin = step === "old" ? oldPin : step === "new" ? newPin : confirmPin;
@@ -69,10 +76,11 @@ export default function PinRotationModal({
 
   // Auto-advance when 6 digits entered
   useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
     if (step === "old" && oldPin.length === 6) {
-      setTimeout(() => setStep("new"), 200);
+      t = setTimeout(() => setStep("new"), 200);
     } else if (step === "new" && newPin.length === 6) {
-      setTimeout(() => setStep("confirm"), 200);
+      t = setTimeout(() => setStep("confirm"), 200);
     } else if (step === "confirm" && confirmPin.length === 6) {
       if (confirmPin !== newPin) {
         setError("PINs don't match — try again");
@@ -83,6 +91,7 @@ export default function PinRotationModal({
       }
       handleSave();
     }
+    return () => { if (t) clearTimeout(t); };
   }, [oldPin, newPin, confirmPin, step]);
 
   const handleSave = useCallback(async () => {
@@ -110,7 +119,7 @@ export default function PinRotationModal({
       }
 
       setStep("success");
-      setTimeout(() => onSuccess(), 1500);
+      successTimerRef.current = setTimeout(() => onSuccess(), 1500);
     } catch {
       setError("Connection error — try again");
       setStep("error");

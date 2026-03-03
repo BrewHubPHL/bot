@@ -198,6 +198,7 @@ export default function PayrollSection() {
 
   // ---- Summary state (single source of truth: DB view) ----------
   const [summaryRows, setSummaryRows] = useState<PayrollSummaryRow[]>([]);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [openShifts, setOpenShifts] = useState<OpenShiftRow[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(true);
 
@@ -248,6 +249,10 @@ export default function PayrollSection() {
   const [pendingAction, setPendingAction] = useState<PendingFixAction | null>(null);
   const [showChallengeModal, setShowChallengeModal] = useState(false);
 
+  // ---- Synchronous double-tap locks for payroll mutations -----------
+  const fixClockLockRef = useRef(false);
+  const adjustHoursLockRef = useRef(false);
+
   // ---- Polling backoff refs (declared before callbacks that use them) --
   const payrollBackoffRef = useRef<number>(60_000);
   const payrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -256,6 +261,7 @@ export default function PayrollSection() {
   const fetchSummary = useCallback(async () => {
     if (!token) { setSummaryLoading(false); return; }
     setSummaryLoading(true);
+    setSummaryError(null);
     try {
       const res = await fetchOps(
         `/get-payroll?view=summary&start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`,
@@ -275,9 +281,7 @@ export default function PayrollSection() {
       setOverrides(data.overrides ?? []);
     } catch (err) {
       console.error("Summary fetch failed:", err);
-      setSummaryRows([]);
-      setOpenShifts([]);
-      setOverrides([]);
+      setSummaryError("Unable to load payroll data. Please try again.");
     }
     setSummaryLoading(false);
   }, [startDate, endDate, token]);
@@ -315,6 +319,8 @@ export default function PayrollSection() {
   // ---- Fix clock-out handler ------------------------------------
   const handleFixClockOut = async (email: string, challengeNonce?: string) => {
     if (!token || !fixTime) return;
+    if (fixClockLockRef.current) return;
+    fixClockLockRef.current = true;
     setFixBusy(true);
     setFixError("");
     setFixSuccess("");
@@ -359,6 +365,7 @@ export default function PayrollSection() {
     } catch (err: unknown) {
       setFixError(toUserSafeMessageFromUnknown(err, "Unable to fix clock-out right now."));
     } finally {
+      fixClockLockRef.current = false;
       setFixBusy(false);
     }
   };
@@ -367,6 +374,8 @@ export default function PayrollSection() {
   const handleChallengeSuccess = useCallback(async (nonce: string) => {
     setShowChallengeModal(false);
     if (!pendingAction || !token) return;
+    if (fixClockLockRef.current) return;
+    fixClockLockRef.current = true;
 
     setFixBusy(true);
     setFixError("");
@@ -397,6 +406,7 @@ export default function PayrollSection() {
     } catch (err: unknown) {
       setFixError(toUserSafeMessageFromUnknown(err, "Unable to fix clock-out right now."));
     } finally {
+      fixClockLockRef.current = false;
       setFixBusy(false);
     }
   }, [pendingAction, token, fetchSummary, closeSheet]);
@@ -409,6 +419,8 @@ export default function PayrollSection() {
     if (Math.abs(delta) > 1440) { setAdjustError("Adjustment cannot exceed ±24 hours (1440 minutes)."); return; }
     const reason = adjustReason.trim();
     if (reason.length < 10) { setAdjustError("Reason must be at least 10 characters (IRS compliance)."); return; }
+    if (adjustHoursLockRef.current) return;
+    adjustHoursLockRef.current = true;
 
     setAdjustBusy(true);
     setAdjustError("");
@@ -452,6 +464,7 @@ export default function PayrollSection() {
     } catch (err: unknown) {
       setAdjustError(toUserSafeMessageFromUnknown(err, "Unable to adjust hours right now."));
     } finally {
+      adjustHoursLockRef.current = false;
       setAdjustBusy(false);
     }
   };
@@ -460,6 +473,8 @@ export default function PayrollSection() {
   const handleAdjustChallengeSuccess = useCallback(async (nonce: string) => {
     setShowAdjustChallenge(false);
     if (!pendingAdjust || !token) return;
+    if (adjustHoursLockRef.current) return;
+    adjustHoursLockRef.current = true;
 
     setAdjustBusy(true);
     setAdjustError("");
@@ -489,6 +504,7 @@ export default function PayrollSection() {
     } catch (err: unknown) {
       setAdjustError(toUserSafeMessageFromUnknown(err, "Unable to adjust hours right now."));
     } finally {
+      adjustHoursLockRef.current = false;
       setAdjustBusy(false);
     }
   }, [pendingAdjust, token, fetchSummary]);
@@ -726,6 +742,11 @@ export default function PayrollSection() {
             {[...Array(4)].map((_, i) => (
               <div key={i} className="h-10 bg-stone-800 rounded-lg animate-pulse" />
             ))}
+          </div>
+        ) : summaryError ? (
+          <div className="px-5 py-6 flex items-center gap-2 text-red-400 text-sm">
+            <AlertTriangle size={16} className="shrink-0" />
+            {summaryError}
           </div>
         ) : summaryRows.length === 0 ? (
           <div className="px-5 py-6 text-stone-500 text-sm">

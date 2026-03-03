@@ -5,6 +5,7 @@ const { chatBucket } = require('./_token-bucket');
 const { sendSMS } = require('./_sms');
 const { hashIP } = require('./_ip-hash');
 const { sanitizeInput } = require('./_sanitize');
+const { logSystemError } = require('./_system-errors');
 
 // ═══════════════════════════════════════════════════════════════════
 // ALLERGEN / DIETARY / MEDICAL SAFETY LAYER
@@ -221,6 +222,24 @@ const TOOLS = [
                 }
             },
             required: ['destination']
+        }
+    },
+    {
+        name: 'check_parcels',
+        description: 'Checks the database to see if a resident has any pending packages waiting for pickup. Use when someone asks about packages, mail, or deliveries.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                resident_name: {
+                    type: 'string',
+                    description: 'The resident or recipient name to search for (fuzzy match)'
+                },
+                unit_number: {
+                    type: 'string',
+                    description: 'The mailbox / unit number to search for'
+                }
+            },
+            required: []
         }
     }
 ];
@@ -524,7 +543,10 @@ async function executeTool(toolName, toolInput, supabase) {
 
                 if (coffeeErr) {
                     // Rollback the parent order to prevent ghost KDS cards
-                    await supabase.from('orders').delete().eq('id', order.id);
+                    const { error: deleteErr } = await supabase.from('orders').delete().eq('id', order.id);
+                    if (deleteErr) {
+                        console.error('[CLAUDE-CHAT] Order rollback delete failed for order', order.id, ':', deleteErr.message);
+                    }
                     return { success: false, result: 'Failed to save order items. Please try again.' };
                 }
 
@@ -574,11 +596,14 @@ async function executeTool(toolName, toolInput, supabase) {
             if (supabase) {
                 // Unified CRM: single customers table
                 if (email) {
-                    const { data } = await supabase
+                    const { data, error: emailLookupErr } = await supabase
                         .from('customers')
                         .select('id, email, full_name, loyalty_points')
                         .eq('email', email.toLowerCase().trim())
                         .maybeSingle();
+                    if (emailLookupErr) {
+                        console.error('[LOYALTY] Customer email lookup failed:', emailLookupErr.message);
+                    }
                     customer = data;
                     lookupEmail = email;
                 }
@@ -587,11 +612,14 @@ async function executeTool(toolName, toolInput, supabase) {
                 // ONLY return results that match the authed user's email
                 if (!customer && phone) {
                     const cleanPhone = phone.replace(/\D/g, '').slice(-10);
-                    const { data: byPhone } = await supabase
+                    const { data: byPhone, error: phoneLookupErr } = await supabase
                         .from('customers')
                         .select('id, email, full_name, loyalty_points')
                         .like('phone', `%${cleanPhone}`)
                         .maybeSingle();
+                    if (phoneLookupErr) {
+                        console.error('[LOYALTY] Customer phone lookup failed:', phoneLookupErr.message);
+                    }
                     
                     // Cross-reference: only use phone lookup if the email matches the authed user
                     if (byPhone?.email && byPhone.email.toLowerCase() === authedUser.email?.toLowerCase()) {
@@ -729,10 +757,13 @@ async function executeTool(toolName, toolInput, supabase) {
             }
 
             // Also cancel associated coffee_orders
-            await supabase
+            const { error: coffeeUpdateErr } = await supabase
                 .from('coffee_orders')
                 .update({ status: 'cancelled' })
                 .eq('order_id', orders.id);
+            if (coffeeUpdateErr) {
+                console.error('[CANCEL] coffee_orders cancel failed (non-fatal):', coffeeUpdateErr.message);
+            }
 
             const orderNum = orders.id.slice(0, 4).toUpperCase();
             console.log(`[CANCEL] Order #${orderNum} (${orders.id}) cancelled via chat`);
@@ -744,6 +775,115 @@ async function executeTool(toolName, toolInput, supabase) {
         } catch (err) {
             console.error('Cancel order error:', err?.message);
             return { success: false, result: 'Something went wrong cancelling the order.' };
+        }
+    }
+
+    if (toolName === 'check_parcels') {
+        const { resident_name, unit_number } = toolInput;
+
+        if (!resident_name && !unit_number) {
+            return { result: 'I need at least a name or unit number to look up packages.' };
+        }
+
+        if (!supabase) {
+            return { result: 'Unable to check parcels right now.' };
+        }
+
+        // Strip LIKE wildcards (%, _) AFTER sanitisation to prevent
+        // the LLM from injecting "%" → match-all queries.
+        const stripLikeWildcards = (s) => s.replace(/[%_]/g, '');
+
+        try {
+            const SELECT_COLS = 'id, recipient_name, unit_number, carrier, tracking_number, received_at, status';
+            let data;
+
+            if (resident_name && unit_number) {
+                // ── Both provided — run two safe queries and merge ──
+                // NEVER use .or() with string interpolation on LLM input;
+                // commas / periods in the value break PostgREST filter syntax
+                // and enable filter-injection attacks.
+                const safeName = stripLikeWildcards(sanitizeInput(resident_name).slice(0, 120));
+                const safeUnit = stripLikeWildcards(sanitizeInput(unit_number).slice(0, 20));
+
+                if (safeName.length < 2 && safeUnit.length < 1) {
+                    return { result: 'I need a longer name or valid unit number to search.' };
+                }
+
+                const [byName, byUnit] = await Promise.all([
+                    safeName.length >= 2
+                        ? supabase.from('parcels').select(SELECT_COLS)
+                            .eq('status', 'arrived')
+                            .ilike('recipient_name', `%${safeName}%`)
+                            .order('received_at', { ascending: false }).limit(10)
+                        : Promise.resolve({ data: [], error: null }),
+                    safeUnit.length >= 1
+                        ? supabase.from('parcels').select(SELECT_COLS)
+                            .eq('status', 'arrived')
+                            .eq('unit_number', safeUnit)
+                            .order('received_at', { ascending: false }).limit(10)
+                        : Promise.resolve({ data: [], error: null }),
+                ]);
+
+                if (byName.error) throw byName.error;
+                if (byUnit.error) throw byUnit.error;
+
+                // Dedupe by id
+                const seen = new Set();
+                data = [...(byName.data || []), ...(byUnit.data || [])].filter(p => {
+                    if (seen.has(p.id)) return false;
+                    seen.add(p.id);
+                    return true;
+                });
+            } else if (resident_name) {
+                const safeName = stripLikeWildcards(sanitizeInput(resident_name).slice(0, 120));
+                if (safeName.length < 2) {
+                    return { result: 'I need at least two characters of a name to search.' };
+                }
+                const result = await supabase.from('parcels').select(SELECT_COLS)
+                    .eq('status', 'arrived')
+                    .ilike('recipient_name', `%${safeName}%`)
+                    .order('received_at', { ascending: false }).limit(20);
+                if (result.error) throw result.error;
+                data = result.data;
+            } else {
+                const safeUnit = stripLikeWildcards(sanitizeInput(unit_number).slice(0, 20));
+                if (safeUnit.length < 1) {
+                    return { result: 'I need a valid unit number to search.' };
+                }
+                const result = await supabase.from('parcels').select(SELECT_COLS)
+                    .eq('status', 'arrived')
+                    .eq('unit_number', safeUnit)
+                    .order('received_at', { ascending: false }).limit(20);
+                if (result.error) throw result.error;
+                data = result.data;
+            }
+
+            if (!data || data.length === 0) {
+                // Echo only the sanitised values — never raw LLM input
+                const displayName = resident_name ? sanitizeInput(resident_name).slice(0, 60) : null;
+                const displayUnit = unit_number ? sanitizeInput(unit_number).slice(0, 20) : null;
+                return {
+                    found: false,
+                    result: `No pending packages found${displayName ? ` for "${displayName}"` : ''}${displayUnit ? ` (unit ${displayUnit})` : ''}. If you're expecting something, it may not have been scanned in yet — check back later or ask at the front desk.`
+                };
+            }
+
+            const parcels = data.map(p => ({
+                carrier: p.carrier || 'Unknown carrier',
+                arrived: p.received_at || 'Unknown',
+                status: 'Waiting in your secure locker',
+            }));
+
+            return {
+                found: true,
+                count: parcels.length,
+                parcels,
+                result: `Found ${parcels.length} pending package${parcels.length === 1 ? '' : 's'}. Details attached.`
+            };
+        } catch (err) {
+            console.error('check_parcels error:', err?.message);
+            logSystemError({ source: 'claude-chat/check_parcels', message: err?.message, stack: err?.stack });
+            return { result: 'Unable to check parcels right now. Please ask at the front desk.' };
         }
     }
 
@@ -830,6 +970,7 @@ You have access to real APIs - ALWAYS use them instead of making up information:
 4. **cancel_order** - Cancel an order by order number or ID. Use this to fix duplicates.
 5. **get_loyalty_info** - ALWAYS call this when customers ask about their rewards, points, or loyalty QR code. Requires their email or phone. Can also text the QR to them.
 6. **navigate_site** - Use when customers want to see a specific page (menu, shop, checkout, rewards, account, parcels, etc.)
+7. **check_parcels** - Check if a resident has pending packages. If someone asks about packages, mail, or deliveries, politely ask for their name and/or unit number if they have not provided it, then use this tool to look it up. Return the results in a friendly conversational way (carrier, when it arrived). NEVER reveal tracking numbers, sender details, or unit numbers from the tool response. After confirming a package exists, always remind the user: "You will need your physical key or ButterflyMX credential to access your mailbox."
 
 ## ORDERING RULES — FOLLOW THESE EXACTLY
 1. When a customer wants to place an order and you do NOT know whether they are logged in, FIRST offer them this exact choice: "Would you like to login to order with your loyalty rewards, or would you like to checkout as a guest? If you'd like to checkout as a guest, I'll just need your name."

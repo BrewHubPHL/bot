@@ -22,14 +22,14 @@ export type ParcelSyncEvent =
   | { type: "tracking"; tracking: string; carrier: string; seq: number }
   | { type: "unit"; unit: string; seq: number }
   | { type: "submit"; tracking: string; carrier: string; unit: string; residentName: string | null; residentId: string | null }
-  | { type: "result"; success: boolean; error?: string; parcelId?: string }
+  | { type: "result"; success: boolean; error?: string; parcelId?: string; residentId?: string; residentName?: string }
   | { type: "duplicate"; tracking: string; carrier: string; unit: string };
 
 export interface ParcelSyncHandlers {
   onTracking?: (tracking: string, carrier: string, seq: number) => void;
   onUnit?: (unit: string, seq: number) => void;
   onSubmit?: (data: { tracking: string; carrier: string; unit: string; residentName: string | null; residentId: string | null }) => void;
-  onResult?: (data: { success: boolean; error?: string; parcelId?: string }) => void;
+  onResult?: (data: { success: boolean; error?: string; parcelId?: string; residentId?: string; residentName?: string }) => void;
   onDuplicate?: (data: { tracking: string; carrier: string; unit: string }) => void;
 }
 
@@ -112,7 +112,7 @@ export function useParcelSync(handlers: ParcelSyncHandlers) {
   );
 
   const sendResult = useCallback(
-    (data: { success: boolean; error?: string; parcelId?: string }) => {
+    (data: { success: boolean; error?: string; parcelId?: string; residentId?: string; residentName?: string }) => {
       channelRef.current?.send({
         type: "broadcast",
         event: "result",

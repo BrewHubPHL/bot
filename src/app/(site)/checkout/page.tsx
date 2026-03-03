@@ -78,6 +78,9 @@ export default function CheckoutPage() {
   const [awaitingFinality, setAwaitingFinality] = useState(false);
   const [finalityMessage, setFinalityMessage] = useState('');
   const [paymentTimedOut, setPaymentTimedOut] = useState(false);
+  // Mutable ref mirrors state so the catch block inside submitPayment
+  // always reads the up-to-date value (avoids stale closure).
+  const paymentTimedOutRef = useRef(false);
   const cardRef = useRef<SquareCard | null>(null);
   const paymentsRef = useRef<SquarePayments | null>(null);
   const applePayRef = useRef<SquarePaymentMethod | null>(null);
@@ -86,6 +89,11 @@ export default function CheckoutPage() {
   const walletPaymentRequestRef = useRef<SquarePaymentRequest | null>(null);
 
   const [squareLoadError, setSquareLoadError] = useState(false);
+
+  // Synchronous ref lock to prevent double-submit race conditions.
+  // React state (isProcessing) is async — a fast double-click can slip
+  // through before the re-render disables the button.
+  const submittingRef = useRef(false);
 
   const totalCents = cart.reduce((sum, item) => sum + (item.price_cents * item.quantity), 0);
   const hasMerch = cart.some((item) => item.category === 'merch');
@@ -260,6 +268,7 @@ export default function CheckoutPage() {
     setAwaitingFinality(false);
     setFinalityMessage('');
     setPaymentTimedOut(false);
+    paymentTimedOutRef.current = false;
 
     // AbortController: kills the fetch if the network hangs (Wi-Fi→5G switch)
     const controller = new AbortController();
@@ -294,6 +303,7 @@ export default function CheckoutPage() {
         clearTimeout(timer);
         // Network timeout — payment may have been captured server-side
         if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+          paymentTimedOutRef.current = true;
           setPaymentTimedOut(true);
           setError(
             'The connection timed out while processing your payment. ' +
@@ -336,7 +346,7 @@ export default function CheckoutPage() {
       setSuccess(true);
       localStorage.removeItem('brewhub_cart');
     } catch (err: unknown) {
-      if (!paymentTimedOut) {
+      if (!paymentTimedOutRef.current) {
         setError(err instanceof Error ? err.message : 'Payment failed. Please try again.');
       }
     } finally {
@@ -345,7 +355,7 @@ export default function CheckoutPage() {
       setWalletProcessing(false);
       setAwaitingFinality(false);
     }
-  }, [cart, email, name, fulfillmentType, addressLine1, addressLine2, city, state, zip, phone, waitForPaymentFinality, paymentTimedOut]);
+  }, [cart, email, name, fulfillmentType, addressLine1, addressLine2, city, state, zip, phone, waitForPaymentFinality]);
 
   /** Validate fulfillment fields; returns error message or empty string */
   function validateFulfillment(): string {
@@ -363,11 +373,13 @@ export default function CheckoutPage() {
   // ── Card payment (form submit) ──
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (isProcessing) return;
+    if (isProcessing || submittingRef.current) return;
+    submittingRef.current = true;
     const ffError = validateFulfillment();
-    if (ffError) { setError(ffError); return; }
+    if (ffError) { setError(ffError); submittingRef.current = false; return; }
     if (!cardRef.current || !email.trim()) {
       setError('Please fill in your email and card details');
+      submittingRef.current = false;
       return;
     }
 
@@ -385,16 +397,20 @@ export default function CheckoutPage() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Payment failed. Please try again.');
       setLoading(false);
+    } finally {
+      submittingRef.current = false;
     }
   }
 
   // ── Wallet payment (Apple Pay / Google Pay) ──
   async function handleWalletPayment(walletMethod: SquarePaymentMethod, walletName: string) {
-    if (isProcessing) return;
+    if (isProcessing || submittingRef.current) return;
+    submittingRef.current = true;
     const ffError = validateFulfillment();
-    if (ffError) { setError(ffError); return; }
+    if (ffError) { setError(ffError); submittingRef.current = false; return; }
     if (!email.trim()) {
       setError('Please enter your email before paying');
+      submittingRef.current = false;
       return;
     }
 
@@ -412,6 +428,8 @@ export default function CheckoutPage() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : `${walletName} payment failed. Please try card payment.`);
       setWalletProcessing(false);
+    } finally {
+      submittingRef.current = false;
     }
   }
 

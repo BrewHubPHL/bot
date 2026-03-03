@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useOpsSession } from '@/components/OpsGate';
+import { fetchOps } from '@/utils/ops-api';
 import { BarChart3, Users, DollarSign, Package, RefreshCw } from 'lucide-react';
 import KdsSection from '@/app/(site)/components/manager/KdsSection';
 
@@ -12,29 +13,9 @@ export default function ManagerDashboard() {
   const [inventory, setInventory] = useState<any[]>([]);
   const [payroll, setPayroll] = useState<any[]>([]);
 
-  useEffect(() => {
-    loadDashboardData();
-    // Real-time subscription to refresh sales when orders are updated
-    const channel = supabase.channel('manager-sync')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: 'status=eq.completed' }, () => loadSalesReport())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, []);
-
-  async function loadDashboardData() {
-    await Promise.all([
-      loadSalesReport(),
-      loadStaffStats(),
-      loadInventory(),
-      loadPayroll()
-    ]);
-  }
-
-  async function loadSalesReport() {
+  const loadSalesReport = useCallback(async () => {
     try {
-      const res = await fetch('/.netlify/functions/sales-report', {
-        headers: { 'Authorization': `Bearer ${token}`, 'X-BrewHub-Action': 'true' }
-      });
+      const res = await fetchOps('/sales-report', {}, token);
       if (res.ok) {
         const data = await res.json();
         setStats(prev => ({ ...prev, revenue: data.gross_revenue, orders: data.total_orders }));
@@ -42,13 +23,11 @@ export default function ManagerDashboard() {
     } catch (err) {
       console.error('[ADMIN] Sales report load failed');
     }
-  }
+  }, [token]);
 
-  async function loadStaffStats() {
+  const loadStaffStats = useCallback(async () => {
     try {
-      const res = await fetch('/.netlify/functions/get-manager-stats', {
-        headers: { 'Authorization': `Bearer ${token}`, 'X-BrewHub-Action': 'true' }
-      });
+      const res = await fetchOps('/get-manager-stats', {}, token);
       if (res.ok) {
         const data = await res.json();
         setStats(prev => ({
@@ -60,13 +39,11 @@ export default function ManagerDashboard() {
     } catch (err) {
       console.error('[ADMIN] Staff stats load failed');
     }
-  }
+  }, [token]);
 
-  async function loadInventory() {
+  const loadInventory = useCallback(async () => {
     try {
-      const res = await fetch('/.netlify/functions/get-inventory', {
-        headers: { 'Authorization': `Bearer ${token}`, 'X-BrewHub-Action': 'true' }
-      });
+      const res = await fetchOps('/get-inventory', {}, token);
       if (res.ok) {
         const data = await res.json();
         setInventory(Array.isArray(data) ? data.slice(0, 5) : []);
@@ -74,13 +51,11 @@ export default function ManagerDashboard() {
     } catch (err) {
       console.error('[ADMIN] Inventory load failed');
     }
-  }
+  }, [token]);
 
-  async function loadPayroll() {
+  const loadPayroll = useCallback(async () => {
     try {
-      const res = await fetch('/.netlify/functions/get-payroll', {
-        headers: { 'Authorization': `Bearer ${token}`, 'X-BrewHub-Action': 'true' }
-      });
+      const res = await fetchOps('/get-payroll', {}, token);
       if (res.ok) {
         const data = await res.json();
         setPayroll(Array.isArray(data) ? data : (data.payroll || []));
@@ -88,7 +63,25 @@ export default function ManagerDashboard() {
     } catch (err) {
       console.error('[ADMIN] Payroll load failed');
     }
-  }
+  }, [token]);
+
+  const loadDashboardData = useCallback(async () => {
+    await Promise.all([
+      loadSalesReport(),
+      loadStaffStats(),
+      loadInventory(),
+      loadPayroll()
+    ]);
+  }, [loadSalesReport, loadStaffStats, loadInventory, loadPayroll]);
+
+  useEffect(() => {
+    loadDashboardData();
+    // Real-time subscription to refresh sales when orders are updated
+    const channel = supabase.channel('manager-sync')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: 'status=eq.completed' }, () => loadSalesReport())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [loadDashboardData, loadSalesReport]);
 
   return (
     <div className="min-h-screen bg-stone-50 pt-24 pb-12 px-6 max-w-7xl mx-auto space-y-10">

@@ -151,12 +151,21 @@ export default function ResidentPortal() {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const authSubmittingRef = useRef(false);
   const [signupDone, setSignupDone] = useState(false);
 
   /* Auth rate-limiting state */
   const authAttemptsRef = useRef(0);
   const cooldownUntilRef = useRef(0);
+  const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
+
+  /* Clean up cooldown interval on unmount to prevent memory leak */
+  useEffect(() => {
+    return () => {
+      if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+    };
+  }, []);
 
   /* Dashboard state */
   const [unitNumber, setUnitNumber] = useState<string | null>(null);
@@ -169,6 +178,7 @@ export default function ResidentPortal() {
   const [pickupQrUrl, setPickupQrUrl] = useState<string | null>(null);
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
   const [parcelPop, setParcelPop] = useState<string | null>(null); // id of freshly arrived parcel
+  const parcelPopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ── Client-side QR generation (H6: UUID never leaves browser) ── */
   useEffect(() => {
@@ -314,7 +324,9 @@ export default function ResidentPortal() {
                   // "Pop" animation for INSERT events
                   if (payload.eventType === "INSERT" && payload.new?.id) {
                     setParcelPop(payload.new.id);
-                    setTimeout(() => setParcelPop(null), 1500);
+                    // Clear any previous pop timer to prevent stacked timeouts
+                    if (parcelPopTimerRef.current) clearTimeout(parcelPopTimerRef.current);
+                    parcelPopTimerRef.current = setTimeout(() => setParcelPop(null), 1500);
                   }
                 }
               });
@@ -359,6 +371,7 @@ export default function ResidentPortal() {
       .subscribe();
 
     return () => {
+      if (parcelPopTimerRef.current) clearTimeout(parcelPopTimerRef.current);
       if (parcelsChannel) supabase.removeChannel(parcelsChannel);
       supabase.removeChannel(ordersChannel);
       supabase.removeChannel(coffeeChannel);
@@ -463,6 +476,9 @@ export default function ResidentPortal() {
     e.preventDefault();
     setAuthError("");
 
+    // Synchronous ref guard — prevents double-submit race condition
+    if (authSubmittingRef.current) return;
+
     // Rate-limit check: cooldown active?
     const now = Date.now();
     if (now < cooldownUntilRef.current) {
@@ -471,6 +487,7 @@ export default function ResidentPortal() {
       return;
     }
 
+    authSubmittingRef.current = true;
     setAuthLoading(true);
 
     // Cap inputs before sending
@@ -513,6 +530,7 @@ export default function ResidentPortal() {
                 "Go to the POS terminal or staff hub to log in."
               );
               setAuthLoading(false);
+              authSubmittingRef.current = false;
               return;
             }
           } catch {
@@ -541,9 +559,15 @@ export default function ResidentPortal() {
       if (authAttemptsRef.current >= MAX_AUTH_ATTEMPTS) {
         cooldownUntilRef.current = Date.now() + AUTH_COOLDOWN_MS;
         setCooldownRemaining(AUTH_COOLDOWN_MS / 1000);
-        const timer = setInterval(() => {
+        // Clear any previous cooldown timer before starting a new one
+        if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = setInterval(() => {
           setCooldownRemaining((prev) => {
-            if (prev <= 1) { clearInterval(timer); return 0; }
+            if (prev <= 1) {
+              if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+              cooldownTimerRef.current = null;
+              return 0;
+            }
             return prev - 1;
           });
         }, 1000);
@@ -551,6 +575,7 @@ export default function ResidentPortal() {
       }
     }
     setAuthLoading(false);
+    authSubmittingRef.current = false;
   }
 
   /* ── Print keychain ────────────────────────────────────── */

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import {
   Clock,
@@ -73,19 +73,33 @@ interface KdsOrderCardProps {
 export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyRing, isExiting = false, isAwaitingPayment = false, onItemToggle }: KdsOrderCardProps) {
   // Optimistic toggle state: tracks items being toggled (waiting for Realtime)
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set())
+  const toggleTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  // Cleanup all toggle timers on unmount
+  useEffect(() => {
+    return () => {
+      toggleTimersRef.current.forEach((t) => clearTimeout(t))
+      toggleTimersRef.current.clear()
+    }
+  }, [])
 
   const handleToggle = useCallback((itemId: string) => {
     if (!itemId || !onItemToggle) return
     setTogglingIds((prev) => new Set(prev).add(itemId))
     onItemToggle(itemId)
+    // Clear any existing timer for this item
+    const existing = toggleTimersRef.current.get(itemId)
+    if (existing) clearTimeout(existing)
     // Clear toggling state after Realtime should have caught up
-    setTimeout(() => {
+    const t = setTimeout(() => {
       setTogglingIds((prev) => {
         const next = new Set(prev)
         next.delete(itemId)
         return next
       })
+      toggleTimersRef.current.delete(itemId)
     }, 3000)
+    toggleTimersRef.current.set(itemId, t)
   }, [onItemToggle])
 
   const completedCount = order.items.filter((i) => i.completed_at).length

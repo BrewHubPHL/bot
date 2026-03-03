@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, createContext, useContext, type ReactNode } from "react";
+import { useState, useCallback, useEffect, useRef, createContext, useContext, type ReactNode } from "react";
 import {
   Lock, LogIn, LogOut, Loader2, Clock, AlertCircle, User, CheckCircle2, Delete, Shield, ScanFace, Fingerprint, WifiOff
 } from "lucide-react";
@@ -138,6 +138,9 @@ export default function OpsGate({ children, requireManager = false }: { children
   const [verifying, setVerifying] = useState(false);
   const [clockLoading, setClockLoading] = useState(false);
   const [clockMsg, setClockMsg] = useState("");
+
+  // Synchronous ref lock — prevents double-submit race on fast taps/auto-submit
+  const submittingRef = useRef(false);
 
   // TOTP fallback state
   const [isTotpMode, setIsTotpMode] = useState(false);
@@ -289,6 +292,10 @@ export default function OpsGate({ children, requireManager = false }: { children
 
 
   const handleSubmit = useCallback(async () => {
+    // Synchronous ref guard — React state (loading) is async and can't
+    // prevent a double-fire from fast taps or the auto-submit useEffect.
+    if (submittingRef.current) return;
+
     if (!isTotpMode && pin.length !== 6) {
       setError("Enter your 6-digit PIN");
       return;
@@ -298,6 +305,7 @@ export default function OpsGate({ children, requireManager = false }: { children
       return;
     }
 
+    submittingRef.current = true;
     setLoading(true);
     setError("");
 
@@ -352,6 +360,7 @@ export default function OpsGate({ children, requireManager = false }: { children
       setIsTotpMode(false);
     } finally {
       setLoading(false);
+      submittingRef.current = false;
     }
   }, [pin, totpCode, isTotpMode]);
 
@@ -473,6 +482,9 @@ export default function OpsGate({ children, requireManager = false }: { children
       };
       setSession(newSession);
       setPin("");
+
+      // Always land on the staff hub (clock-in portal) after login
+      opsRouter.replace("/staff-hub");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Passkey login failed";
       // Don't show error for user cancellation

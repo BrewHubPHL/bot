@@ -45,6 +45,12 @@ export default function ManagerChallengeModal({
   const [verifying, setVerifying] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup success timer on unmount
+  useEffect(() => {
+    return () => { if (successTimerRef.current) clearTimeout(successTimerRef.current); };
+  }, []);
 
   // Issue challenge on mount
   useEffect(() => {
@@ -112,7 +118,8 @@ export default function ManagerChallengeModal({
   // Focus input when entering verify step
   useEffect(() => {
     if (step === "verify") {
-      setTimeout(() => inputRef.current?.focus(), 100);
+      const t = setTimeout(() => inputRef.current?.focus(), 100);
+      return () => clearTimeout(t);
     }
   }, [step]);
 
@@ -152,7 +159,7 @@ export default function ManagerChallengeModal({
 
       setStep("success");
       // Brief success flash, then callback
-      setTimeout(() => onSuccess(nonce), 600);
+      successTimerRef.current = setTimeout(() => onSuccess(nonce), 600);
     } catch {
       setError("Connection error — try again");
       setUserCode("");

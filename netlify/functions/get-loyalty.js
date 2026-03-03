@@ -107,11 +107,15 @@ exports.handler = async (event) => {
     // Unified CRM: single customers table lookup
     if (email) {
       const normalized = String(email).toLowerCase().trim();
-      const { data } = await supabase
+      const { data, error: emailErr } = await supabase
         .from('customers')
         .select('id, email, full_name, loyalty_points')
         .eq('email', normalized)
         .maybeSingle();
+      if (emailErr) {
+        console.error('[GET-LOYALTY] Email lookup failed:', emailErr.message);
+        return json(502, { success: false, error: 'Loyalty lookup failed' });
+      }
       customer = data;
       lookupEmail = normalized;
     }
@@ -120,11 +124,15 @@ exports.handler = async (event) => {
     if (!customer && phone) {
       const cleanPhone = phone.replace(/\D/g, '').slice(-10);
       if (cleanPhone.length >= 7) {
-        const { data } = await supabase
+        const { data, error: phoneErr } = await supabase
           .from('customers')
           .select('id, email, full_name, loyalty_points')
           .like('phone', `%${cleanPhone}`)
           .maybeSingle();
+        if (phoneErr) {
+          console.error('[GET-LOYALTY] Phone lookup failed:', phoneErr.message);
+          return json(502, { success: false, error: 'Loyalty lookup failed' });
+        }
         if (data) {
           customer = data;
           lookupEmail = data.email;

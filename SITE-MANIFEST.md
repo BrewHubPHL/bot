@@ -12,7 +12,7 @@
 2. [3rd Party API Dependencies](#2-3rd-party-api-dependencies)
 3. [Shared Utilities](#3-shared-utilities-srclib)
 4. [Complete Netlify Functions Inventory](#4-complete-netlify-functions-inventory)
-5. [Complete SQL Schema Inventory (1–79 + CRM)](#5-complete-sql-schema-inventory-179--crm)
+5. [Complete SQL Schema Inventory (1–79 + CRM + Specialty Menu + Staff Phone)](#5-complete-sql-schema-inventory-179--crm)
 6. [Complete Frontend Page Inventory](#6-complete-frontend-page-inventory)
 7. [Frontend Components Inventory](#7-frontend-components-inventory)
 8. [Supabase Edge Functions](#8-supabase-edge-functions)
@@ -122,9 +122,13 @@
 
 *(Refer to codebase for full HTTP methods and Auth mapping. All authenticated frontend operations now enforce `credentials: "include"` via the central `fetchOps()` wrapper.)*
 
+| Function | Method | Auth | Purpose |
+|---|---|---|---|
+| `get-crm-customers.js` | GET | Manager PIN | Returns filtered `customers` rows for CRM drill-down (8 filter modes: all, app_users, walk_in, mailbox, vip, loyalty, active_30d, new_7d). Origin-validated CORS, 500-row limit, 15s cache. |
+
 ---
 
-## 5. Complete SQL Schema Inventory (1–79 + CRM)
+## 5. Complete SQL Schema Inventory (1–79 + CRM + Specialty Menu)
 
 | Schema | Purpose |
 |---|---|
@@ -157,6 +161,9 @@
 | `schema-79_performance` | Embedded O(1) token versioning within PIN verifications |
 | `20260302_unified_crm` | Unified CRM: merges `profiles` + `residents` → single `customers` table with `auth_id`, `unit_number`, VIP, loyalty |
 | `20260302_crm_insights_rpc` | `crm_insights()` RPC: aggregated CRM stats for the manager dashboard |
+| `20260302_scheduled_shifts_staff_fk` | Repairs `scheduled_shifts.user_id` FK to reference `staff_directory(id)` and cascades deletes safely |
+| `20260302_specialty_coffee_menu` | Adds `long_description` (TEXT) and `allowed_modifiers` (JSONB) to `merch_products`; archives legacy menu items; inserts 7 curated specialty coffee items |
+| `20260302_add_staff_phone` | Adds nullable `phone TEXT` column to `staff_directory`; inherited by `v_staff_status` view |
 
 ---
 
@@ -167,7 +174,7 @@
 |---|---|---|
 | `/` | None | Homepage — hero, waitlist, AI chat |
 | `/about`, `/privacy`, `/terms` | None | Informational Pages |
-| `/cafe` | None | Customer cafe ordering |
+| ~~`/cafe`~~ | — | *Removed — ordering consolidated into `/shop`* |
 | `/shop` | None | Merch storefront |
 | `/checkout` | None | Cart checkout with Square |
 | `/waitlist` | None | Join waitlist |
@@ -185,6 +192,7 @@
 | `/kds` | Middleware + OpsGate | Kitchen Display System (realtime) |
 | `/scanner` | Middleware + OpsGate | Inventory barcode scanner |
 | `/manager` | Middleware PIN | Manager dashboard |
+| `/manager/calendar` | Middleware PIN | Shift scheduling with multi-employee drag-and-drop |
 | `/manager/fulfillment` | Middleware PIN | Order fulfillment management |
 | `/manager/parcels/monitor` | Middleware PIN | Smart TV kiosk (PII-masked VIEW) |
 | `/staff-hub` | Middleware PIN | Staff portal (clock, orders, inventory) |
@@ -211,6 +219,11 @@
 | `ManagerNav.tsx` | `(site)/components/manager/` | Manager dashboard navigation |
 | `PayrollSection.tsx` | `(site)/components/manager/` | Payroll management |
 | `CrmInsights.tsx` | `(site)/components/manager/` | Unified CRM breakdown (stat cards + top drinks) |
+| `AdminCalendar.tsx` | `src/components/` | Shift calendar with multi-select creation, pill-based rendering, hover tooltips, and grouped drag-and-drop |
+| `ExportOrdersButton.tsx` | `(ops)/manager/` | Client-side CSV export of all `coffee_orders` |
+| `StaffSection.tsx` | `(ops)/manager/components/` | Data-fetching wrapper: loads staff from `v_staff_status` view |
+| `StaffTable.tsx` | `(ops)/manager/components/` | Interactive staff directory table with search, role filtering, action menus, role badges, working-status indicators |
+| `CustomerTable.tsx` | `(site)/components/manager/` | CRM customer table with 8 filter presets, deferred search, action menus, VIP/loyalty badges |
 
 *(Note: `StatsGrid.tsx`, `InventoryTable.tsx`, `RecentActivity.tsx`, and `MobileNav.tsx` were deprecated and removed during the refactor.)*
 
@@ -237,6 +250,15 @@
 | `simulate-rush.js` | Fire simulated webhooks (dev only) |
 | `debug-imports.mjs` | Debug Next.js import resolution |
 | `regenerate_schema_and_diff.py` | Regenerate Supabase schema + diff |
+
+### Test Infrastructure
+| Script / Config | Purpose |
+|---|---|
+| `npm run test:unit` | Run Vitest unit tests |
+| `npm run test:functions` | Run Jest Netlify function tests |
+| `npm run test:e2e` | Run Playwright end-to-end tests |
+| `npm run test:all` | Run all three test suites sequentially |
+| `tests/jest.config.functions.js` | Dedicated Jest config for Netlify function tests |
 
 ---
 

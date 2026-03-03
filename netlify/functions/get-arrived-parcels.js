@@ -1,8 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-
 function sanitize(text, max = 120) {
   if (typeof text !== 'string') return null;
   return text.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, max);
@@ -41,6 +39,11 @@ exports.handler = async (event) => {
   }
 
   try {
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+
     // Fetch both arrived AND pending_notification (dead-letter) parcels for staff visibility
     const { data, error } = await supabase
       .from('parcels')

@@ -11,6 +11,15 @@ You are acting as the Lead Full-Stack Security Engineer and Next.js Expert for B
 
 ---
 
+## 📝 Duty to Document
+**You must never leave documentation out of sync with the code.**
+- Whenever you modify the codebase (especially database schemas, security rules, or core logic), you MUST concurrently update the relevant markdown files.
+- **Architectural/Schema changes:** Update `SYSTEM-BLUEPRINT.md` and `SITE-MANIFEST.md`.
+- **Operational/Workflow changes:** Update `manager.md`.
+- **Security changes:** Update `README-SECURITY.md`.
+
+---
+
 ## 🔒 Security & Backend Non-Negotiables
 **Read these carefully. Do not propose code that violates these rules.**
 
@@ -46,8 +55,8 @@ You are acting as the Lead Full-Stack Security Engineer and Next.js Expert for B
    - Never use raw `fetch()` to ensure cookies and CSRF headers are sent.
 
 8. **Database Rules**
-   - Never read or write `is_working` directly on `staff_directory`.
-   - Read from the `v_staff_status` view. Shift states are computed dynamically via `time_logs`.
+   - **Unified CRM:** The `profiles` and `residents` tables have been MERGED into `customers`. Do not query `profiles` or `residents`. All identity, loyalty, and parcel relationships use `customers`.
+   - **Staff Status:** Never read or write `is_working` directly on `staff_directory`. Read from the `v_staff_status` view. Shift states are computed dynamically via `time_logs`.
 
 ---
 

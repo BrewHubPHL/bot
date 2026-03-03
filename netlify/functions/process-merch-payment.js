@@ -297,9 +297,12 @@ exports.handler = async (event) => {
         console.error('Payment failed:', paymentResponse);
         // Rollback reserved stock — card was NOT charged (single batch call)
         if (reservedItems.length > 0) {
-          await supabase.rpc('rollback_merch_stock_batch', {
+          const { error: rollbackErr } = await supabase.rpc('rollback_merch_stock_batch', {
             p_items: reservedItems.map(r => ({ product_id: r.productId, quantity: r.quantity })),
-          }).catch(e => console.error('[MERCH-PAY] Batch rollback failed after payment decline:', e.message));
+          });
+          if (rollbackErr) {
+            console.error('[MERCH-PAY] Batch rollback failed after payment decline:', rollbackErr.message);
+          }
         }
         return { 
           statusCode: 400, 
@@ -310,9 +313,12 @@ exports.handler = async (event) => {
     } catch (squareErr) {
       // Square threw — rollback reserved stock (single batch call)
       if (reservedItems.length > 0) {
-        await supabase.rpc('rollback_merch_stock_batch', {
+        const { error: rollbackErr } = await supabase.rpc('rollback_merch_stock_batch', {
           p_items: reservedItems.map(r => ({ product_id: r.productId, quantity: r.quantity })),
-        }).catch(e => console.error('[MERCH-PAY] Batch rollback failed after Square error:', e.message));
+        });
+        if (rollbackErr) {
+          console.error('[MERCH-PAY] Batch rollback failed after Square error:', rollbackErr.message);
+        }
       }
       throw squareErr; // re-throw so outer catch returns 400/500
     }
@@ -351,9 +357,12 @@ exports.handler = async (event) => {
       // CRITICAL: Payment succeeded but DB insert failed.
       // 1. Rollback reserved stock (single batch call)
       if (reservedItems.length > 0) {
-        await supabase.rpc('rollback_merch_stock_batch', {
+        const { error: rollbackErr } = await supabase.rpc('rollback_merch_stock_batch', {
           p_items: reservedItems.map(r => ({ product_id: r.productId, quantity: r.quantity })),
-        }).catch(e => console.error('[MERCH-PAY] Batch rollback failed after DB insert error:', e.message));
+        });
+        if (rollbackErr) {
+          console.error('[MERCH-PAY] Batch rollback failed after DB insert error:', rollbackErr.message);
+        }
       }
       // 2. Refund the Square payment so the customer isn't silently charged
       try {

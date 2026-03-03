@@ -107,6 +107,7 @@ export default function ScannerPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanLockRef = useRef(false); // prevents double-scans
+  const saveLockRef = useRef(false); // prevents double-tap on inventory save
   const lastScannedCode = useRef<string>("");
   const lastScannedTime = useRef<number>(0);
   const animFrameRef = useRef<number>(0);
@@ -314,6 +315,8 @@ export default function ScannerPage() {
     if (!currentItem) return;
     const delta = pendingStock - (currentItem.current_stock || 0);
     if (delta === 0) { clearResult(); return; }
+    if (saveLockRef.current) return;
+    saveLockRef.current = true;
 
     setViewState("saving");
 
@@ -355,6 +358,8 @@ export default function ScannerPage() {
       setStatusMsg(msg);
       setViewState("error");
       haptic("error");
+    } finally {
+      saveLockRef.current = false;
     }
   };
 

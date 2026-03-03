@@ -102,6 +102,19 @@ exports.handler = async (event) => {
         .gte('start_time', twentyFourHoursAgo),
     ]);
 
+    // Fail fast if any query returned an error — do not render stale/empty stats
+    const dbErrors = [
+      ordersRes.error && `orders: ${ordersRes.error.message}`,
+      staffRes.error && `staff: ${staffRes.error.message}`,
+      logsRes.error && `time_logs: ${logsRes.error.message}`,
+      inventoryRes.error && `inventory: ${inventoryRes.error.message}`,
+      noShowRes.error && `no_shows: ${noShowRes.error.message}`,
+    ].filter(Boolean);
+    if (dbErrors.length > 0) {
+      console.error('[GET-MANAGER-STATS] DB query errors:', dbErrors.join('; '));
+      return { statusCode: 502, headers, body: JSON.stringify({ error: 'Database query failed', details: dbErrors }) };
+    }
+
     const orderData = ordersRes.data || [];
     const staffData = staffRes.data || [];
     const logsData = logsRes.data || [];

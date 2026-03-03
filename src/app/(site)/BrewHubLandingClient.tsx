@@ -89,6 +89,9 @@ export default function BrewHubLandingClient() {
   const [email, setEmail] = useState("");
   const [isJoined, setIsJoined] = useState(false);
   const [waitlistError, setWaitlistError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const chatSubmittingRef = useRef(false);
   const [chatInput, setChatInput] = useState("");
   const [chatTyping, setChatTyping] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'assistant', content: "Hey! I'm Elise, your BrewHub helper. Ask me about our opening, your waitlist spot, or the menu!" }]);
@@ -388,25 +391,36 @@ export default function BrewHubLandingClient() {
   // 2. WAITLIST LOGIC
   const handleWaitlist = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
     setWaitlistError("");
-    const { error } = await supabase.from('waitlist').insert([{ email }]);
-    if (!error) {
-      setIsJoined(true);
-      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-      localStorage.setItem('brewhub_email', email);
-    } else {
-      setWaitlistError(
-        error.code === '23505'
-          ? "You're already on the list! We'll see you soon."
-          : "Something went wrong. Please try again."
-      );
+    try {
+      const { error } = await supabase.from('waitlist').insert([{ email }]);
+      if (!error) {
+        setIsJoined(true);
+        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        localStorage.setItem('brewhub_email', email);
+      } else {
+        setWaitlistError(
+          error.code === '23505'
+            ? "You're already on the list! We'll see you soon."
+            : "Something went wrong. Please try again."
+        );
+      }
+    } catch {
+      setWaitlistError("Network error — please check your connection and try again.");
+    } finally {
+      setIsSubmitting(false);
+      submittingRef.current = false;
     }
   };
 
   // 3. TEXT CHAT LOGIC (Claude-powered — same backend as voice)
   const handleTextChat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || chatTyping) return;
+    if (!chatInput.trim() || chatSubmittingRef.current) return;
+    chatSubmittingRef.current = true;
 
     const userText = chatInput;
     setMessages(prev => [...prev, { role: 'user', content: userText }]);
@@ -420,6 +434,7 @@ export default function BrewHubLandingClient() {
       setMessages(prev => [...prev, { role: 'assistant', content: "I'm having trouble connecting to my coffee sensors. Try again in a second!" }]);
     } finally {
       setChatTyping(false);
+      chatSubmittingRef.current = false;
     }
   };
 
@@ -457,7 +472,9 @@ export default function BrewHubLandingClient() {
                 className="hero-input"
                 required
               />
-              <button type="submit" className="hero-btn">Join Waitlist</button>
+              <button type="submit" className="hero-btn" disabled={isSubmitting}>
+                {isSubmitting ? 'Joining…' : 'Join Waitlist'}
+              </button>
             </form>
           ) : (
             <div className="hero-success">You&apos;re on the list. We&apos;ll see you soon at the Hub. ☕</div>
@@ -469,10 +486,25 @@ export default function BrewHubLandingClient() {
               (e.g. staff dashboard shortcut) must never be added here
               since even with ssr:false the initial render should be
               deterministic and not depend on cookie/session state. */}
-          <div className="flex flex-wrap justify-center gap-3 mt-6 w-full">
-            <a href="/shop" className="hero-cta-link">Browse the Shop</a>
-            <a href="/about" className="hero-cta-link">Our Story</a>
-            <a href="/location" className="hero-cta-link">Find Us</a>
+          <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3 sm:gap-4 mt-8 w-full">
+            <a
+              href="/shop"
+              className="inline-flex items-center justify-center px-5 py-2.5 text-xs sm:text-sm font-bold uppercase tracking-[0.12em] text-stone-800 border-2 border-[#b8860b] rounded-lg hover:bg-[#b8860b] hover:text-white hover:border-stone-900 transition-all duration-200 ease-in-out min-w-[160px] text-center"
+            >
+              Browse the Shop
+            </a>
+            <a
+              href="/about"
+              className="inline-flex items-center justify-center px-5 py-2.5 text-xs sm:text-sm font-bold uppercase tracking-[0.12em] text-stone-800 border-2 border-[#b8860b] rounded-lg hover:bg-[#b8860b] hover:text-white hover:border-stone-900 transition-all duration-200 ease-in-out min-w-[160px] text-center"
+            >
+              Our Story
+            </a>
+            <a
+              href="/location"
+              className="inline-flex items-center justify-center px-5 py-2.5 text-xs sm:text-sm font-bold uppercase tracking-[0.12em] text-stone-800 border-2 border-[#b8860b] rounded-lg hover:bg-[#b8860b] hover:text-white hover:border-stone-900 transition-all duration-200 ease-in-out min-w-[160px] text-center"
+            >
+              Find Us
+            </a>
           </div>
         </div>
       </section>

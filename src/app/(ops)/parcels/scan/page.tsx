@@ -386,15 +386,18 @@ export default function ParcelScanPage() {
         value_tier: "standard",
       };
 
-      if (isGhostWithInfo) {
-        // Ghost / Quick-Add: pass name + phone directly
+      if (resident?.id) {
+        // Known resident (includes post-upsert ghosts with a UUID)
+        payload.resident_id = resident.id;
+        payload.recipient_name = resident.name || ghostName.trim() || undefined;
+      } else if (isGhostWithInfo) {
+        // Ghost / Quick-Add with no DB record yet: pass raw strings
         payload.recipient_name = ghostName.trim();
         payload.phone_number = ghostPhone.replace(/\D/g, "") || undefined;
         payload.unit_number = unitInput.trim();
       } else {
-        // Known resident
+        // Fallback — known resident without an id (shouldn't happen)
         payload.recipient_name = resident?.name || undefined;
-        payload.resident_id = resident?.id ?? undefined;
       }
 
       const res = await fetchOps("/parcel-check-in", {
@@ -425,7 +428,7 @@ export default function ParcelScanPage() {
           tracking: trimmedTracking,
           unit: unitInput.trim(),
           carrier,
-          recipientName: isGhostWithInfo ? ghostName.trim() : (resident?.name || null),
+          recipientName: resident?.name || (isGhostWithInfo ? ghostName.trim() : null),
           timestamp: Date.now(),
           source: "local" as const,
         }, ...prev].slice(0, 50),

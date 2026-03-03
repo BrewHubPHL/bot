@@ -182,12 +182,17 @@ exports.handler = async (event, context) => {
           // Square terminal checkout was cancelled (customer walked away, timeout, etc.)
           // Mark the order so cancel-stale-orders doesn't re-check it
           console.log(`[RECONCILE] Checkout cancelled for order ${order.id}. Marking as cancelled.`);
-          await supabase.from('orders').update({
+          const { error: cancelErr } = await supabase.from('orders').update({
             status: 'cancelled',
             notes: 'Terminal checkout cancelled by Square',
             updated_at: new Date().toISOString()
           }).eq('id', order.id).eq('status', 'pending');
-          cancelled++;
+          if (cancelErr) {
+            console.error(`[RECONCILE] Failed to mark order ${order.id} as cancelled:`, cancelErr.message);
+            errors++;
+          } else {
+            cancelled++;
+          }
 
         } else {
           // PENDING, IN_PROGRESS, CANCEL_REQUESTED — still waiting

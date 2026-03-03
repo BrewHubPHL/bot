@@ -37,6 +37,7 @@ const KNOWN_MODIFIERS = {
   'Extra Shot': 100,
   'Vanilla Syrup': 50,
   'Caramel Syrup': 50,
+  'Chocolate': 75,
   'Make it Iced': 0,
   'Sugar': 0,
 };
@@ -406,7 +407,10 @@ exports.handler = async (event) => {
 
     if (itemErr) {
       // Coffee items failed — rollback the parent order to prevent a ghost KDS card
-      await supabase.from('orders').delete().eq('id', order.id);
+      const { error: rollbackError } = await supabase.from('orders').delete().eq('id', order.id);
+      if (rollbackError) {
+        console.error(`[CAFE] Ghost ticket: orders rollback failed for ${order.id}:`, rollbackError.message);
+      }
       // ── DEAD LETTER: order was created then rolled back ─────
       await logSystemError(supabase, {
         error_type: 'db_insert_failed',
@@ -432,26 +436,32 @@ exports.handler = async (event) => {
       // Non-managers cannot comp orders above the cap
       if (!isManager && totalCents > COMP_CAP_CENTS) {
         // Rollback: delete the order we just created
-        await supabase.from('coffee_orders').delete().eq('order_id', order.id);
-        await supabase.from('orders').delete().eq('id', order.id);
+        const { error: rollbackItemsErr } = await supabase.from('coffee_orders').delete().eq('order_id', order.id);
+        if (rollbackItemsErr) {
+          console.error(`[CAFE] Ghost ticket: coffee_orders rollback failed for ${order.id}:`, rollbackItemsErr.message);
+        }
+        const { error: rollbackOrderErr } = await supabase.from('orders').delete().eq('id', order.id);
+        if (rollbackOrderErr) {
+          console.error(`[CAFE] Ghost ticket: orders rollback failed for ${order.id}:`, rollbackOrderErr.message);
+        }
         return json(403, {
           error: `Comp limit is $${(COMP_CAP_CENTS / 100).toFixed(2)} for non-manager staff. Ask a manager to approve.`,
         });
       }
 
-      try {
-        await supabase.from('comp_audit').insert({
-          order_id:     order.id,
-          staff_id:     auth.user?.id || null,
-          staff_email:  auth.user?.email || 'unknown',
-          staff_role:   auth.role || 'unknown',
-          amount_cents: totalCents,
-          reason:       compReason.slice(0, 500),
-          is_manager:   !!isManager,
-        });
+      const { error: compAuditErr } = await supabase.from('comp_audit').insert({
+        order_id:     order.id,
+        staff_id:     auth.user?.id || null,
+        staff_email:  auth.user?.email || 'unknown',
+        staff_role:   auth.role || 'unknown',
+        amount_cents: totalCents,
+        reason:       compReason.slice(0, 500),
+        is_manager:   !!isManager,
+      });
+      if (compAuditErr) {
+        console.error(`[COMP AUDIT] Non-fatal audit insert error for order ${order.id}:`, compAuditErr.message);
+      } else {
         console.log(`[COMP AUDIT] ${auth.user?.email} (${auth.role}) comped order ${order.id} ($${(totalCents / 100).toFixed(2)}): ${compReason}`);
-      } catch (auditErr) {
-        console.error('[COMP AUDIT] Non-fatal audit insert error:', auditErr.message);
       }
     }
 

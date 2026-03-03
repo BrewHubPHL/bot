@@ -3,6 +3,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { fetchOps } from "@/utils/ops-api";
+import CustomerTable, {
+  type CustomerRow,
+  type CrmFilter,
+} from "./CustomerTable";
 import {
   Users,
   Smartphone,
@@ -45,26 +49,34 @@ function StatCard({
   value,
   sub,
   accent = "amber",
+  onClick,
+  isActive = false,
 }: {
   icon: React.ElementType;
   label: string;
   value: string | number;
   sub?: string;
   accent?: "amber" | "emerald" | "sky" | "rose" | "violet";
+  onClick?: () => void;
+  isActive?: boolean;
 }) {
-  const colors: Record<string, { bg: string; icon: string; ring: string }> = {
-    amber:   { bg: "bg-amber-500/10",   icon: "text-amber-400",   ring: "ring-amber-500/20" },
-    emerald: { bg: "bg-emerald-500/10", icon: "text-emerald-400", ring: "ring-emerald-500/20" },
-    sky:     { bg: "bg-sky-500/10",     icon: "text-sky-400",     ring: "ring-sky-500/20" },
-    rose:    { bg: "bg-rose-500/10",    icon: "text-rose-400",    ring: "ring-rose-500/20" },
-    violet:  { bg: "bg-violet-500/10",  icon: "text-violet-400",  ring: "ring-violet-500/20" },
+  const colors: Record<string, { bg: string; icon: string; ring: string; activeRing: string }> = {
+    amber:   { bg: "bg-amber-500/10",   icon: "text-amber-400",   ring: "ring-amber-500/20",   activeRing: "ring-amber-400/60" },
+    emerald: { bg: "bg-emerald-500/10", icon: "text-emerald-400", ring: "ring-emerald-500/20", activeRing: "ring-emerald-400/60" },
+    sky:     { bg: "bg-sky-500/10",     icon: "text-sky-400",     ring: "ring-sky-500/20",     activeRing: "ring-sky-400/60" },
+    rose:    { bg: "bg-rose-500/10",    icon: "text-rose-400",    ring: "ring-rose-500/20",    activeRing: "ring-rose-400/60" },
+    violet:  { bg: "bg-violet-500/10",  icon: "text-violet-400",  ring: "ring-violet-500/20",  activeRing: "ring-violet-400/60" },
   };
   const c = colors[accent] || colors.amber;
 
   return (
-    <div
-      className={`relative overflow-hidden rounded-xl ${c.bg} ring-1 ${c.ring} p-4 
-                  transition-all hover:scale-[1.02] hover:shadow-lg`}
+    <button
+      type="button"
+      onClick={onClick}
+      className={`relative overflow-hidden rounded-xl ${c.bg} ring-1 
+                  ${isActive ? `${c.activeRing} ring-2 shadow-lg` : c.ring}
+                  p-4 text-left w-full
+                  transition-all hover:scale-[1.02] hover:shadow-lg cursor-pointer`}
     >
       <div className="flex items-start justify-between">
         <div className="space-y-1">
@@ -80,7 +92,7 @@ function StatCard({
           <Icon size={20} className={c.icon} />
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -206,6 +218,12 @@ export default function CrmInsights() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  /* ── Drill-down state ──────────────────────────────── */
+  const [activeFilter, setActiveFilter] = useState<CrmFilter>("all");
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [custLoading, setCustLoading] = useState(false);
+  const [custError, setCustError] = useState<string | null>(null);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -224,9 +242,46 @@ export default function CrmInsights() {
     }
   }, [token]);
 
+  /* ── Fetch customers when filter changes ───────────── */
+  const fetchCustomers = useCallback(
+    async (filter: CrmFilter) => {
+      setCustLoading(true);
+      setCustError(null);
+      try {
+        const res = await fetchOps(
+          `/get-crm-customers?filter=${encodeURIComponent(filter)}`,
+          {},
+          token
+        );
+        if (!res.ok) {
+          setCustError(`Failed to load customers (${res.status})`);
+          return;
+        }
+        const json = await res.json();
+        setCustomers(json.customers ?? []);
+      } catch {
+        setCustError("Network error loading customers");
+      } finally {
+        setCustLoading(false);
+      }
+    },
+    [token]
+  );
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  /* Fetch customers on initial mount and whenever filter changes */
+  useEffect(() => {
+    fetchCustomers(activeFilter);
+  }, [activeFilter, fetchCustomers]);
+
+  /* ── Card click handler ────────────────────────────── */
+  const handleCardClick = (filter: CrmFilter) => {
+    // Clicking the already-active card resets to 'all'
+    setActiveFilter((prev) => (prev === filter ? "all" : filter));
+  };
 
   /* ── Loading / Error states ──────────────────────────── */
   if (loading) {
@@ -287,6 +342,8 @@ export default function CrmInsights() {
           value={data.total_customers.toLocaleString()}
           sub={`${data.new_last_7d} new this week`}
           accent="amber"
+          onClick={() => handleCardClick("all")}
+          isActive={activeFilter === "all"}
         />
         <StatCard
           icon={Smartphone}
@@ -294,6 +351,8 @@ export default function CrmInsights() {
           value={data.app_users.toLocaleString()}
           sub={`${data.total_customers > 0 ? Math.round((data.app_users / data.total_customers) * 100) : 0}% of total`}
           accent="emerald"
+          onClick={() => handleCardClick("app_users")}
+          isActive={activeFilter === "app_users"}
         />
         <StatCard
           icon={Footprints}
@@ -301,6 +360,8 @@ export default function CrmInsights() {
           value={data.walk_ins.toLocaleString()}
           sub="No app account yet"
           accent="sky"
+          onClick={() => handleCardClick("walk_in")}
+          isActive={activeFilter === "walk_in"}
         />
         <StatCard
           icon={Mailbox}
@@ -308,6 +369,8 @@ export default function CrmInsights() {
           value={data.mailbox_renters.toLocaleString()}
           sub={`${data.mailbox_cafe_crossover} also order cafe`}
           accent="violet"
+          onClick={() => handleCardClick("mailbox")}
+          isActive={activeFilter === "mailbox"}
         />
       </div>
 
@@ -318,6 +381,8 @@ export default function CrmInsights() {
           label="VIP Customers"
           value={data.vips}
           accent="rose"
+          onClick={() => handleCardClick("vip")}
+          isActive={activeFilter === "vip"}
         />
         <StatCard
           icon={Heart}
@@ -325,6 +390,8 @@ export default function CrmInsights() {
           value={data.loyalty_active.toLocaleString()}
           sub={`${data.total_loyalty_points.toLocaleString()} pts in system`}
           accent="amber"
+          onClick={() => handleCardClick("loyalty")}
+          isActive={activeFilter === "loyalty"}
         />
         <StatCard
           icon={TrendingUp}
@@ -332,14 +399,27 @@ export default function CrmInsights() {
           value={data.active_last_30d}
           sub={`Avg ${data.avg_orders_per_active} orders each`}
           accent="emerald"
+          onClick={() => handleCardClick("active_30d")}
+          isActive={activeFilter === "active_30d"}
         />
         <StatCard
           icon={UserPlus}
           label="New This Week"
           value={data.new_last_7d}
           accent="sky"
+          onClick={() => handleCardClick("new_7d")}
+          isActive={activeFilter === "new_7d"}
         />
       </div>
+
+      {/* ── Customer Drill-Down Table ────────────────── */}
+      <CustomerTable
+        customers={customers}
+        loading={custLoading}
+        error={custError}
+        activeFilter={activeFilter}
+        onClearFilter={() => setActiveFilter("all")}
+      />
 
       {/* ── Crossover Venn + Drinks ──────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

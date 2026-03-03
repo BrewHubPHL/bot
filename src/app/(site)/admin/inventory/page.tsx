@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOpsSession } from '@/components/OpsGate';
 import { fetchOps } from '@/utils/ops-api';
 import { toUserSafeMessage } from '@/lib/errorCatalog';
@@ -26,6 +26,7 @@ export default function InventoryScanner() {
   const [status, setStatus] = useState("Loading inventory…");
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const saveLockRef = useRef(false);
 
   /* ─── Load inventory via authenticated Netlify function ─── */
   const loadInventory = useCallback(async () => {
@@ -58,6 +59,8 @@ export default function InventoryScanner() {
     if (!item) return;
     const delta = pendingStock - item.current_stock;
     if (delta === 0) { setStatus("No change to save."); return; }
+    if (saveLockRef.current) return;
+    saveLockRef.current = true;
 
     setSaving(true);
     setStatus("Saving…");
@@ -84,6 +87,7 @@ export default function InventoryScanner() {
     } catch {
       setStatus("Connection error — try again.");
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   }

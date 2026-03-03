@@ -25,6 +25,18 @@ export default async function (req, context) {
       supabase.from('customers').select('*', { count: 'exact', head: true }).gte('created_at', startTime.toISOString())
     ]);
 
+    // Abort SMS if any query failed — do not send misleading zeros
+    const dbErrors = [
+      orders.error && `orders: ${orders.error.message}`,
+      parcelsIn.error && `parcelsIn: ${parcelsIn.error.message}`,
+      parcelsOut.error && `parcelsOut: ${parcelsOut.error.message}`,
+      newCustomers.error && `newCustomers: ${newCustomers.error.message}`,
+    ].filter(Boolean);
+    if (dbErrors.length > 0) {
+      console.error('[DAILY-PULSE] DB query errors — aborting SMS:', dbErrors.join('; '));
+      return new Response(JSON.stringify({ error: 'DB query failed', details: dbErrors }), { status: 502 });
+    }
+
     const rev = orders.data?.reduce((acc, o) => acc + (o.status === 'completed' ? o.total_amount_cents : 0), 0) || 0;
 
     const message = `

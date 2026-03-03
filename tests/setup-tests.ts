@@ -5,4 +5,7 @@ import { vi } from 'vitest'
   fn: vi.fn,
   mock: vi.mock,
   spyOn: vi.spyOn,
+  clearAllMocks: () => vi.clearAllMocks(),
+  resetAllMocks: () => vi.resetAllMocks(),
+  restoreAllMocks: () => vi.restoreAllMocks(),
 }

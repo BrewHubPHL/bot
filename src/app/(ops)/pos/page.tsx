@@ -30,6 +30,7 @@ interface MenuItem {
   price_cents: number;
   description: string | null;
   image_url: string | null;
+  allowed_modifiers: string[] | null;
 }
 
 interface Modifier {
@@ -37,14 +38,24 @@ interface Modifier {
   price_cents: number;
 }
 
+/** A modifier with a staff-selected quantity (e.g. Sugar x3) */
+interface CartModifier extends Modifier {
+  quantity: number;
+}
+
 interface CartItem {
   id: string; // unique cart-line id
   productId: string; // merch_products UUID (for server-side price lookup)
   name: string;
   price_cents: number;
-  modifiers: Modifier[];
+  modifiers: CartModifier[];
   quantity: number;
   isOpenPrice?: boolean; // true for shipping / TBD items with staff-entered price
+}
+
+/** Format a single cart modifier for KDS / receipt display */
+function formatModifier(m: CartModifier): string {
+  return m.quantity > 1 ? `${m.name} (x${m.quantity})` : m.name;
 }
 
 interface LoyaltyCustomer {
@@ -82,7 +93,7 @@ const CATEGORIES: { key: string; label: string; icon: React.ReactNode; match: (n
     key: "hot",
     label: "Hot Drinks",
     icon: <Coffee size={18} />,
-    match: (n) => /latte|espresso|americano|cappuccino|drip|mocha|macchiato|cortado|coffee/i.test(n) && !/cold|iced/i.test(n),
+    match: (n) => /latte|espresso|americano|cappuccino|drip|mocha|macchiato|cortado|coffee|roast|pour.over/i.test(n) && !/cold|iced/i.test(n),
   },
   {
     key: "cold",
@@ -116,8 +127,49 @@ const DRINK_MODIFIERS: Modifier[] = [
   { name: "Extra Shot", price_cents: 100 },
   { name: "Vanilla Syrup", price_cents: 50 },
   { name: "Caramel Syrup", price_cents: 50 },
+  { name: "Chocolate", price_cents: 75 },
   { name: "Make it Iced", price_cents: 0 },
 ];
+
+/** Modifier groups keyed by allowed_modifiers values from the DB */
+const MODIFIER_GROUPS: Record<string, Modifier[]> = {
+  milks: [
+    { name: "Oat Milk", price_cents: 75 },
+    { name: "Almond Milk", price_cents: 75 },
+  ],
+  sweeteners: [
+    { name: "Sugar", price_cents: 0 },
+  ],
+  standard_syrups: [
+    { name: "Vanilla Syrup", price_cents: 50 },
+    { name: "Caramel Syrup", price_cents: 50 },
+  ],
+  specialty_addins: [
+    { name: "Chocolate", price_cents: 75 },
+    { name: "Extra Shot", price_cents: 100 },
+    { name: "Make it Iced", price_cents: 0 },
+  ],
+};
+
+/** Resolve allowed_modifiers JSON array from DB into a flat list of Modifier objects */
+function getModifiersForItem(item: MenuItem): Modifier[] {
+  const groups = item.allowed_modifiers;
+  if (!groups || groups.length === 0) return [];
+  const seen = new Set<string>();
+  const result: Modifier[] = [];
+  for (const groupKey of groups) {
+    const mods = MODIFIER_GROUPS[groupKey];
+    if (mods) {
+      for (const mod of mods) {
+        if (!seen.has(mod.name)) {
+          seen.add(mod.name);
+          result.push(mod);
+        }
+      }
+    }
+  }
+  return result;
+}
 
 function categorize(name: string): string {
   for (const cat of CATEGORIES) {
@@ -170,7 +222,7 @@ export default function POSPage() {
   } | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
-  const [pendingMods, setPendingMods] = useState<Modifier[]>([]);
+  const [pendingMods, setPendingMods] = useState<CartModifier[]>([]);
   // Ticket lifecycle
   const [ticketPhase, setTicketPhase] = useState<TicketPhase>("building");
   const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
@@ -244,13 +296,20 @@ export default function POSPage() {
   // POS-1: useRef lock to prevent duplicate handleSendToKDS calls (race condition fix)
   const submittingRef = useRef(false);
 
+  // POS-2: useRef lock to prevent duplicate payment calls (double-tap on "Pay on Terminal" / "Cash")
+  const payingRef = useRef(false);
+
+  // Memory-leak guards: store setTimeout IDs so we can clear on unmount
+  const orderSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   /* ─── Fetch menu (with offline fallback) ──────────────────────── */
   useEffect(() => {
     (async () => {
       try {
         const { data, error } = await supabase
           .from("merch_products")
-          .select("id, name, price_cents, description, image_url")
+          .select("id, name, price_cents, description, image_url, allowed_modifiers")
           .eq("is_active", true)
           .is("archived_at", null)
           .order("sort_order", { ascending: true })
@@ -297,7 +356,7 @@ export default function POSPage() {
           try {
             const { data, error } = await supabase
               .from("merch_products")
-              .select("id, name, price_cents, description, image_url")
+              .select("id, name, price_cents, description, image_url, allowed_modifiers")
               .eq("is_active", true)
               .is("archived_at", null)
               .order("sort_order", { ascending: true })
@@ -320,7 +379,7 @@ export default function POSPage() {
           try {
             const { data, error } = await supabase
               .from("merch_products")
-              .select("id, name, price_cents, description, image_url")
+              .select("id, name, price_cents, description, image_url, allowed_modifiers")
               .eq("is_active", true)
               .is("archived_at", null)
               .order("sort_order", { ascending: true })
@@ -343,7 +402,7 @@ export default function POSPage() {
           try {
             const { data, error } = await supabase
               .from("merch_products")
-              .select("id, name, price_cents, description, image_url")
+              .select("id, name, price_cents, description, image_url, allowed_modifiers")
               .eq("is_active", true)
               .is("archived_at", null)
               .order("sort_order", { ascending: true })
@@ -430,7 +489,7 @@ export default function POSPage() {
                 });
                 console.log(`[POS] Closed offline session — ${data.duration_minutes}min, $${(data.cash_total_cents / 100).toFixed(2)}, ${data.orders_count} orders`);
                 // Auto-dismiss recovery report after 10 seconds
-                setTimeout(() => setRecoveryReport(null), 10000);
+                recoveryTimerRef.current = setTimeout(() => setRecoveryReport(null), 10000);
               }
             }
           }
@@ -471,7 +530,7 @@ export default function POSPage() {
         // Re-fetch live menu
         const { data } = await supabase
           .from("merch_products")
-          .select("id, name, price_cents, description, image_url")
+          .select("id, name, price_cents, description, image_url, allowed_modifiers")
           .eq("is_active", true)
           .is("archived_at", null)
           .order("sort_order", { ascending: true })
@@ -485,13 +544,13 @@ export default function POSPage() {
         setSyncingOrders(false);
       }
     })();
-  }, [wasOffline, isOnline]);
+  }, [wasOffline, isOnline, offlineSessionId]);
 
   /* ─── Offline order creation (cash-only, with cap enforcement) ── */
   const handleOfflineOrder = useCallback(async () => {
     if (cart.length === 0) return;
     const total = cart.reduce(
-      (sum, ci) => sum + (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0)) * ci.quantity, 0
+      (sum, ci) => sum + (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents * m.quantity, 0)) * ci.quantity, 0
     );
 
     // ── Check cap BEFORE accepting the order ──
@@ -581,8 +640,8 @@ export default function POSPage() {
         product_id: ci.productId,
         name: ci.name,
         quantity: ci.quantity,
-        price_cents: ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0),
-        customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => m.name) : undefined,
+        price_cents: ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents * m.quantity, 0),
+        customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => formatModifier(m)) : undefined,
       })),
       total_cents: total,
       payment_method: "cash",
@@ -662,6 +721,7 @@ export default function POSPage() {
         ? String(item.customizations).split(",").filter(Boolean).map((m) => ({
             name: m.trim(),
             price_cents: 0,
+            quantity: 1,
           }))
         : [],
       quantity: 1,
@@ -684,7 +744,7 @@ export default function POSPage() {
   /* ─── Derived ────────────────────────────────────────────────── */
   const filteredItems = menuItems.filter((i) => categorize(i.name) === activeCategory);
   const cartTotal = cart.reduce(
-    (sum, ci) => sum + (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0)) * ci.quantity,
+    (sum, ci) => sum + (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents * m.quantity, 0)) * ci.quantity,
     0
   );
   const cartCount = cart.reduce((s, ci) => s + ci.quantity, 0);
@@ -694,14 +754,14 @@ export default function POSPage() {
     return cart.map((ci) => ({
       product_id: ci.productId,
       quantity: ci.quantity,
-      customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => m.name) : undefined,
+      customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => formatModifier(m)) : undefined,
       ...(ci.isOpenPrice ? { open_price_cents: ci.price_cents } : {}),
     }));
   }, [cart]);
 
   /* ─── Cart helpers ───────────────────────────────────────────── */
   const addToCart = useCallback(
-    (item: MenuItem, mods: Modifier[]) => {
+    (item: MenuItem, mods: CartModifier[]) => {
       setCart((prev) => [
         ...prev,
         { id: uid(), productId: item.id, name: item.name, price_cents: item.price_cents, modifiers: mods, quantity: 1 },
@@ -736,7 +796,10 @@ export default function POSPage() {
     linkedChatOrderRef.current = null;
   }, []);
 
-  /* ── Cancel order: delete pending DB row then clear cart ──── */
+  /* ── Cancel order: delete pending DB row then clear cart ────
+   * Only clear the cart on a successful cancel so the POS never
+   * shows an empty screen while a ghost order lives in the kitchen.
+   * ──────────────────────────────────────────────────────────── */
   const handleCancelOrder = useCallback(async () => {
     if (!createdOrderId) {
       clearCart();
@@ -744,32 +807,50 @@ export default function POSPage() {
     }
     try {
       const token = getAccessToken();
-      await fetchOps("/cancel-order", {
+      const res = await fetchOps("/cancel-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: createdOrderId }),
       }, token);
-    } catch (e: unknown) {
-      console.error("[POS] Failed to cancel order:", (e as Error)?.message);
-    } finally {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Cancel failed (${res.status})`);
+      }
+      // Cancel confirmed — safe to clear the cart
       clearCart();
+    } catch (e: unknown) {
+      const msg = (e instanceof Error ? e.message : null) || "Failed to cancel order. The order is still active.";
+      console.error("[POS] Failed to cancel order:", msg);
+      setErrorMsg(msg);
+      setTicketPhase("error");
+      haptic("error");
     }
   }, [createdOrderId, clearCart]);
 
   /* ─── Builder panel ──────────────────────────────────────────── */
   const openBuilder = (item: MenuItem) => {
     setSelectedItem(item);
-    setPendingMods([]);
+    // Initialize every available modifier at quantity 0
+    setPendingMods(getModifiersForItem(item).map((m) => ({ ...m, quantity: 0 })));
   };
 
-  const toggleMod = (mod: Modifier) => {
+  /** Increment or decrement a pending modifier's quantity (min 0, max 9) */
+  const updateModQty = (modName: string, delta: number) => {
     setPendingMods((prev) =>
-      prev.find((m) => m.name === mod.name) ? prev.filter((m) => m.name !== mod.name) : [...prev, mod]
+      prev.map((m) =>
+        m.name === modName
+          ? { ...m, quantity: Math.max(0, Math.min(9, m.quantity + delta)) }
+          : m
+      )
     );
   };
 
   const confirmBuilder = () => {
-    if (selectedItem) addToCart(selectedItem, pendingMods);
+    if (selectedItem) {
+      // Only include modifiers the barista actually selected (qty > 0)
+      const activeMods = pendingMods.filter((m) => m.quantity > 0);
+      addToCart(selectedItem, activeMods);
+    }
     setSelectedItem(null);
     setPendingMods([]);
   };
@@ -787,7 +868,13 @@ export default function POSPage() {
     if (NO_MODIFIER_CATEGORIES.has(categorize(item.name))) {
       addToCart(item, []);
     } else {
-      openBuilder(item);
+      // Check allowed_modifiers from DB — if empty array, add directly (no customization)
+      const itemMods = getModifiersForItem(item);
+      if (itemMods.length === 0) {
+        addToCart(item, []);
+      } else {
+        openBuilder(item);
+      }
     }
   };
 
@@ -996,7 +1083,8 @@ export default function POSPage() {
       setTicketPhase("confirm");
       setCartDrawerOpen(true); // Auto-open cart drawer on mobile for payment phase
       setOrderSuccess(orderId.slice(0, 6).toUpperCase());
-      setTimeout(() => setOrderSuccess(null), 4000);
+      if (orderSuccessTimerRef.current) clearTimeout(orderSuccessTimerRef.current);
+      orderSuccessTimerRef.current = setTimeout(() => setOrderSuccess(null), 4000);
 
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Order creation failed";
@@ -1033,7 +1121,8 @@ export default function POSPage() {
       setTicketPhase("confirm");
       setCartDrawerOpen(true);
       setOrderSuccess(orderId.slice(0, 6).toUpperCase());
-      setTimeout(() => setOrderSuccess(null), 4000);
+      if (orderSuccessTimerRef.current) clearTimeout(orderSuccessTimerRef.current);
+      orderSuccessTimerRef.current = setTimeout(() => setOrderSuccess(null), 4000);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Order creation failed";
       setErrorMsg(msg);
@@ -1208,13 +1297,19 @@ export default function POSPage() {
     poll();
   }, [stopPaymentPolling]);
 
-  // Cleanup polling on unmount
+  // Cleanup polling + misc timers on unmount
   useEffect(() => {
-    return () => stopPaymentPolling();
+    return () => {
+      stopPaymentPolling();
+      if (orderSuccessTimerRef.current) clearTimeout(orderSuccessTimerRef.current);
+      if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current);
+    };
   }, [stopPaymentPolling]);
 
   const handlePayOnTerminal = async () => {
     if (!createdOrderId) return;
+    if (payingRef.current) return; // POS-2: ref lock — prevent double-tap
+    payingRef.current = true;
 
     // Fresh user-initiated attempt (not an automatic network retry)?
     // Generate a new idempotency key so Square accepts this as a new charge
@@ -1253,6 +1348,7 @@ export default function POSPage() {
         setTicketPhase("paying");
         setTerminalStatus("Order conflict detected \u2014 verifying payment status\u2026");
         startPaymentPolling(createdOrderId, { isReconciliation: true });
+        // payingRef released in finally block
         return;
       }
 
@@ -1292,6 +1388,8 @@ export default function POSPage() {
         haptic("error");
         // Exponential backoff: 2s, 4s
         const delay = 2000 * paymentRetryRef.current;
+        // Release ref lock before retry so the recursive call can acquire it
+        payingRef.current = false;
         setTimeout(() => handlePayOnTerminal(), delay);
         return;
       }
@@ -1303,12 +1401,17 @@ export default function POSPage() {
         : msg);
       setTicketPhase("error");
       haptic("error");
+    } finally {
+      // POS-2: guaranteed release — prevents permanent POS lockup on
+      // any exit path (409 reconciliation, success, error, network retry).
+      payingRef.current = false;
     }
   };
 
   /* ─── Mark as Paid (atomic cash — single cafe-checkout call) ──── */
   const handleMarkPaid = async (guestName?: string) => {
     if (cart.length === 0) return;
+    if (payingRef.current) return; // POS-2: ref lock — prevent double-tap
 
     // If no loyalty customer or missing name, prompt for guest first name
     if (!guestName && (!loyaltyCustomer || !loyaltyCustomer.name)) {
@@ -1319,6 +1422,7 @@ export default function POSPage() {
       return;
     }
 
+    payingRef.current = true; // POS-2: acquire ref lock
     setTicketPhase("paying");
     setTerminalStatus("Recording cash payment…");
 
@@ -1372,6 +1476,8 @@ export default function POSPage() {
       const msg = e instanceof Error ? e.message : "Failed to record payment";
       setErrorMsg(msg);
       setTicketPhase("error");
+    } finally {
+      payingRef.current = false; // POS-2: release ref lock
     }
   };
 
@@ -1548,6 +1654,8 @@ export default function POSPage() {
   /* ─── Cash Fallback (confirm phase — order already created as pending) ── */
   const handleCashFallback = async () => {
     if (!createdOrderId) return;
+    if (payingRef.current) return; // POS-2: ref lock — prevent double-tap
+    payingRef.current = true;
     setTicketPhase("paying");
     setTerminalStatus("Recording cash payment…");
 
@@ -1607,6 +1715,8 @@ export default function POSPage() {
       const msg = e instanceof Error ? e.message : "Failed to record payment";
       setErrorMsg(msg);
       setTicketPhase("error");
+    } finally {
+      payingRef.current = false; // POS-2: release ref lock
     }
   };
 
@@ -2069,29 +2179,51 @@ export default function POSPage() {
                     </button>
                   </div>
 
-                  {/* Modifiers */}
+                  {/* Modifiers — quantity-based [-] qty [+] controls */}
                   <div className="flex-1 overflow-y-auto p-6">
                     <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-stone-500 mb-4">
                       Customize
                     </h3>
                     <div className="space-y-2">
-                      {DRINK_MODIFIERS.map((mod) => {
-                        const active = pendingMods.some((m) => m.name === mod.name);
+                      {pendingMods.map((mod) => {
+                        const active = mod.quantity > 0;
                         return (
-                          <button
+                          <div
                             key={mod.name}
-                            onClick={() => toggleMod(mod)}
                             className={`w-full flex items-center justify-between px-4 py-3 min-h-[48px] rounded-lg border transition-all text-sm
                               ${active
                                 ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
-                                : "bg-stone-800/50 border-stone-700 text-stone-300 hover:border-stone-600"
+                                : "bg-stone-800/50 border-stone-700 text-stone-300"
                               }`}
                           >
-                            <span className="font-medium">{mod.name}</span>
-                            <span className="text-xs">
-                              {mod.price_cents > 0 ? `+${cents(mod.price_cents)}` : "Free"}
-                            </span>
-                          </button>
+                            <div className="flex-1 min-w-0">
+                              <span className="font-medium">{mod.name}</span>
+                              <span className="text-xs ml-2 opacity-70">
+                                {mod.price_cents > 0 ? `+${cents(mod.price_cents)}` : "Free"}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0 ml-3">
+                              <button
+                                type="button"
+                                onClick={() => updateModQty(mod.name, -1)}
+                                disabled={mod.quantity === 0}
+                                className="w-9 h-9 flex items-center justify-center rounded-md bg-stone-700 hover:bg-stone-600 text-stone-200 text-lg font-bold transition-colors disabled:opacity-25 disabled:cursor-not-allowed active:scale-95"
+                                aria-label={`Decrease ${mod.name}`}
+                              >
+                                −
+                              </button>
+                              <span className="w-6 text-center font-bold tabular-nums text-base text-white">{mod.quantity}</span>
+                              <button
+                                type="button"
+                                onClick={() => updateModQty(mod.name, +1)}
+                                disabled={mod.quantity >= 9}
+                                className="w-9 h-9 flex items-center justify-center rounded-md bg-stone-700 hover:bg-stone-600 text-stone-200 text-lg font-bold transition-colors disabled:opacity-25 disabled:cursor-not-allowed active:scale-95"
+                                aria-label={`Increase ${mod.name}`}
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
                         );
                       })}
                     </div>
@@ -2102,7 +2234,7 @@ export default function POSPage() {
                     <div className="flex items-center justify-between mb-3 text-sm">
                       <span className="text-stone-500">Item total</span>
                       <span className="font-bold text-white text-lg">
-                        {cents(selectedItem.price_cents + pendingMods.reduce((s, m) => s + m.price_cents, 0))}
+                        {cents(selectedItem.price_cents + pendingMods.reduce((s, m) => s + m.price_cents * m.quantity, 0))}
                       </span>
                     </div>
                     <button
@@ -2197,7 +2329,7 @@ export default function POSPage() {
           ) : (
             <div className="divide-y divide-stone-800/50" role="list">
               {cart.map((ci) => {
-                const lineTotal = (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents, 0)) * ci.quantity;
+                const lineTotal = (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents * m.quantity, 0)) * ci.quantity;
                 return (
                   <div key={ci.id} className="px-4 py-3 flex items-start gap-3 group">
                     {/* Item info */}
@@ -2205,7 +2337,7 @@ export default function POSPage() {
                       <p className="text-sm font-semibold text-white truncate">{ci.name}</p>
                       {ci.modifiers.length > 0 && (
                         <p className="text-[11px] text-stone-500 truncate mt-0.5">
-                          {ci.modifiers.map(m => m.name).join(", ")}
+                          {ci.modifiers.map(m => formatModifier(m)).join(", ")}
                         </p>
                       )}
                       <p className="text-xs font-bold text-amber-400 mt-1 tabular-nums">{cents(lineTotal)}</p>

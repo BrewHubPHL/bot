@@ -59,6 +59,7 @@ export default function QueueMonitor({ onBack }: QueueMonitorProps) {
       const { count, error: countErr } = await supabase
         .from("v_items_to_pickup")
         .select("item_id", { count: "exact", head: true })
+        .neq("current_status", "completed")
       if (!countErr) setPickupCount(count ?? 0)
     } catch { /* non-critical — badge just won't show */ }
   }, [])

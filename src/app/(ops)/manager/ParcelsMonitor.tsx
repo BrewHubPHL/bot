@@ -306,7 +306,8 @@ export default function ParcelMonitor({ onBack }: ParcelMonitorProps) {
       const { count, error: countErr } = await supabase
         .from("v_items_to_pickup")
         .select("item_id", { count: "exact", head: true })
-        .eq("item_type", "cafe_order");
+        .eq("item_type", "cafe_order")
+        .neq("current_status", "completed");
       if (!countErr) setCafeReadyCount(count ?? 0);
     } catch { /* non-critical */ }
   }, []);

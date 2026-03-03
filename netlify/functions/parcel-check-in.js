@@ -31,34 +31,43 @@ function hashPickupCode(code) {
 async function detectGuestStatus(residentId, recipientEmail, recipientPhone, unitNumber) {
   // If a customer id was provided, look them up directly
   if (residentId) {
-    const { data: res } = await supabase
+    const { data: res, error: idErr } = await supabase
       .from('customers')
       .select('id, full_name, unit_number, phone, email')
       .eq('id', residentId)
       .single();
+    if (idErr) {
+      console.error('[GUEST-DETECT] Customer lookup by ID failed:', idErr.message);
+    }
     if (res && res.email) return { isGuest: false, resident: { ...res, name: res.full_name, full_name: res.full_name } };
   }
 
   // Try matching by email
   if (recipientEmail) {
-    const { data: res } = await supabase
+    const { data: res, error: emailErr } = await supabase
       .from('customers')
       .select('id, full_name, unit_number, phone, email')
       .eq('email', recipientEmail)
       .limit(1)
       .maybeSingle();
+    if (emailErr) {
+      console.error('[GUEST-DETECT] Customer lookup by email failed:', emailErr.message);
+    }
     if (res) return { isGuest: false, resident: { ...res, name: res.full_name, full_name: res.full_name } };
   }
 
   // Try matching by phone + unit combo
   if (recipientPhone && unitNumber) {
-    const { data: res } = await supabase
+    const { data: res, error: phoneUnitErr } = await supabase
       .from('customers')
       .select('id, full_name, unit_number, phone, email')
       .eq('phone', recipientPhone)
       .eq('unit_number', unitNumber)
       .limit(1)
       .maybeSingle();
+    if (phoneUnitErr) {
+      console.error('[GUEST-DETECT] Customer lookup by phone+unit failed:', phoneUnitErr.message);
+    }
     if (res) return { isGuest: false, resident: { ...res, name: res.full_name, full_name: res.full_name } };
   }
 
@@ -262,11 +271,14 @@ exports.handler = async (event) => {
         recipientPhone = sanitizeInput(guestCheck.resident.phone) || recipientPhone;
         recipientEmail = sanitizeInput(guestCheck.resident.email);
       } else if (resident_id) {
-        const { data: customer } = await supabase
+        const { data: customer, error: custErr } = await supabase
           .from('customers')
           .select('full_name, unit_number, phone, email')
           .eq('id', resident_id)
           .single();
+        if (custErr) {
+          console.error('[PARCEL-CHECK-IN] Customer fallback lookup failed:', custErr.message);
+        }
 
         if (customer) {
           finalRecipient = sanitizeInput(customer.full_name);
@@ -361,7 +373,7 @@ exports.handler = async (event) => {
     // Patch notification payload with pickup code + guest onboarding info
     if (result?.queue_task_id) {
       console.log(`[QUEUE] Notification queued: ${result.queue_task_id}`);
-      await supabase.from('notification_queue')
+      const { error: queueUpdateErr } = await supabase.from('notification_queue')
         .update({
           payload: {
             recipient_name: sanitizeInput(responseRecipient),
@@ -376,8 +388,10 @@ exports.handler = async (event) => {
             invite_url: wasPreRegistered ? null : guestInviteUrl,
           }
         })
-        .eq('id', result.queue_task_id)
-        .catch(() => {}); // Best-effort
+        .eq('id', result.queue_task_id);
+      if (queueUpdateErr) {
+        console.error('[QUEUE] notification_queue payload update failed:', queueUpdateErr.message);
+      }
     }
 
     // Fire-and-forget: Immediately trigger worker (cron is backup)

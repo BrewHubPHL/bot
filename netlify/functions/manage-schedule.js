@@ -8,6 +8,7 @@ const { authorize, json, sanitizedError } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { sanitizeInput } = require('./_sanitize');
 const { staffBucket } = require('./_token-bucket');
+const { logSystemError } = require('./_system-errors');
 
 const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -53,11 +54,31 @@ exports.handler = async (event) => {
   const supabase = getSupabase();
 
   try {
-    // ─── GET: list shifts ────────────────────────────────────────────────
+    // ─── GET: list shifts (date-windowed, defaults to now → +30 days) ────
     if (event.httpMethod === 'GET') {
+      const params = event.queryStringParameters || {};
+
+      // Staff directory listing (for calendar dropdown)
+      if (params.type === 'staff') {
+        const { data, error } = await supabase
+          .from('staff_directory_safe')
+          .select('id, name, full_name, role');
+
+        if (error) throw error;
+        return corsJson(200, { staff: data || [] });
+      }
+
+      const startDate = params.start_date || new Date().toISOString();
+      const endDefault = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const endDate = params.end_date || endDefault;
+
       const { data, error } = await supabase
         .from('v_scheduled_shifts_with_staff')
-        .select('id, user_id, start_time, end_time, role_id, status, updated_at, employee_name');
+        .select('id, user_id, start_time, end_time, role_id, status, updated_at, employee_name')
+        .gte('start_time', startDate)
+        .lte('end_time', endDate)
+        .order('start_time', { ascending: true })
+        .limit(500);
 
       if (error) throw error;
       return corsJson(200, { shifts: data || [] });
@@ -75,12 +96,24 @@ exports.handler = async (event) => {
       return corsJson(400, { error: 'Invalid JSON body' });
     }
 
-    // ─── POST: create shift ──────────────────────────────────────────────
+    // ─── POST: create shift(s) — supports batch user_ids or single user_id ──
     if (event.httpMethod === 'POST') {
-      const { user_id, start_time, end_time, role_id, location_id } = body;
+      const { user_id, user_ids, start_time, end_time, role_id, location_id } = body;
 
-      if (!user_id || typeof user_id !== 'string' || !UUID_RE.test(user_id)) {
-        return corsJson(422, { error: 'Missing or invalid user_id (UUID)' });
+      // Support batch user_ids (preferred) or single user_id (backward compat)
+      const isBatch = Array.isArray(user_ids) && user_ids.length > 0;
+      const ids = isBatch ? user_ids : (user_id ? [user_id] : []);
+
+      if (ids.length === 0) {
+        return corsJson(422, { error: 'Missing or invalid user_id / user_ids (UUID)' });
+      }
+      if (ids.length > 20) {
+        return corsJson(422, { error: 'Maximum 20 shifts per batch create' });
+      }
+      for (const uid of ids) {
+        if (typeof uid !== 'string' || !UUID_RE.test(uid)) {
+          return corsJson(422, { error: `Invalid user_id: ${String(uid).slice(0, 40)}` });
+        }
       }
       if (!start_time || !end_time) {
         return corsJson(422, { error: 'start_time and end_time are required' });
@@ -97,41 +130,61 @@ exports.handler = async (event) => {
       const safeRoleId = role_id ? sanitizeInput(String(role_id)).slice(0, 100) : null;
       const safeLocationId = location_id ? sanitizeInput(String(location_id)).slice(0, 100) : 'brewhub_main';
 
+      const rows = ids.map(uid => ({
+        user_id: uid,
+        start_time: startDt.toISOString(),
+        end_time: endDt.toISOString(),
+        role_id: safeRoleId,
+        location_id: safeLocationId,
+        status: 'scheduled',
+      }));
+
       const { data, error } = await supabase
         .from('scheduled_shifts')
-        .insert({
-          user_id,
-          start_time: startDt.toISOString(),
-          end_time: endDt.toISOString(),
-          role_id: safeRoleId,
-          location_id: safeLocationId,
-          status: 'scheduled',
-        })
-        .select('id, user_id, start_time, end_time, role_id, status, updated_at')
-        .single();
+        .insert(rows)
+        .select('id, user_id, start_time, end_time, role_id, status, updated_at');
 
       if (error) throw error;
 
       // Audit log
-      await supabase.from('shift_audit_log').insert({
-        shift_id: data.id,
+      const auditRows = (data || []).map(shift => ({
+        shift_id: shift.id,
         action: 'created',
         actor_id: auth.user?.id || null,
         actor_name: auth.user?.name || auth.user?.email || 'unknown',
-        new_data: data,
-      }).then(({ error: auditErr }) => {
-        if (auditErr) console.warn('[manage-schedule] Audit log insert failed:', auditErr.message);
-      });
+        new_data: shift,
+      }));
+      if (auditRows.length > 0) {
+        await supabase.from('shift_audit_log').insert(auditRows).then(({ error: auditErr }) => {
+          if (auditErr) console.warn('[manage-schedule] Audit log insert failed:', auditErr.message);
+        });
+      }
 
-      return corsJson(201, { shift: data });
+      // Return single shift for backward compat when only one was created
+      if (!isBatch && data && data.length === 1) {
+        return corsJson(201, { shift: data[0] });
+      }
+      return corsJson(201, { shifts: data || [] });
     }
 
-    // ─── PATCH: update/move shift ────────────────────────────────────────
+    // ─── PATCH: update/move shift(s) — supports single id or batch shift_ids ──
     if (event.httpMethod === 'PATCH') {
-      const { id, start_time, end_time, updated_at } = body;
+      const { id, shift_ids, start_time, end_time, updated_at } = body;
 
-      if (!id || typeof id !== 'string' || !UUID_RE.test(id)) {
-        return corsJson(422, { error: 'Missing or invalid shift id (UUID)' });
+      // Support single id (backward compat) or batch shift_ids
+      const isBatch = Array.isArray(shift_ids) && shift_ids.length > 0;
+      const ids = isBatch ? shift_ids : (id ? [id] : []);
+
+      if (ids.length === 0) {
+        return corsJson(422, { error: 'Missing shift id or shift_ids' });
+      }
+      if (ids.length > 20) {
+        return corsJson(422, { error: 'Maximum 20 shifts per batch move' });
+      }
+      for (const shiftId of ids) {
+        if (typeof shiftId !== 'string' || !UUID_RE.test(shiftId)) {
+          return corsJson(422, { error: `Invalid shift id: ${String(shiftId).slice(0, 40)}` });
+        }
       }
       if (!start_time || !end_time) {
         return corsJson(422, { error: 'start_time and end_time are required' });
@@ -145,80 +198,109 @@ exports.handler = async (event) => {
         return corsJson(422, { error: 'end_time must be after start_time' });
       }
 
-      // Optimistic concurrency: only update if updated_at still matches
-      let query = supabase
-        .from('scheduled_shifts')
-        .update({ start_time: startDt.toISOString(), end_time: endDt.toISOString() })
-        .eq('id', id);
+      let data;
 
-      if (updated_at) {
-        query = query.eq('updated_at', updated_at);
-      }
+      if (!isBatch && updated_at) {
+        // Single shift with optimistic concurrency (existing behavior)
+        const result = await supabase
+          .from('scheduled_shifts')
+          .update({ start_time: startDt.toISOString(), end_time: endDt.toISOString() })
+          .eq('id', ids[0])
+          .eq('updated_at', updated_at)
+          .select('id, user_id, start_time, end_time, role_id, status, updated_at')
+          .maybeSingle();
 
-      const { data, error } = await query
-        .select('id, user_id, start_time, end_time, role_id, status, updated_at')
-        .maybeSingle();
+        if (result.error) throw result.error;
+        if (!result.data) {
+          return corsJson(409, { error: 'Conflict — shift was modified by another manager. Please refresh.' });
+        }
+        data = [result.data];
+      } else {
+        // Batch update (or single without optimistic concurrency)
+        const result = await supabase
+          .from('scheduled_shifts')
+          .update({ start_time: startDt.toISOString(), end_time: endDt.toISOString() })
+          .in('id', ids)
+          .select('id, user_id, start_time, end_time, role_id, status, updated_at');
 
-      if (error) throw error;
-      if (!data) {
-        return corsJson(409, { error: 'Conflict — shift was modified by another manager. Please refresh.' });
+        if (result.error) throw result.error;
+        if (!result.data || result.data.length === 0) {
+          return corsJson(409, { error: 'Conflict — shifts were modified. Please refresh.' });
+        }
+        data = result.data;
       }
 
       // Audit log
-      await supabase.from('shift_audit_log').insert({
-        shift_id: id,
+      const auditRows = data.map(shift => ({
+        shift_id: shift.id,
         action: 'updated',
         actor_id: auth.user?.id || null,
         actor_name: auth.user?.name || auth.user?.email || 'unknown',
-        new_data: data,
+        new_data: shift,
         changed_cols: ['start_time', 'end_time'],
-      }).then(({ error: auditErr }) => {
+      }));
+      await supabase.from('shift_audit_log').insert(auditRows).then(({ error: auditErr }) => {
         if (auditErr) console.warn('[manage-schedule] Audit log insert failed:', auditErr.message);
       });
 
-      return corsJson(200, { shift: data });
+      return corsJson(200, { shifts: data });
     }
 
-    // ─── DELETE: remove shift ────────────────────────────────────────────
+    // ─── DELETE: remove shift(s) — supports single id or batch ids ────────
     if (event.httpMethod === 'DELETE') {
-      const { id } = body;
+      const deleteIds = Array.isArray(body.ids)
+        ? body.ids
+        : body.id
+          ? [body.id]
+          : [];
 
-      if (!id || typeof id !== 'string' || !UUID_RE.test(id)) {
-        return corsJson(422, { error: 'Missing or invalid shift id (UUID)' });
+      if (deleteIds.length === 0) {
+        return corsJson(422, { error: 'Missing shift id or ids' });
+      }
+      if (deleteIds.length > 20) {
+        return corsJson(422, { error: 'Maximum 20 shifts per batch delete' });
+      }
+      for (const shiftId of deleteIds) {
+        if (typeof shiftId !== 'string' || !UUID_RE.test(shiftId)) {
+          return corsJson(422, { error: `Invalid shift id: ${String(shiftId).slice(0, 40)}` });
+        }
       }
 
       // Fetch old data for audit trail before deleting
-      const { data: oldShift } = await supabase
+      const { data: oldShifts, error: oldShiftsErr } = await supabase
         .from('scheduled_shifts')
         .select('id, user_id, start_time, end_time, role_id, status')
-        .eq('id', id)
-        .maybeSingle();
+        .in('id', deleteIds);
+
+      if (oldShiftsErr) throw oldShiftsErr;
 
       const { error } = await supabase
         .from('scheduled_shifts')
         .delete()
-        .eq('id', id);
+        .in('id', deleteIds);
 
       if (error) throw error;
 
       // Audit log
-      if (oldShift) {
-        await supabase.from('shift_audit_log').insert({
-          shift_id: id,
+      if (oldShifts && oldShifts.length > 0) {
+        const auditRows = oldShifts.map(shift => ({
+          shift_id: shift.id,
           action: 'deleted',
           actor_id: auth.user?.id || null,
           actor_name: auth.user?.name || auth.user?.email || 'unknown',
-          old_data: oldShift,
-        }).then(({ error: auditErr }) => {
+          old_data: shift,
+        }));
+        await supabase.from('shift_audit_log').insert(auditRows).then(({ error: auditErr }) => {
           if (auditErr) console.warn('[manage-schedule] Audit log insert failed:', auditErr.message);
         });
       }
 
-      return corsJson(200, { ok: true });
+      return corsJson(200, { ok: true, deleted: deleteIds.length });
     }
 
     return corsJson(405, { error: 'Method not allowed' });
   } catch (err) {
+    logSystemError({ source: 'manage-schedule', message: err?.message, stack: err?.stack });
     return sanitizedError(err, 'manage-schedule');
   }
 };
