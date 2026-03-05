@@ -250,6 +250,18 @@
 - Adds nullable `phone TEXT` column to `staff_directory`.
 - Automatically inherited by the `v_staff_status` view (uses `sd.*`).
 
+### Notion Operations Ledger Sync (`20260304_schema86_notion_sync`)
+- **New Netlify Function:** `notion-sync.js` receives POST payloads from internal webhook sources and syncs canonical DB records to Notion via API calls.
+- **Strict Security Gate:** Requires both CSRF header (`X-BrewHub-Action: true`) and `INTERNAL_SYNC_SECRET` (`x-brewhub-secret`) validation before any processing.
+- **Server-Side Truth Source:** Function re-fetches records from Supabase by ID (`orders`, `manager_override_log`, `customers`) and never trusts inbound payload fields for business data.
+- **Routing Rules:**
+  - `orders.status = 'completed'` → Notion Sales Ledger database (`NOTION_SALES_DB_ID`). Properties: **Name** (title, order ID), **Status** (select), **Total** (number, dollars).
+  - `manager_override_log` inserts → Notion Audit Trail database (`NOTION_AUDIT_DB_ID`). Properties: **Name** (title, action type), **Manager** (rich_text), **Action** (select), **Target Entity** / **Target ID** / **Details** (rich_text).
+- **Idempotency Table:** `processed_notion_syncs` (Schema 86) stores unique `sync_key` entries to guarantee at-most-once Notion writes.
+- **DB Trigger Webhooks:**
+  - `trg_manager_override_notion_sync` (`AFTER INSERT` on `manager_override_log`) — calls `net.http_post` to `/.netlify/functions/notion-sync` with signed internal headers.
+  - `trg_orders_notion_sync` (`AFTER UPDATE` on `orders`, Schema 86b) — fires only on the exact `status → 'completed'` transition (`NEW.status = 'completed' AND OLD.status IS DISTINCT FROM 'completed'`). Posts `source_table: 'orders'` + `record_id` so the Netlify function re-fetches the canonical order row for the Sales Ledger. Uses the same `app.settings.*` runtime config and graceful `EXCEPTION` degradation as the manager override trigger.
+
 ### CRM Customer Endpoint (`get-crm-customers.js`)
 - **New:** Manager-only, rate-limited GET endpoint returning filtered `customers` rows.
 - **8 Filter Modes:** `all`, `app_users`, `walk_in`, `mailbox`, `vip`, `loyalty`, `active_30d`, `new_7d`.
