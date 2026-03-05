@@ -52,7 +52,7 @@ function resolveTargetDatabase(sourceTable, canonicalRecord) {
           title: [{ text: { content: truncate(`Order ${canonicalRecord.id}`, 200) } }],
         },
         Status: {
-          status: { name: canonicalRecord.status },
+          status: { name: canonicalRecord.status === 'completed' ? 'Done' : canonicalRecord.status === 'in_progress' ? 'In progress' : 'Not started' },
         },
         Total: {
           number: totalDollars,
