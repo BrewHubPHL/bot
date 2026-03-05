@@ -228,8 +228,17 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
+  // DEBUG: log what the trigger is sending (remove after testing)
+  console.log('[notion-sync] x-brewhub-secret present:', !!event.headers?.['x-brewhub-secret']);
+  console.log('[notion-sync] x-brewhub-secret length:', (event.headers?.['x-brewhub-secret'] || '').length);
+  console.log('[notion-sync] INTERNAL_SYNC_SECRET present:', !!process.env.INTERNAL_SYNC_SECRET);
+  console.log('[notion-sync] INTERNAL_SYNC_SECRET length:', (process.env.INTERNAL_SYNC_SECRET || '').length);
+
   const serviceAuth = verifyServiceSecret(event);
-  if (!serviceAuth.valid) return serviceAuth.response;
+  if (!serviceAuth.valid) {
+    console.warn('[notion-sync] verifyServiceSecret REJECTED — 401');
+    return serviceAuth.response;
+  }
 
   const clientIP = getClientIP(event);
   const bucketKey = `notion-sync:${hashIP(clientIP)}`;
