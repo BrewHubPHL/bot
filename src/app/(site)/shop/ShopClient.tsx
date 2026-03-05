@@ -410,6 +410,39 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
 
       {/* Products Grid — 2-col mobile, 2-col sm, 3-col lg */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
+
+        {/* ═══ Coffee Balam Cross-Promotion Banner ═══ */}
+        {activeTab === 'merch' && (
+          <div className="mb-6 bg-gradient-to-r from-stone-50 to-[var(--hub-cream)] border border-stone-200 rounded-xl p-4 sm:p-5 flex items-center justify-between gap-4 shadow-sm animate-fade-in-up">
+            <div className="flex-1">
+              <h3 className="text-sm sm:text-base font-semibold text-[var(--hub-espresso)] mb-1">
+                Enjoying the BrewHub Signature Roast?
+              </h3>
+              <p className="text-xs sm:text-sm text-stone-600 leading-relaxed max-w-xl">
+                We proudly partner with Coffee Balam to source and roast our beans. If you&apos;d like to purchase full bags for your home, you can order directly from our roaster.
+              </p>
+            </div>
+
+            {/* External Logo Link */}
+            <a
+              href="https://coffeebalam.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 group flex flex-col items-center justify-center p-2 rounded-lg hover:bg-white/50 transition-colors"
+              aria-label="Shop Coffee Balam Beans (Opens in new tab)"
+            >
+              <img
+                src="/Coffee-Balam.png"
+                alt="Coffee Balam Logo"
+                className="h-10 sm:h-12 w-auto object-contain drop-shadow-sm group-hover:scale-105 transition-transform duration-300"
+              />
+              <span className="text-[10px] text-[var(--hub-brown)] mt-1.5 font-bold uppercase tracking-wider group-hover:underline flex items-center gap-1">
+                Shop Beans <span className="text-xs">↗</span>
+              </span>
+            </a>
+          </div>
+        )}
+
         <div
           key={activeTab}
           className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 animate-fade-in-up"

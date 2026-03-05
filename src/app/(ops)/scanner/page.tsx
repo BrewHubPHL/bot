@@ -321,7 +321,7 @@ export default function ScannerPage() {
     setViewState("saving");
 
     try {
-      const resp = await fetchOps("/adjust-inventory", {
+      const resp = await fetchOps("/process-inventory-adjustment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

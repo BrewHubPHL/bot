@@ -30,7 +30,9 @@
  *   This page does NOT query staff_directory or v_staff_status directly.
  */
 
-import dynamic from "next/dynamic";
+import nextDynamic from "next/dynamic";
+
+export const dynamic = 'force-dynamic';
 
 /* ── Static splash shell ─────────────────────────────────────────
    Rendered by the server (SSR) as the loading fallback.
@@ -59,7 +61,7 @@ const SplashShell = () => (
 );
 
 /* ── Dynamic import: SSR disabled ────────────────────────────── */
-const BrewHubLandingClient = dynamic(
+const BrewHubLandingClient = nextDynamic(
   () => import("./BrewHubLandingClient"),
   { ssr: false, loading: SplashShell }
 );

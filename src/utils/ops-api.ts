@@ -54,6 +54,7 @@ export async function fetchOps(
   path: string,
   init: RequestInit = {},
   token?: string | null,
+  options?: { skipAutoLogout?: boolean },
 ): Promise<Response> {
   // Merge caller headers with auth + CSRF headers
   const headers = new Headers(init.headers);
@@ -69,7 +70,9 @@ export async function fetchOps(
   });
 
   // Global 401 handler — session expired / fingerprint mismatch / revoked
-  if (res.status === 401) {
+  // Callers that handle 401 themselves (e.g. AgreementViewer recovery flow)
+  // pass { skipAutoLogout: true } to prevent the hard page reload.
+  if (res.status === 401 && !options?.skipAutoLogout) {
     forceOpsLogout();
   }
 

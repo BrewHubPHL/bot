@@ -19,7 +19,8 @@ exports.handler = async (event) => {
   if (csrfBlock) return csrfBlock;
 
   // Require staff authentication for terminal checkout
-  const auth = await authorize(event, { requirePin: true });
+  // requireOnboarded: block staff who haven't signed their agreement
+  const auth = await authorize(event, { requirePin: true, requireOnboarded: true });
   if (!auth.ok) return auth.response;
 
   // Fail-closed env checks and per-request clients

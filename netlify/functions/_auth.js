@@ -74,6 +74,7 @@ function deriveDeviceFingerprint(event, { log = false } = {}) {
 async function authorize(event, options = {}) {
   const {
     requireManager = false,
+    requireOnboarded = false,
     allowServiceSecret = false,
     maxTokenAgeMinutes = null,
     requirePin = false,
@@ -195,7 +196,7 @@ async function authorize(event, options = {}) {
       }
 
       const staffLookupQuery = withSourceComment(
-        getSupabase().from('staff_directory').select('role, token_version, version_updated_at').eq('email', email),
+        getSupabase().from('staff_directory').select('role, token_version, version_updated_at, onboarding_complete').eq('email', email),
         'auth-authorize-guard'
       );
       const { data: staff, error } = await staffLookupQuery.single();
@@ -213,6 +214,15 @@ async function authorize(event, options = {}) {
           console.warn(`[AUTH BLOCKED] Legacy token version mismatch (timestamp): ${email}`);
           return { ok: false, response: json(401, { error: 'Session invalidated', code: 'TOKEN_VERSION_MISMATCH' }) };
         }
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // Onboarding gate: if requireOnboarded is true, block staff
+      // who have not completed onboarding (contract unsigned).
+      // ═══════════════════════════════════════════════════════════
+      if (requireOnboarded && !staff.onboarding_complete) {
+        console.warn(`[AUTH BLOCKED] Onboarding incomplete for ${email}`);
+        return { ok: false, response: json(403, { error: 'ONBOARDING_REQUIRED' }) };
       }
 
       const isManager = staff.role === 'manager' || staff.role === 'admin';
@@ -276,7 +286,7 @@ async function authorize(event, options = {}) {
         }
       }
 
-      return { ok: true, via: 'pin', user: { email, id: payload.staffId }, role: staff.role, deviceFingerprint: payload.dfp };
+      return { ok: true, via: 'pin', user: { email, id: payload.staffId }, role: staff.role, onboarding_complete: staff.onboarding_complete, deviceFingerprint: payload.dfp };
     } catch (err) {
       console.error('[AUTH] PIN verification failed:', err);
       return { ok: false, response: json(401, { error: 'Invalid PIN session' }) };
@@ -320,7 +330,7 @@ async function authorize(event, options = {}) {
 
     const email = (data.user.email || '').toLowerCase();
     const staffLookupQuery = withSourceComment(
-      getSupabase().from('staff_directory').select('role, token_version, version_updated_at').eq('email', email),
+      getSupabase().from('staff_directory').select('role, token_version, version_updated_at, onboarding_complete').eq('email', email),
       'auth-authorize-guard'
     );
     const { data: staff, error: staffErr } = await staffLookupQuery.single();
@@ -337,6 +347,12 @@ async function authorize(event, options = {}) {
         console.warn(`[AUTH BLOCKED] Token version mismatch (timestamp): ${email}`);
         return { ok: false, response: json(401, { error: 'Session invalidated', code: 'TOKEN_VERSION_MISMATCH' }) };
       }
+    }
+
+    // Onboarding gate for Supabase JWT path
+    if (requireOnboarded && !staff.onboarding_complete) {
+      console.warn(`[AUTH BLOCKED] Onboarding incomplete for JWT user: ${email}`);
+      return { ok: false, response: json(403, { error: 'ONBOARDING_REQUIRED' }) };
     }
 
     const isManager = staff.role === 'manager' || staff.role === 'admin';

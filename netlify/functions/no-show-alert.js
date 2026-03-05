@@ -128,35 +128,66 @@ exports.handler = async (event) => {
   console.log('[NO-SHOW][DETECT] Heartbeat: Starting full detection check...');
 
   try {
-    const now = new Date();
-    const fifteenAgo = new Date(now.getTime() - 15 * 60 * 1000).toISOString();
-    const twoHoursAgo = new Date(now.getTime() - 120 * 60 * 1000).toISOString();
+    // ── Bulletproof UTC time math ────────────────────────────────
+    // All timestamps from Supabase are UTC. Netlify runs in UTC.
+    // We build explicit ISO-8601 strings from Date.now() to avoid
+    // any locale or timezone drift.
+    const nowMs = Date.now();
+    const now = new Date(nowMs);
+    const nowISO = now.toISOString();
+    const fifteenAgoISO = new Date(nowMs - 15 * 60_000).toISOString();
+    const twoHoursAgoISO = new Date(nowMs - 120 * 60_000).toISOString();
 
-    console.log(`[NO-SHOW][DETECT] Querying shifts starting between ${twoHoursAgo} and ${fifteenAgo}`);
+    console.log(`[NO-SHOW][DETECT] Current UTC time : ${nowISO}`);
+    console.log(`[NO-SHOW][DETECT] Window           : ${twoHoursAgoISO}  →  ${fifteenAgoISO}`);
 
-    // ── Query 1: Overdue shifts ──────────────────────────────────
-    // NOTE: scheduled_shifts.user_id FK → auth.users(id), NOT staff_directory.
-    // PostgREST cannot infer a join to staff_directory, so we split into
-    // two queries and match on sd.id = shift.user_id (same UUID by convention).
-    const { data: shifts, error: shiftErr } = await withSourceComment(
+    // ── Eligible statuses ───────────────────────────────────────
+    // A shift is "alertable" if the employee was expected but hasn't
+    // clocked in. Both 'scheduled' AND 'confirmed' count.
+    const ALERTABLE_STATUSES = ['scheduled', 'confirmed'];
+
+    // ── Query 1: Fetch ALL shifts in the 2-hour window (broad) ──
+    // We intentionally do NOT filter by status in the query so we
+    // can log exactly why each shift was kept or skipped.
+    const { data: allShifts, error: shiftErr } = await withSourceComment(
       supabase
         .from('scheduled_shifts')
-        .select('id, user_id, start_time')
-        .eq('status', 'scheduled')
-        .lt('start_time', fifteenAgo)
-        .gt('start_time', twoHoursAgo),
+        .select('id, user_id, start_time, status')
+        .lt('start_time', fifteenAgoISO)
+        .gt('start_time', twoHoursAgoISO),
       'cron-no-show-check'
     );
 
     if (shiftErr) throw new Error(`Shift Query Failed: ${shiftErr.message}`);
 
-    console.log(`[NO-SHOW][DETECT] Found ${shifts?.length || 0} potential no-shows.`);
+    console.log(`[NO-SHOW][DETECT] Total shifts in window: ${allShifts?.length || 0}`);
 
-    if (!shifts || shifts.length === 0) {
+    if (!allShifts || allShifts.length === 0) {
+      console.log('[NO-SHOW][DETECT] No shifts found in the 2h→15m window. All clear.');
       return json(200, { alerted: 0, mode: 'detect', status: 'Clear' });
     }
 
-    // ── Query 2: Batch-fetch staff info by matching user_id → staff_directory.id ──
+    // ── Filter by status with detailed skip logging ─────────────
+    const shifts = [];
+    for (const s of allShifts) {
+      if (ALERTABLE_STATUSES.includes(s.status)) {
+        shifts.push(s);
+      } else {
+        const ageMin = Math.round((nowMs - new Date(s.start_time).getTime()) / 60_000);
+        console.log(
+          `[NO-SHOW][DETECT] Shift ${s.id} SKIPPED: status="${s.status}" ` +
+          `(not in [${ALERTABLE_STATUSES}]), start_time was ${ageMin}m ago`
+        );
+      }
+    }
+
+    console.log(`[NO-SHOW][DETECT] Alertable shifts after status filter: ${shifts.length}`);
+
+    if (shifts.length === 0) {
+      return json(200, { alerted: 0, mode: 'detect', status: 'Clear — all shifts filtered out' });
+    }
+
+    // ── Query 2: Batch-fetch staff info ─────────────────────────
     const userIds = [...new Set(shifts.map(s => s.user_id).filter(Boolean))];
     const { data: staffRows, error: staffErr } = userIds.length > 0
       ? await supabase
@@ -166,28 +197,22 @@ exports.handler = async (event) => {
       : { data: [], error: null };
 
     if (staffErr) {
-      console.error('[NO-SHOW][DETECT] Staff lookup error:', staffErr.message);
-      // Non-fatal: shifts without staff info will be skipped below
+      console.error('[NO-SHOW][DETECT] Staff lookup error (non-fatal):', staffErr.message);
     }
 
-    // Index staff by id for O(1) lookup
     const staffById = new Map();
     for (const s of (staffRows || [])) {
       staffById.set(s.id, s);
     }
 
-    // Attach staff info to each shift for downstream processing
     for (const shift of shifts) {
       shift._staff = staffById.get(shift.user_id) || null;
     }
 
-    // ── Batch-fetch ALL relevant time_logs in one query ─────────
-    // Compute a broad window that covers every shift's clock-in range:
-    //   earliest possible = earliest shift start − 30 min
-    //   latest possible   = latest shift start + 15 min
+    // ── Query 3: Batch-fetch ALL relevant time_logs ─────────────
     const shiftStarts = shifts.map(s => new Date(s.start_time).getTime());
-    const broadWindowStart = new Date(Math.min(...shiftStarts) - 30 * 60 * 1000).toISOString();
-    const broadWindowEnd   = new Date(Math.max(...shiftStarts) + 15 * 60 * 1000).toISOString();
+    const broadWindowStart = new Date(Math.min(...shiftStarts) - 30 * 60_000).toISOString();
+    const broadWindowEnd   = new Date(Math.max(...shiftStarts) + 15 * 60_000).toISOString();
 
     const staffEmails = shifts
       .map(s => s._staff?.email)
@@ -206,11 +231,9 @@ exports.handler = async (event) => {
       : { data: [], error: null };
 
     if (logErr) {
-      console.error('[NO-SHOW][DETECT] Batch time_logs query error:', logErr.message);
-      // Non-fatal — we'll treat everyone as no-shows (SMS is the safe default)
+      console.error('[NO-SHOW][DETECT] Batch time_logs query error (non-fatal):', logErr.message);
     }
 
-    // Index clock-ins by lowercase email for O(1) lookup
     const clockInsByEmail = new Map();
     for (const log of (allClockIns || [])) {
       const key = (log.employee_email || '').toLowerCase();
@@ -219,67 +242,97 @@ exports.handler = async (event) => {
     }
 
     let alertedCount = 0;
+    let skippedCount = 0;
 
-    // ── Iterate locally — zero additional DB queries ─────────────
+    // ── Iterate locally — zero additional DB queries ────────────
     for (const shift of shifts) {
       const staff = shift._staff;
       if (!staff || !staff.name || !staff.email) {
-        console.error(`[NO-SHOW][DETECT] Skipping shift ${shift.id}: Staff record not found.`);
+        console.log(
+          `[NO-SHOW][DETECT] Shift ${shift.id} SKIPPED: ` +
+          `No staff record found for user_id="${shift.user_id}"`
+        );
+        skippedCount++;
         continue;
       }
 
-      // Check for a clock-in within this shift's specific window
-      const shiftStart = new Date(shift.start_time).getTime();
-      const windowStart = new Date(shiftStart - 30 * 60 * 1000).getTime();
-      const windowEnd   = new Date(shiftStart + 15 * 60 * 1000).getTime();
+      const shiftStartMs = new Date(shift.start_time).getTime();
+      const latenessMin = Math.round((nowMs - shiftStartMs) / 60_000);
+
+      // Check for a clock-in within this shift's ±30/+15 window
+      const windowStartMs = shiftStartMs - 30 * 60_000;
+      const windowEndMs   = shiftStartMs + 15 * 60_000;
 
       const staffLogs = clockInsByEmail.get(staff.email.toLowerCase()) || [];
-      const hasClockedIn = staffLogs.some(log => {
+      const matchingLog = staffLogs.find(log => {
         const t = new Date(log.clock_in).getTime();
-        return t >= windowStart && t <= windowEnd;
+        return t >= windowStartMs && t <= windowEndMs;
       });
 
-      if (!hasClockedIn) {
-        const startTime = new Date(shift.start_time);
-        const latenessMinutes = Math.floor((now - startTime) / 1000 / 60);
+      if (matchingLog) {
+        console.log(
+          `[NO-SHOW][DETECT] Shift ${shift.id} SKIPPED: ` +
+          `${staff.name} clocked in at ${matchingLog.clock_in} ` +
+          `(within window for ${shift.start_time} shift). No alert needed.`
+        );
+        skippedCount++;
+        continue;
+      }
 
-        const shiftLocal = startTime.toLocaleTimeString('en-US', {
-          hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York',
+      // ── This is a genuine no-show — send alert ────────────────
+      const startTime = new Date(shift.start_time);
+      const shiftLocal = startTime.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York',
+      });
+
+      const smsBody = buildSmsBody({
+        employeeName: staff.name,
+        shiftTime: shiftLocal,
+        latenessMinutes: latenessMin,
+      });
+
+      console.log(
+        `[NO-SHOW][DETECT] 🚨 ALERTING: ${staff.name} | Shift ${shift.id} | ` +
+        `status="${shift.status}" | start=${shift.start_time} | ${latenessMin}m late | ` +
+        `0 matching clock-ins from ${staffLogs.length} total logs`
+      );
+
+      try {
+        await twilioClient.messages.create({
+          body: smsBody,
+          from: TWILIO_PHONE_NUMBER,
+          to: MANAGER_PHONE,
         });
 
-        const smsBody = buildSmsBody({
-          employeeName: staff.name,
-          shiftTime: shiftLocal,
-          latenessMinutes,
-        });
-
-        console.log(`[NO-SHOW][DETECT] Sending SMS for ${staff.name}`);
-
-        try {
-          await twilioClient.messages.create({
-            body: smsBody,
-            from: TWILIO_PHONE_NUMBER,
-            to: MANAGER_PHONE,
-          });
-
-          const { error: statusErr } = await supabase.from('scheduled_shifts').update({ status: 'no_show' }).eq('id', shift.id);
-          if (statusErr) {
-            console.error(`[NO-SHOW][DETECT] Failed to update shift ${shift.id} status: ${statusErr.message}`);
-          }
-
-          // Note: shift_audit_log is NOT inserted manually — the DB trigger
-          // `log_shift_change` on scheduled_shifts handles it automatically.
-
-          alertedCount++;
-        } catch (smsErr) {
-          console.error(`[NO-SHOW][DETECT] SMS Failed: ${smsErr.message}`);
+        const { error: statusErr } = await supabase
+          .from('scheduled_shifts')
+          .update({ status: 'no_show' })
+          .eq('id', shift.id);
+        if (statusErr) {
+          console.error(`[NO-SHOW][DETECT] Failed to update shift ${shift.id} status: ${statusErr.message}`);
         }
-      } else {
-        console.log(`[NO-SHOW][DETECT] ${staff.name} is clocked in. No alert needed.`);
+
+        // Note: shift_audit_log is NOT inserted manually — the DB trigger
+        // `log_shift_change` on scheduled_shifts handles it automatically.
+
+        alertedCount++;
+      } catch (smsErr) {
+        console.error(`[NO-SHOW][DETECT] SMS Failed for shift ${shift.id}: ${smsErr.message}`);
       }
     }
 
-    return json(200, { alerted: alertedCount, mode: 'detect', shifts_checked: shifts.length });
+    console.log(
+      `[NO-SHOW][DETECT] Summary: ${alertedCount} alerted, ${skippedCount} skipped, ` +
+      `${shifts.length} checked (from ${allShifts.length} total in window)`
+    );
+
+    return json(200, {
+      alerted: alertedCount,
+      skipped: skippedCount,
+      mode: 'detect',
+      shifts_checked: shifts.length,
+      shifts_in_window: allShifts.length,
+    });
 
   } catch (err) {
     console.error('[NO-SHOW][DETECT] CRASH:', err.message);

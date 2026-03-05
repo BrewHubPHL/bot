@@ -24,6 +24,8 @@ interface EmployeeInShift {
   userId: string;
   name: string;
   updatedAt: string | null;
+  startTime: string;
+  endTime: string;
 }
 
 interface GroupedShiftEvent {
@@ -99,6 +101,8 @@ function groupShiftsBySlot(rawShifts: RawShift[]): GroupedShiftEvent[] {
       userId: s.user_id,
       name: s.employee_name || 'Unknown',
       updatedAt: s.updated_at,
+      startTime: s.start_time,
+      endTime: s.end_time,
     }));
 
     return {
@@ -112,6 +116,73 @@ function groupShiftsBySlot(rawShifts: RawShift[]): GroupedShiftEvent[] {
       extendedProps: { employees },
     };
   });
+}
+
+/** Format ISO datetime → HH:MM in America/New_York for <input type="time"> */
+function toTimeInputValue(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', {
+    timeZone: 'America/New_York',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+/** Format ISO datetime → readable date label in ET */
+function toDateLabelET(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+/** Get YYYY-MM-DD date part in America/New_York */
+function toDatePartET(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
+/** Get the UTC offset string (e.g. "-05:00") for a date in America/New_York */
+function getETOffset(iso: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    timeZoneName: 'shortOffset',
+  }).formatToParts(new Date(iso));
+  const tzPart = parts.find((p) => p.type === 'timeZoneName')?.value || 'GMT-5';
+  const match = tzPart.match(/GMT([+-])(\d+)/);
+  if (!match) return '-05:00';
+  return `${match[1]}${match[2].padStart(2, '0')}:00`;
+}
+
+/** Build an ISO string from a date (YYYY-MM-DD) + time (HH:MM) in ET.
+ *  Computes the offset for the TARGET date+time (not a reference),
+ *  so DST transitions (e.g. March 8 spring-forward) resolve correctly. */
+function buildISOFromET(datePart: string, time: string): string {
+  // First pass: assume EST (-05:00) to get a rough UTC moment
+  const rough = new Date(`${datePart}T${time}:00-05:00`);
+  // Second pass: compute the ACTUAL ET offset for that moment
+  const offset = getETOffset(rough.toISOString());
+  return `${datePart}T${time}:00${offset}`;
+}
+
+/**
+ * Ensure a FullCalendar datetime string carries the correct ET offset.
+ * FullCalendar with timeZone="America/New_York" emits bare strings like
+ * "2026-03-05T06:00:00" (no Z, no offset). If we send these to the
+ * backend, `new Date()` parses them relative to the SERVER's timezone,
+ * causing ±5h drift. This helper detects bare strings and appends the
+ * correct ET offset so the backend always receives an unambiguous ISO
+ * timestamp.
+ */
+function ensureETOffset(dateStr: string): string {
+  if (!dateStr) return dateStr;
+  // Already has 'Z' or an explicit offset (+HH:MM / -HH:MM) → leave as-is
+  if (/Z$/.test(dateStr) || /[+-]\d{2}:\d{2}$/.test(dateStr)) return dateStr;
+  // Extract date + time components from e.g. "2026-03-05T06:00:00"
+  const match = dateStr.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  if (!match) return dateStr;
+  return buildISOFromET(match[1], match[2]);
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -136,6 +207,11 @@ export default function AdminCalendar() {
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
   const [selectedGroup, setSelectedGroup] = useState<EmployeeInShift[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // ── Inline time-editing state (manage modal) ─────────────────────────────
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
+  const [editStart, setEditStart] = useState('');
+  const [editEnd, setEditEnd] = useState('');
 
   // ── Tooltip state ────────────────────────────────────────────────────────
   const [tooltip, setTooltip] = useState<{
@@ -209,6 +285,16 @@ export default function AdminCalendar() {
     };
   }, [fetchShifts, fetchStaff, isManager]);
 
+  // ── Reset editing state when modal closes ─────────────────────────────────
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      setEditingShiftId(null);
+      setEditStart('');
+      setEditEnd('');
+    }
+  }, [isModalOpen]);
+
   // ── Keyboard: Escape closes modal ────────────────────────────────────────
 
   useEffect(() => {
@@ -248,7 +334,8 @@ export default function AdminCalendar() {
   const handleEventClick = useCallback(
     (info: { event: { extendedProps: Record<string, unknown> } }) => {
       if (!isManager) return;
-      const employees = info.event.extendedProps.employees as EmployeeInShift[];
+      const employees = (info.event.extendedProps.employees as EmployeeInShift[]) ?? [];
+      if (employees.length === 0) return;
       setSelectedGroup([...employees]);
       setModalMode('manage');
       setIsModalOpen(true);
@@ -266,10 +353,12 @@ export default function AdminCalendar() {
       };
       revert: () => void;
     }) => {
+      // 1. RBAC Guard
       if (!isManager) {
         info.revert();
         return;
       }
+      // 2. Dual-Lock Guard
       if (eventDropLockRef.current) {
         info.revert();
         return;
@@ -281,30 +370,35 @@ export default function AdminCalendar() {
       const shiftIds = employees.map((e) => e.shiftId);
 
       try {
-        const res = await fetchOps('/manage-schedule', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            shift_ids: shiftIds,
-            start_time: event.startStr,
-            end_time: event.endStr,
-          }),
-        }, token);
+        // Fire concurrent PATCH requests for EACH shift in the group.
+        // The backend expects `id` (single), not `shift_ids` (array).
+        const results = await Promise.all(
+          shiftIds.map((id) =>
+            fetchOps(
+              '/manage-schedule',
+              {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  id: id,
+                  start_time: ensureETOffset(event.startStr),
+                  end_time: ensureETOffset(event.endStr),
+                }),
+              },
+              token
+            )
+          )
+        );
 
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          showToast(
-            res.status === 409
-              ? 'Conflict — another manager changed this shift. Refreshing…'
-              : toUserSafeMessage(body.error || res.statusText, 'Could not move shift.'),
-            'error',
-          );
+        // If ANY of the concurrent patch requests fail, revert the entire visual drag
+        if (results.some((res) => !res.ok)) {
+          showToast('Failed to move some shifts. Reverting...', 'error');
           revert();
           await fetchShifts();
           return;
         }
       } catch {
-        showToast('Network error moving shift.', 'error');
+        showToast('Network error moving shift(s).', 'error');
         revert();
         await fetchShifts();
         return;
@@ -312,8 +406,9 @@ export default function AdminCalendar() {
         eventDropLockRef.current = false;
       }
 
+      // 3. Sync & Confirm
       await fetchShifts();
-      showToast('Shift moved', 'success');
+      showToast(`Moved ${shiftIds.length} shift(s)`, 'success');
     },
     [isManager, showToast, fetchShifts, token],
   );
@@ -335,8 +430,8 @@ export default function AdminCalendar() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_ids: userIds,
-          start_time: selectedRange.start,
-          end_time: selectedRange.end,
+          start_time: ensureETOffset(selectedRange.start),
+          end_time: ensureETOffset(selectedRange.end),
           location_id: 'brewhub_main',
         }),
       }, token);
@@ -431,11 +526,66 @@ export default function AdminCalendar() {
     await fetchShifts();
   }, [selectedGroup, showToast, fetchShifts, token]);
 
+  // ── Individual time editing ──────────────────────────────────────────────
+
+  const handleUpdateShiftTime = useCallback(
+    async (shiftId: string) => {
+      if (!editStart || !editEnd) {
+        showToast('Please set both start and end times.', 'error');
+        return;
+      }
+      if (editEnd <= editStart) {
+        showToast('End time must be after start time.', 'error');
+        return;
+      }
+
+      const emp = selectedGroup.find((e) => e.shiftId === shiftId);
+      if (!emp) return;
+
+      const datePart = toDatePartET(emp.startTime);
+      const startISO = buildISOFromET(datePart, editStart);
+      const endISO = buildISOFromET(datePart, editEnd);
+
+      setSubmitting(true);
+      try {
+        const res = await fetchOps('/manage-schedule', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: shiftId,
+            start_time: startISO,
+            end_time: endISO,
+          }),
+        }, token);
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          showToast(
+            toUserSafeMessage(body.error || res.statusText, 'Failed to update shift time.'),
+            'error',
+          );
+          return;
+        }
+      } catch {
+        showToast('Network error updating shift time.', 'error');
+        return;
+      } finally {
+        setSubmitting(false);
+      }
+
+      setEditingShiftId(null);
+      showToast('Shift time updated', 'success');
+      setIsModalOpen(false);
+      await fetchShifts();
+    },
+    [editStart, editEnd, selectedGroup, showToast, fetchShifts, token],
+  );
+
   // ── Tooltip handlers ─────────────────────────────────────────────────────
 
   const handleEventMouseEnter = useCallback(
     (info: { el: HTMLElement; event: { extendedProps: Record<string, unknown> } }) => {
-      const employees = info.event.extendedProps.employees as EmployeeInShift[];
+      const employees = (info.event.extendedProps.employees as EmployeeInShift[]) ?? [];
       if (employees.length <= 1) return; // No tooltip needed for single employee
       const rect = info.el.getBoundingClientRect();
       const tooltipWidth = 220;
@@ -456,7 +606,8 @@ export default function AdminCalendar() {
 
   const renderEventContent = useCallback(
     (arg: { event: { extendedProps: Record<string, unknown> } }) => {
-      const employees = arg.event.extendedProps.employees as EmployeeInShift[];
+      const employees = (arg.event.extendedProps.employees as EmployeeInShift[]) ?? [];
+      if (employees.length === 0) return null;
       const visible = employees.slice(0, MAX_VISIBLE_PILLS);
       const overflow = employees.length - MAX_VISIBLE_PILLS;
 
@@ -548,6 +699,10 @@ export default function AdminCalendar() {
           timeZone="America/New_York"
           events={events}
           eventContent={renderEventContent}
+          /* ── Explicit ET time formatting (12h with AM/PM) ── */
+          slotLabelFormat={{ hour: 'numeric', minute: '2-digit', hour12: true }}
+          eventTimeFormat={{ hour: 'numeric', minute: '2-digit', hour12: true }}
+          nowIndicator={true}
           /* ── RBAC: conditionally enable interaction ── */
           editable={isManager}
           selectable={isManager}
@@ -573,6 +728,10 @@ export default function AdminCalendar() {
           allDaySlot={false}
           height="100%"
         />
+        {/* Timezone indicator anchored below calendar header */}
+        <div className="absolute top-[58px] right-4 text-[10px] font-medium text-gray-400 tracking-wide pointer-events-none select-none">
+          Eastern Time (ET)
+        </div>
       </div>
 
       {/* ── Hover tooltip ── */}
@@ -617,6 +776,17 @@ export default function AdminCalendar() {
             {/* ── Create mode: multi-select checkboxes ── */}
             {modalMode === 'create' && (
               <div className="mb-6">
+                {/* Selected time range in ET */}
+                {selectedRange.start && (
+                  <div className="mb-4 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+                    <span className="font-semibold">
+                      {toDateLabelET(selectedRange.start)}
+                    </span>
+                    {' · '}
+                    {toTimeInputValue(selectedRange.start)} – {toTimeInputValue(selectedRange.end)}
+                    <span className="text-blue-500 text-xs ml-1">(ET)</span>
+                  </div>
+                )}
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Select Employees
                 </label>
@@ -648,31 +818,98 @@ export default function AdminCalendar() {
               </div>
             )}
 
-            {/* ── Manage mode: employee list with remove buttons ── */}
+            {/* ── Manage mode: employee list with edit time + remove ── */}
             {modalMode === 'manage' && (
               <div className="mb-4">
-                <p className="text-sm text-gray-600 mb-3">Employees on this shift:</p>
+                <p className="text-sm text-gray-600 mb-1">Employees on this shift:</p>
+                {selectedGroup.length > 0 && (
+                  <p className="text-xs text-gray-400 mb-3">
+                    {toDateLabelET(selectedGroup[0].startTime)}
+                    {' · '}
+                    {toTimeInputValue(selectedGroup[0].startTime)} – {toTimeInputValue(selectedGroup[0].endTime)}
+                    {' '}(ET)
+                  </p>
+                )}
                 <div className="space-y-2">
                   {selectedGroup.map((emp) => (
-                    <div
-                      key={emp.shiftId}
-                      className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-md"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold ${getEmployeeColor(emp.userId)}`}
-                        >
-                          {getInitials(emp.name)}
-                        </span>
-                        <span className="text-sm font-medium">{emp.name}</span>
+                    <div key={emp.shiftId} className="bg-gray-50 rounded-md px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold ${getEmployeeColor(emp.userId)}`}
+                          >
+                            {getInitials(emp.name)}
+                          </span>
+                          <span className="text-sm font-medium">{emp.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {editingShiftId !== emp.shiftId && (
+                            <button
+                              onClick={() => {
+                                setEditingShiftId(emp.shiftId);
+                                setEditStart(toTimeInputValue(emp.startTime));
+                                setEditEnd(toTimeInputValue(emp.endTime));
+                              }}
+                              disabled={submitting}
+                              className="text-blue-500 hover:text-blue-700 text-xs font-semibold disabled:opacity-50"
+                            >
+                              Edit Time
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleRemoveFromGroup(emp.shiftId)}
+                            disabled={submitting}
+                            className="text-red-500 hover:text-red-700 text-xs font-semibold disabled:opacity-50"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
-                      <button
-                        onClick={() => handleRemoveFromGroup(emp.shiftId)}
-                        disabled={submitting}
-                        className="text-red-500 hover:text-red-700 text-xs font-semibold disabled:opacity-50"
-                      >
-                        Remove
-                      </button>
+                      {/* Current time display (when not editing this shift) */}
+                      {editingShiftId !== emp.shiftId && (
+                        <div className="mt-1 ml-8 text-xs text-gray-500">
+                          {toTimeInputValue(emp.startTime)} – {toTimeInputValue(emp.endTime)}
+                        </div>
+                      )}
+                      {/* Inline time editor */}
+                      {editingShiftId === emp.shiftId && (
+                        <div className="mt-2 ml-8 flex items-center gap-2 flex-wrap">
+                          <label className="text-xs text-gray-600 flex items-center gap-1">
+                            Start
+                            <input
+                              type="time"
+                              value={editStart}
+                              onChange={(e) => setEditStart(e.target.value)}
+                              disabled={submitting}
+                              className="px-2 py-1 border border-gray-300 rounded text-sm"
+                            />
+                          </label>
+                          <label className="text-xs text-gray-600 flex items-center gap-1">
+                            End
+                            <input
+                              type="time"
+                              value={editEnd}
+                              onChange={(e) => setEditEnd(e.target.value)}
+                              disabled={submitting}
+                              className="px-2 py-1 border border-gray-300 rounded text-sm"
+                            />
+                          </label>
+                          <button
+                            onClick={() => handleUpdateShiftTime(emp.shiftId)}
+                            disabled={submitting || !editStart || !editEnd}
+                            className="px-2 py-1 bg-blue-600 text-white rounded text-xs font-semibold hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {submitting ? 'Saving…' : 'Save'}
+                          </button>
+                          <button
+                            onClick={() => setEditingShiftId(null)}
+                            disabled={submitting}
+                            className="px-2 py-1 text-gray-600 text-xs font-semibold hover:text-gray-800"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

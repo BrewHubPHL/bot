@@ -17,12 +17,21 @@ interface StaffInfo {
   email: string;
   role: string;
   is_working: boolean;
+  contract_signed: boolean;
+  onboarding_complete: boolean;
 }
 
-interface OpsSession {
+/** Internal session state — stored via useState (no refreshSession yet). */
+interface OpsSessionState {
   staff: StaffInfo;
   token: string;
   needsPinRotation?: boolean;
+}
+
+/** Full session exposed to child components via context (includes refreshSession). */
+interface OpsSession extends OpsSessionState {
+  /** Re-verify session with the backend (calls pin-verify). Updates staff flags like onboarding_complete. */
+  refreshSession: () => Promise<void>;
 }
 
 /**
@@ -129,12 +138,38 @@ function ClockButtons({
   );
 }
 
+/**
+ * OnboardingRedirect — Displayed when a staff member hasn't completed onboarding.
+ * Redirects to /staff-hub/onboarding and shows a persistent notice.
+ */
+function OnboardingRedirect() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/staff-hub/onboarding");
+  }, [router]);
+
+  return (
+    <div className="min-h-screen bg-black flex flex-col items-center justify-center px-4 text-center">
+      <AlertCircle className="w-12 h-12 text-amber-400 mb-4" />
+      <h1 className="text-xl font-bold text-white mb-2">Action Required</h1>
+      <p className="text-amber-300 text-sm max-w-md">
+        Please review and sign your Mutual Working Agreement to unlock shop operations.
+      </p>
+      <div className="mt-6">
+        <Loader2 className="w-6 h-6 animate-spin text-amber-400 mx-auto" />
+        <p className="text-zinc-500 text-xs mt-2">Redirecting to onboarding…</p>
+      </div>
+    </div>
+  );
+}
+
 export default function OpsGate({ children, requireManager = false }: { children: ReactNode; requireManager?: boolean }) {
 
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [session, setSession] = useState<OpsSession | null>(null);
+  const [session, setSession] = useState<OpsSessionState | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [clockLoading, setClockLoading] = useState(false);
   const [clockMsg, setClockMsg] = useState("");
@@ -336,7 +371,7 @@ export default function OpsGate({ children, requireManager = false }: { children
         return;
       }
 
-      const newSession: OpsSession = {
+      const newSession: OpsSessionState = {
         staff: data.staff,
         token: data.token,
         needsPinRotation: data.needsPinRotation || false,
@@ -351,8 +386,10 @@ export default function OpsGate({ children, requireManager = false }: { children
         setShowPinRotation(true);
       }
 
-      // Always land on the staff hub (clock-in portal) after login
-      opsRouter.replace("/staff-hub");
+      // Role-based landing page: managers/admins → dashboard, staff → clock-in hub
+      const role = (data.staff?.role || "").toLowerCase();
+      const landingPage = (role === "manager" || role === "admin") ? "/manager" : "/staff-hub";
+      opsRouter.replace(landingPage);
     } catch {
       setError("Connection error — try again");
       setPin("");
@@ -420,7 +457,7 @@ export default function OpsGate({ children, requireManager = false }: { children
     }
   }, [session]);
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
     setSession(null);
     setPin("");
     setError("");
@@ -434,8 +471,12 @@ export default function OpsGate({ children, requireManager = false }: { children
       localStorage.removeItem("brewhub_email");
     } catch { /* storage unavailable */ }
 
-    // Clear the HttpOnly session cookie via a logout endpoint
-    fetch(`${API_BASE}/pin-logout`, { method: "POST", headers: { "X-BrewHub-Action": "true" }, credentials: "include" }).catch(() => {});
+    // Clear the HttpOnly session cookie via a logout endpoint.
+    // Await to ensure the Set-Cookie: Max-Age=0 is processed by the browser
+    // before any subsequent verifySession() could re-hydrate from the stale cookie.
+    try {
+      await fetch(`${API_BASE}/pin-logout`, { method: "POST", headers: { "X-BrewHub-Action": "true" }, credentials: "include" });
+    } catch { /* network down — cookie will expire naturally via Max-Age */ }
   }, []);
 
   // ═══════════════════════════════════════════════════════════════
@@ -475,7 +516,7 @@ export default function OpsGate({ children, requireManager = false }: { children
       if (!verifyRes.ok) throw new Error(data.error || "Passkey login failed");
 
       // Success — create session (same format as PIN login)
-      const newSession: OpsSession = {
+      const newSession: OpsSessionState = {
         staff: data.staff,
         token: data.token,
         needsPinRotation: false,
@@ -483,8 +524,10 @@ export default function OpsGate({ children, requireManager = false }: { children
       setSession(newSession);
       setPin("");
 
-      // Always land on the staff hub (clock-in portal) after login
-      opsRouter.replace("/staff-hub");
+      // Role-based landing page: managers/admins → dashboard, staff → clock-in hub
+      const role = (data.staff?.role || "").toLowerCase();
+      const landingPage = (role === "manager" || role === "admin") ? "/manager" : "/staff-hub";
+      opsRouter.replace(landingPage);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Passkey login failed";
       // Don't show error for user cancellation
@@ -569,6 +612,11 @@ export default function OpsGate({ children, requireManager = false }: { children
 
   const managerChallengeValue: ManagerChallenge = { requestChallenge };
 
+  // Memoized session context value — includes refreshSession callback
+  const sessionContextValue: OpsSession | null = session
+    ? { ...session, refreshSession: verifySession }
+    : null;
+
   /* ─── SSR / pre-mount: show blank black screen to avoid hydration mismatch ─── */
   if (!mounted) {
     return (
@@ -608,8 +656,36 @@ export default function OpsGate({ children, requireManager = false }: { children
       );
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // Onboarding Gate — redirect unsigned staff to /staff-hub/onboarding
+    // Uses server-provided onboarding_complete flag from pin-verify.
+    // Exempt: the onboarding page itself and admin/manager roles.
+    // ═══════════════════════════════════════════════════════════
+    const isOnboardingPage = opsPathname === "/staff-hub/onboarding";
+    const needsOnboarding = !session.staff.onboarding_complete && !isManager && !isOnboardingPage;
+
+    if (needsOnboarding) {
+      // Redirect to onboarding — but render a notice while the redirect fires
+      if (opsPathname !== "/staff-hub/onboarding") {
+        // Use effect-free redirect: push happens from the child OnboardingRedirect
+        return (
+          <OpsSessionContext.Provider value={sessionContextValue}>
+            <ManagerChallengeContext.Provider value={managerChallengeValue}>
+              <StaffShiftProvider
+                staffEmail={session.staff.email}
+                token={session.token}
+                initialIsWorking={session.staff.is_working}
+              >
+                <OnboardingRedirect />
+              </StaffShiftProvider>
+            </ManagerChallengeContext.Provider>
+          </OpsSessionContext.Provider>
+        );
+      }
+    }
+
     return (
-      <OpsSessionContext.Provider value={session}>
+      <OpsSessionContext.Provider value={sessionContextValue}>
         <ManagerChallengeContext.Provider value={managerChallengeValue}>
           <StaffShiftProvider
             staffEmail={session.staff.email}
@@ -715,7 +791,18 @@ export default function OpsGate({ children, requireManager = false }: { children
           </div>
 
           {/* Main content offset below header */}
-          <div className="pt-10">{children}</div>
+          <div className="pt-10">
+            {/* Onboarding notice banner — shown when on the onboarding page */}
+            {isOnboardingPage && !session.staff.onboarding_complete && (
+              <div className="bg-amber-900/60 border-b border-amber-600/40 px-4 py-3 text-center">
+                <p className="text-amber-200 text-sm font-medium flex items-center justify-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  Action Required: Please review and sign your Mutual Working Agreement to unlock shop operations.
+                </p>
+              </div>
+            )}
+            {children}
+          </div>
           </StaffShiftProvider>
         </ManagerChallengeContext.Provider>
       </OpsSessionContext.Provider>

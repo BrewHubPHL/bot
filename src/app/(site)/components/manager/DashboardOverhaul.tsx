@@ -6,6 +6,7 @@ import { useStaffOptional } from "@/context/StaffContext";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import { fetchOps } from "@/utils/ops-api";
+import ProfitShareCard from "./ProfitShareCard";
 import {
   RefreshCw,
   CheckCircle,
@@ -347,6 +348,11 @@ export default function DashboardOverhaul() {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════
+          TEAM PROFIT SHARE — monthly bonus progress
+          ═══════════════════════════════════════════════════ */}
+      <ProfitShareCard />
 
       {/* ═══════════════════════════════════════════════════
           ON THE CLOCK — active staff roster

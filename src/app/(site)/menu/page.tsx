@@ -34,12 +34,6 @@ export default function MenuPage() {
         >
           Back to Home
         </a>
-        <a
-          href="/waitlist"
-          className="inline-flex items-center justify-center px-6 py-3 rounded-full border-2 border-[var(--hub-espresso)] text-[var(--hub-espresso)] font-semibold hover:bg-[var(--hub-espresso)]/5 transition-colors"
-        >
-          Join the Waitlist
-        </a>
       </div>
 
       {/* Social nudge */}

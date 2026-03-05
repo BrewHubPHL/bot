@@ -39,10 +39,12 @@ exports.handler = async (event) => {
     (event.headers?.host || '').split(':')[0]
   );
 
+  // MUST match pin-login.js exactly (SameSite=Lax) — if SameSite differs
+  // the browser treats it as a different cookie and the original is never cleared.
   const clearCookie = [
     'hub_staff_session=deleted',
     'HttpOnly',
-    'SameSite=Strict',
+    'SameSite=Lax',
     'Path=/',
     'Max-Age=0', // immediately expire
     isProduction ? 'Secure' : '',

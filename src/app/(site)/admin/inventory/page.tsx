@@ -66,7 +66,7 @@ export default function InventoryScanner() {
     setStatus("Saving…");
 
     try {
-      const res = await fetchOps('/adjust-inventory', {
+      const res = await fetchOps('/process-inventory-adjustment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemId: item.id, delta, itemName: item.item_name }),

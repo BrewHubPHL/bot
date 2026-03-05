@@ -35,6 +35,11 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 ### D. Compliance & Data Integrity
 * **IRS-Compliant Payroll:** `time_logs` are immutable. `atomic_payroll_adjustment()` only inserts new delta rows linked to a manager's UUID and a required reason.
 * **GDPR Right to Erasure:** A `deletion_tombstones` table prevents "zombie data" from being resurrected by external Google Sheets syncs.
+* **Staff Agreement Signatures:** The `agreement_signatures` table provides an immutable cryptographic audit trail. Each row records a SHA-256 hash of the agreement text at signing time, the hashed IP address (via `hashIP()`), truncated user agent, and a timestamped version tag. The `get-schema-health.js` function allows managers to verify schema integrity on-demand.
+* **Backend Onboarding Gate:** `_auth.js` supports `requireOnboarded: true` — blocks staff with `onboarding_complete = false` from calling sensitive endpoints (`collect-payment`, `process-inventory-adjustment`, `cafe-checkout`) with `403 ONBOARDING_REQUIRED`. Enforced on both PIN-session and JWT auth paths.
+* **POS Fail-Closed Gate:** `cafe-checkout.js` enforces a dual fail-closed check: (1) payment methods `cash`, `terminal`, and `comp` require `authMode === 'staff'` — customers and guests receive an immediate 403; (2) even authenticated staff must have `onboarding_complete === true` (defense-in-depth, independent of the `_auth.js` gate). This prevents any regression in the auth layer from opening POS financial operations to un-onboarded personnel.
+* **Atomic Session Rotation on Signature:** The `record_agreement_signature` RPC atomically bumps `token_version` when an agreement is signed, invalidating all existing sessions and forcing a fresh login that picks up the new `onboarding_complete = true` status.
+* **Agreement Version Governance:** The agreement `version_tag` is now pinned server-side via a constant (`CURRENT_VERSION = '2027-Q1'`) in `record-agreement-signature.js`. The frontend-supplied `version_tag` is logged for drift detection but never used in the DB write. This eliminates a class of client-side version spoofing attacks where a tampered frontend could stamp an incorrect version into the immutable audit trail.
 
 ### E. Stateless JWT Revocation ("Ghost Admin")
 * **Vulnerability:** Stateless JWTs historically remained mathematically valid until expiration even after a staff member was fired and their database row removed.
@@ -75,3 +80,42 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 ### F. Double-Tap Prevention (POS)
 * **`payingRef` lock:** Prevents concurrent Square Terminal payment calls from the POS if a barista double-taps the Pay button.
 * **`clockLockRef` lock:** Prevents concurrent clock-in/out calls from the Staff Hub.
+
+### G. SECURITY DEFINER View Audit (Lint 0010)
+* **Scope:** Supabase linter flagged 5 views with `SECURITY DEFINER`: `v_items_to_pickup`, `staff_directory_safe`, `v_staff_status`, `v_attendance_report`, `parcel_departure_board`.
+* **Fixed (→ SECURITY INVOKER):**
+  - `staff_directory_safe` — only consumed by `manage-schedule.js` via service_role (bypasses RLS regardless).
+  - `v_attendance_report` — zero active consumers in any application code.
+* **Intentionally Retained (SECURITY DEFINER):**
+  - `v_items_to_pickup` — provides masked data (first initial, last-4 tracking) to the anon browser client. Switching to INVOKER would require granting `anon` SELECT on `orders`, `parcels`, `outbound_parcels`, exposing full PII.
+  - `v_staff_status` — hides `pin_hash` and raw `time_logs` from browser clients while computing `is_working`.
+  - `parcel_departure_board` — public departure board with masked names, last-4 tracking, and jittered timestamps. Prevents anon from reading raw parcel tables.
+* **Hardening:** All 3 retained views have grants restricted to SELECT-only via explicit `REVOKE ALL` + `GRANT SELECT`.
+* **Migration:** `20260304_schema80_security_definer_audit.sql`
+
+### H. Function Search Path Pinning (Lint 0011)
+* **Scope:** 68+ functions in the `public` schema had mutable `search_path`, allowing potential schema-confusion attacks.
+* **Fix:** Dynamic `DO` block iterates `pg_proc` and sets `search_path = 'public'` on every public-schema function that doesn't already have it pinned. Idempotent and future-proof.
+* **Migration:** `20260304_schema81_function_searchpath_audit.sql`
+
+### I. Extension Schema Hygiene (Lint 0014)
+* **Issue:** `btree_gist` installed in `public` schema (used by `scheduled_shifts.no_overlapping_shifts` exclusion constraint).
+* **Fix:** `ALTER EXTENSION btree_gist SET SCHEMA extensions` — atomic move to Supabase-conventional `extensions` schema.
+
+### J. Overly-Permissive INSERT RLS Policies (Lint 0024)
+* **Scope:** 4 policies with `WITH CHECK (true)` on INSERT operations.
+* **Fixes:**
+  - `coffee_orders` "Staff can add items to orders" → `WITH CHECK (is_brewhub_staff())` — only staff can insert.
+  - `orders` "Staff can create orders" → `WITH CHECK (is_brewhub_staff())` — only staff can insert.
+  - `customers` "customers_insert" → scoped: authenticated must match `auth.uid()`; anon requires non-null email.
+  - `waitlist` "allow_public_inserts" → requires non-empty name + valid email format.
+
+### K. Leaked Password Protection
+* **Status:** Dashboard-only setting. Enable in Supabase Dashboard → Authentication → Settings → Password Security → "Leaked password protection" toggle. Not configurable via SQL.
+
+### L. Schema Integrity Auditing (`get-schema-health.js`)
+* **Purpose:** Automated database schema auditor for the `agreement_signatures` and `maintenance_logs` tables. Detects missing columns, type mismatches, and extra columns by querying `information_schema.tables` and `information_schema.columns`.
+* **Auth:** Manager PIN session required. Rate-limited via `staffBucket`. CORS-locked to `SITE_URL`.
+* **Full Type Comparison:** All tables in `TABLES_TO_CHECK` (including `maintenance_logs`) now receive full `information_schema`-based type comparison when available — not just column existence probes. The `maintenance_logs.cost` column is expected to be `integer` (cents), enabling the M-3 Migration Builder to detect type mismatches (e.g. `numeric` → `integer` migration needed).
+* **Fallback:** When `information_schema` is not exposed via PostgREST, the function falls back to individual column probes (selecting each expected column with `LIMIT 0`) to determine presence without exposing raw metadata.
+* **Frontend integration:** The Manager Dashboard calls this on mount and renders a red System Integrity Alert banner when `healthy === false`, including a "Copy Migration SQL" button that generates the required DDL statements.

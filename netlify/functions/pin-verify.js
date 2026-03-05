@@ -82,7 +82,7 @@ exports.handler = async (event) => {
     const staffLookupQuery = withSourceComment(
       supabase
       .from('v_staff_status')
-      .select('id, name, full_name, email, role, is_working, is_active')
+      .select('id, name, full_name, email, role, is_working, is_active, contract_signed, onboarding_complete')
       .eq('email', auth.user.email),
       'auth-staff-status-lookup'
     );
@@ -114,6 +114,8 @@ exports.handler = async (event) => {
           email: staffRow.email,
           role: staffRow.role,
           is_working: staffRow.is_working ?? false,
+          contract_signed: staffRow.contract_signed ?? false,
+          onboarding_complete: staffRow.onboarding_complete ?? false,
         },
       })
     };

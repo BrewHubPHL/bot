@@ -76,8 +76,9 @@ exports.handler = async (event) => {
   const rawFilter = (event.queryStringParameters?.filter || 'all').toLowerCase();
   const filter = VALID_FILTERS.has(rawFilter) ? rawFilter : 'all';
 
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+
   try {
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
     let query = supabase
       .from('customers')
@@ -124,7 +125,13 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error('[CRM-CUSTOMERS]', err?.message);
-    logSystemError({ source: 'get-crm-customers', message: err?.message, stack: err?.stack });
+    await logSystemError(supabase, {
+      error_type: 'unhandled_exception',
+      severity: 'critical',
+      source_function: 'get-crm-customers',
+      error_message: err?.message || 'Unknown error',
+      context: { stack: err?.stack },
+    });
     return { statusCode: 500, headers, body: JSON.stringify({ error: 'An error occurred. Please try again.' }) };
   }
 };

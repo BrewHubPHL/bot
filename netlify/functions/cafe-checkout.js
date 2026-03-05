@@ -79,7 +79,8 @@ exports.handler = async (event) => {
   // 1. Try staff PIN first (POS terminal flow)
   // 2. Fall back to Supabase JWT (online customer flow)
   // 3. If neither, allow guest checkout with rate limiting
-  let auth = await authorize(event, { requirePin: true });
+  // requireOnboarded: block staff who haven't signed their agreement
+  let auth = await authorize(event, { requirePin: true, requireOnboarded: true });
   let authMode = 'staff';
 
   if (!auth.ok) {
@@ -117,6 +118,20 @@ exports.handler = async (event) => {
       ? rawPaymentMethod
       : null;
     const isAtomicPayment = paymentMethod && ATOMIC_METHODS.includes(paymentMethod);
+
+    // ── POS FAIL-CLOSED: cash/terminal/comp require authenticated staff ──
+    const POS_RESTRICTED_METHODS = ['cash', 'terminal', 'comp'];
+    if (paymentMethod && POS_RESTRICTED_METHODS.includes(paymentMethod) && authMode !== 'staff') {
+      return json(403, { error: 'Cash, terminal, and comp payments require staff authentication.' });
+    }
+    // Defense-in-depth: even if authMode is 'staff', verify onboarding is complete.
+    // The auth layer checks this via requireOnboarded, but we enforce it here as
+    // a second gate so a regression in _auth.js can never open POS transactions
+    // to un-onboarded personnel.
+    if (paymentMethod && POS_RESTRICTED_METHODS.includes(paymentMethod) && authMode === 'staff' && auth.onboarding_complete === false) {
+      console.warn(`[CAFE] Blocked POS transaction for un-onboarded staff: ${auth.user?.email}`);
+      return json(403, { error: 'Staff must complete onboarding before processing cash, terminal, or comp transactions.' });
+    }
 
     // Comp orders require a reason (validated early before DB work)
     const compReason = (body.reason || '').toString().trim();

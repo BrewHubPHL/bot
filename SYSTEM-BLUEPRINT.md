@@ -51,6 +51,14 @@
 - **Mechanism**: `X-BrewHub-Action` header required on all POST/PATCH/PUT/DELETE endpoints.
 - **Module**: `_csrf.js` — enforced globally via `fetchOps`.
 
+### Manager Dashboard Alert Hierarchy
+- **AlertManager Provider** (`src/context/AlertManager.tsx`): Centralized alert state with prioritized queue (P0 → P1 → P2), push/dismiss/clear operations. Wraps the manager dashboard in a React context.
+- **P0 (Critical / Red)**: Schema mismatches (`get-schema-health`), DB connection failures. Rendered as a **blocking modal overlay** (`AlertModal.tsx`) with focus trap — the dashboard is non-interactive until all P0 alerts are acknowledged.
+- **P1 (High / Amber)**: Maintenance-overdue equipment (`get-asset-analytics`), Staff exhaustion (>16h shift from `LiveStaffPulse`). Rendered as stacking banners below the header.
+- **P2 (Medium / Blue)**: Low stock warnings, pending agreement signatures. Rendered as stacking banners below P1.
+- **SystemHealthBadge**: Header badge showing total alert count with color-coded severity. Clicking scrolls to the banner stack.
+- **Rendering**: `AlertRenderer.tsx` orchestrates both `AlertModal` and `AlertBannerStack`. Placed between the sticky header and main content area in `manager/page.tsx`.
+
 ---
 
 ## Part 3: Data Integrity
@@ -58,8 +66,9 @@
 ### RLS Strategy
 - **Row Level Security**: Deny-all by default, scoped SELECT for authenticated staff.
   - **Staff SELECT Policies**: Authenticated users can access operational tables via `is_brewhub_staff()`.
-  - **Manager Write Policies**: `is_brewhub_manager()` gates writes on merch_products, payroll_runs.
+  - **Manager Write Policies**: `is_brewhub_manager()` gates writes on merch_products, payroll_runs, equipment, maintenance_logs.
   - **merch_products extended columns**: `long_description` (TEXT) for origin stories / tasting notes; `allowed_modifiers` (JSONB, default `[]`) for per-item modifier group keys (`milks`, `sweeteners`, `standard_syrups`, `specialty_addins`).
+  - **Equipment Asset Tables** (Schema-82): `equipment` (name, category, purchase_price, install_date, maint_frequency_days, last_maint_date) and `maintenance_logs` (equipment_id FK, performed_at, cost, notes, performed_by). RLS via `is_brewhub_manager()`. `get_asset_analytics()` RPC computes TCO, daily operating cost, and overdue health status.
   - **Service Role**: Backend functions bypass RLS for INSERT/UPDATE/DELETE.
 
 ### Parcel View Logic
@@ -100,11 +109,20 @@
 ## Part 5b: Schema Evolution (44–53)
 *(See previous documentation or SITE-MANIFEST.md for earlier schemas)*
 
-## Part 5c: Dynamic Views & Performance (Schemas 54–79)
+## Part 5c: Dynamic Views & Performance (Schemas 54–80)
 
 ### The View-ification Shift
 - **`v_staff_status` (Schema 77)**: Deprecated the legacy `is_working` column. A staff member's working state is now computed entirely dynamically on the fly by checking for an open `time_logs` row.
 - **`v_items_to_pickup` (Schema 78)**: Consolidated read-layer unifying `orders`, `parcels`, and `outbound_parcels` under one unified interface for front-of-house pickup tracking.
+
+### Security-Definer View Audit (Schema 80)
+- **Converted to SECURITY INVOKER**: `staff_directory_safe` (service_role only), `v_attendance_report` (no consumers).
+- **Intentionally retained as SECURITY DEFINER**: `v_items_to_pickup`, `v_staff_status`, `parcel_departure_board` — these provide masked data windows to anon browser clients. Grants hardened to SELECT-only.
+
+### Comprehensive Lint Remediation (Schema 81)
+- **Function search_path pinning**: All public-schema functions pinned to `SET search_path = 'public'` via dynamic DO block.
+- **Extension hygiene**: `btree_gist` moved from `public` to `extensions` schema.
+- **RLS policy tightening**: 4 INSERT policies with `WITH CHECK(true)` scoped to proper predicates (`is_brewhub_staff()`, `auth.uid()` matching, email validation).
 
 ### Additional Features
 - **WebAuthn Credentials (Schema 65)**: Tables to support passwordless, biometric staff login.
@@ -209,6 +227,25 @@
 - Cart items track `base_price_cents` + `customizations[]` with per-modifier quantity.
 - Modifier group definitions mirror the POS system for consistency.
 
+### Equipment & Maintenance Assets (`20260304_schema82_equipment_assets`)
+- **New Tables:** `equipment` (asset registry with purchase_price, install_date, maint_frequency_days, last_maint_date) and `maintenance_logs` (journal of maintenance events with cost, notes, performed_by FK).
+- **Trigger:** `trg_update_last_maint_date` auto-updates `equipment.last_maint_date` on new maintenance log insert.
+- **RLS:** Full manager-only CRUD via `is_brewhub_manager()` on both tables.
+- **RPC:** `get_asset_analytics()` — SECURITY DEFINER function returning TCO (purchase + sum of maintenance costs), daily operating cost, and boolean overdue health status per asset.
+- **RPC:** `agg_maintenance_costs(start_date date, end_date date)` — STABLE SQL function returning `(total_cost_cents bigint, event_count bigint)`. Uses `COALESCE(cost, 0)` to guarantee NULL safety at the SQL level. Called by `_profit-report.js` for profit computation.
+- **RPC:** `calculate_projected_asset_spend(months_ahead int)` (Schema-83) — SECURITY DEFINER function that identifies all active equipment with a next maintenance date within `months_ahead` months, averages the cost of each item's last 3 maintenance logs, and returns a JSON object `{ total_projected_cost, flagged_equipment[] }`. Input clamped to 1–24 months.
+- **Netlify Function:** `get-asset-analytics.js` — manager-only GET endpoint using the RPC, includes rate limiting (`staffBucket`) and error logging.
+- **Netlify Function:** `get-projected-maintenance.js` — manager-only GET endpoint (`?months=3`). Calls `calculate_projected_asset_spend` RPC. Rate-limited via `staffBucket`, no CSRF (idempotent GET).
+- **Netlify Function:** `log-maintenance-action.js` — manager-only POST endpoint that inserts into `maintenance_logs`; the existing `trg_update_last_maint_date` trigger atomically updates `equipment.last_maint_date` in the same transaction. Validates UUID, date (no future), cost bounds, and sanitizes notes via `sanitizeInput()`.
+- **Frontend:** `/manager/assets` page with sortable equipment table, summary cards (Total Assets, Total TCO, Overdue, Projected Maintenance Spend), and overdue badges. The Finance card shows "Est. Maint. Spend (Next 90d)" with an expandable flagged equipment list. Each row has a "Log Maint." button that opens the `MaintenanceLogger` portal modal. Manager dashboard shows a persistent toast notification on mount when any asset is overdue.
+- **MaintenanceLogger Component:** `src/components/ops/MaintenanceLogger.tsx` — portal-based modal for logging completed maintenance. Posts via `fetchOps()` (auto CSRF header), refreshes asset table on success and clears overdue status.
+- **Shared Module:** `_profit-report.js` — extracts `computeProfitReport(supabase, monthStr)` so both the HTTP endpoint and the cron job share identical business logic. Returns revenue, maintenance cost, operating expenses (OpEx from `property_expenses`), total expenses, net profit, ratio, and event counts. Net Profit is computed as Revenue − Maintenance − OpEx, aligning with the Employee Addendum definition: "Revenue minus all Operating Expenses (OpEx), including rent, payroll, COGS, and Equipment Maintenance Costs." Also exports `centsToDisplay(cents)` (locale-formatted via `Intl.NumberFormat`), `monthBounds(monthStr)`, `MONTH_RE`, `checkVestingEligibility(hireDateStr, asOf?)`, `VESTING_MONTHS` (6), and `PROBATION_DAYS` (90). `checkVestingEligibility` validates whether a staff member's hire date clears both the 90-day probation and 6-month vesting requirements — returns `{ eligible, reason }`. **Maintenance cost aggregation** uses the `agg_maintenance_costs(start_date, end_date)` Postgres RPC which applies `COALESCE(cost, 0)` at the SQL level — never relies on JavaScript `Number() || 0`. Falls back to a row-level fetch with `.not('cost', 'is', null)` filter if the RPC is not yet deployed.
+- **Netlify Function:** `get-true-profit-report.js` — manager-only GET endpoint (`?month=YYYY-MM`, defaults to current month). Calls `computeProfitReport()` from `_profit-report.js`. Powers the "Profitability" card on the Manager Dashboard. Rate-limited via `staffBucket`, PIN session required.
+- **Netlify Function:** `get-profit-share-preview.js` — manager-only GET endpoint (`?month=YYYY-MM`, defaults to current month). Reuses `computeProfitReport()`, then subtracts a $5,000 Profit Floor (`500_000` cents) and computes a 10% Staff Pool via **integer basis-point arithmetic** (`(surplusCents × 1000) / 10000` — no floating-point multiplication on money). Joins `time_logs` with `staff_directory` on `staff_id` and only counts **integer minutes** (`Math.floor`) for employees whose `hire_date` is on or before the 6-month vesting date; employees within the 90-day probation window are hard-excluded from all pool calculations. Derives a Bonus-per-Hour via **cents-per-minute path**: `Math.floor((staffPoolCents × 60) / totalEligibleMinutes)` — avoids the "fractional hour" float trap. If the bonus-per-hour is less than 1¢ or `totalEligibleMinutes` is 0, it returns $0.00 (never Infinity). Response includes `total_staff_minutes` (integer) alongside `total_staff_hours` (display-only) and `staff_pool_rate_bps` (1000) alongside `staff_pool_rate` (0.10, backward compat). Logs an ops-diagnostics info event when no staff are vested yet. Rate-limited via `staffBucket`, PIN session required. Imports `centsToDisplay` and `monthBounds` from `_profit-report.js` (no duplicate helpers).
+- **Shared Utility:** `src/utils/currency-utils.ts` — exports `formatCentsToDollars(cents: number): string`. Converts integer cents to a locale-formatted US dollar string via `Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })`. Used by all frontend components that display monetary values; no division or multiplication occurs in React components.
+- **Frontend Component:** `ProfitShareCard.tsx` — "Team Profit Share" card rendered on the Manager Dashboard (inside `DashboardOverhaul.tsx`). Displays a progress bar toward the $5,000 monthly Profit Floor, Staff Pool amount, total team hours, Bonus-per-Hour, and an Eligible Staff banner showing `eligible_staff_count` with pending count and a vesting-requirement tooltip ("Calculated based on 6-month vesting requirement per Addendum."). Fetches via `fetchOps("/get-profit-share-preview")`. View-only: receives pre-formatted `_display` strings from the API and uses `formatCentsToDollars()` from `currency-utils.ts` only for derived "to go" text (no raw division in JSX). Only visible to managers (OpsGate-gated).
+- **Netlify Function (Scheduled):** `cron-monthly-financial-summary.js` — runs on the 1st of every month at 10:00 AM UTC. Calls `computeProfitReport()` for the previous month, queries all active managers/admins from `staff_directory`, and sends a professional HTML financial summary via Resend. If the Maintenance-to-Revenue ratio exceeds 10%, the email includes a red CTA button linking to `/manager/assets`. Failures are logged via `logSystemError()`.
+
 ### Staff Phone Migration (`20260302_add_staff_phone`)
 - Adds nullable `phone TEXT` column to `staff_directory`.
 - Automatically inherited by the `v_staff_status` view (uses `sd.*`).
@@ -239,3 +276,21 @@
 - **New npm scripts:** `test:unit` (vitest), `test:functions` (jest), `test:e2e` (playwright), `test:all` (runs all three).
 - **New config:** `tests/jest.config.functions.js` — dedicated Jest config for Netlify function tests.
 - Updated `tests/vitest.config.ts` and `tests/setup-tests.ts`.
+
+### Agreement Signatures & Schema Health Auditing
+- **`agreement_signatures` table:** Immutable audit trail for staff digital signatures on the Mutual Working Agreement. Columns: `id` (uuid PK), `staff_id` (uuid FK → staff_directory), `version_tag` (text), `ip_address` (hashed text), `user_agent` (text), `sha256_hash` (text — SHA-256 of the full agreement text at signing time), `signed_at` (timestamptz), `created_at` (timestamptz). RLS enabled, service-role only. Migration: `20260304_schema84_agreement_signatures.sql`.
+- **`record_agreement_signature` RPC:** Atomic Postgres function (`SECURITY DEFINER`, `search_path = public`). Uses `pg_advisory_xact_lock` to serialise concurrent signatures for the same staff member. In a single transaction: (a) inserts into `agreement_signatures`, (b) updates `staff_directory.contract_signed` + `onboarding_complete`, (c) bumps `token_version` + `version_updated_at` to atomically invalidate all existing sessions — forcing a fresh login that picks up the new `onboarding_complete = true` status. Returns `{ signature_id, signed_at }`.
+- **`_crypto-utils.js` / `src/lib/crypto-utils.ts`:** Shared canonical normalization utility (`getCanonicalAgreementText`). Converts CRLF/CR → LF, collapses multiple spaces, trims outer whitespace. Used by the backend (record-agreement-signature, get-signed-certificate) and frontend (AgreementViewer) to guarantee identical SHA-256 hashes regardless of OS or browser whitespace differences.
+- **`record-agreement-signature.js`:** POST endpoint — verifies PIN via `verify_staff_pin` RPC, validates `staff_id` matches authenticated session, **canonically normalizes** the agreement text via `getCanonicalAgreementText`, computes SHA-256 hash server-side, logs original-vs-normalized length delta to ops diagnostics, then calls the atomic `record_agreement_signature` RPC. **Version pinning:** the `version_tag` stored in the DB is always the server-side constant `CURRENT_VERSION` (`'2027-Q1'`); client-supplied version_tag is logged for drift detection only. Sends manager notification email via Resend.
+- **`get-signed-certificate.js`:** GET endpoint (Staff PIN required, `?staff_id=<uuid>`) — returns a Certificate of Agreement payload. Re-hydrates the agreement template for the staff member, applies canonical normalization, re-derives the SHA-256 hash, and compares it against the stored hash to verify integrity. Returns `{ staff_name, version_tag, signed_at, signature_id, stored_hash, derived_hash, integrity_ok }`. Only the employee (or a manager) can view a given certificate.
+- **`get-schema-health.js`:** GET endpoint (Manager PIN required) — database schema auditor that queries `information_schema.tables` and `information_schema.columns` to verify table schemas. Checks **multiple tables**: `agreement_signatures` (full column + type verification) and `maintenance_logs` (full column + type verification; `cost` expected as `integer` for cents-based storage). Falls back to column-probing via PostgREST when `information_schema` is not exposed. Returns a structured health report with `healthy` (boolean), `missingColumns`, `typeMismatches`, `extraColumns`, `additional_tables` (array of per-table results with full `typeMismatches` arrays), `overall_healthy` (aggregate boolean), and a human-readable `message`.
+- **Manager Dashboard — System Integrity Alert:** On mount, the Manager Dashboard calls `get-schema-health` via `fetchOps()`. If `healthy === false`, a red alert banner renders at the top of the dashboard showing the error message, listing missing columns with expected types, and providing a "Copy Migration SQL" button that generates the appropriate `ALTER TABLE` / `CREATE TABLE` statements to the clipboard.
+
+### Onboarding Gate (Schema 85)
+- **Migration:** `20260304_schema85_onboarding_gate.sql` — Ensures `staff_directory.contract_signed` and `staff_directory.onboarding_complete` boolean columns exist. Updates `verify_staff_pin()` RPC to return these fields (plus `token_version`) in the login response.
+- **Backend:** `pin-login.js` and `pin-verify.js` now include `contract_signed` and `onboarding_complete` in the `staff` response object. OpsGate reads these from the server on every session verify.
+- **Frontend (`OpsGate.tsx`):** After authentication, if `onboarding_complete === false` and the user is not an admin/manager and is not already on `/staff-hub/onboarding`, the gate redirects to `/staff-hub/onboarding`. A persistent amber banner reads: "Action Required: Please review and sign your Mutual Working Agreement to unlock shop operations."
+- **`/staff-hub/onboarding` page:** Renders `AgreementViewer` (scroll-to-sign). On successful signature, calls `refreshSession()` which re-fetches the PIN session from the backend, picking up the now-true `onboarding_complete` flag. The gate then automatically unlocks and redirects to the staff landing page. If a 401 occurs mid-signing, AgreementViewer saves the signature attempt to a `recovery_vault` in `localStorage`, displays an inline re-auth modal (mini PIN form), and transparently retries the signature POST with the new session token — no page reload or data loss. Scroll-read progress is persisted to `sessionStorage` so re-mounts after refresh skip re-reading.
+- **Security:** The gate uses server-provided state from `pin-verify` (not client-side flags), preventing manual URL bypass to `/pos`, `/kds`, etc.
+- **Backend Auth Gate (`requireOnboarded`):** The `authorize()` function in `_auth.js` accepts a `requireOnboarded: true` option. When enabled, it fetches `onboarding_complete` from `staff_directory` and returns `403 { error: 'ONBOARDING_REQUIRED' }` if false. Applied to `collect-payment.js`, `process-inventory-adjustment.js`, and `cafe-checkout.js` (staff PIN path) — ensuring unsigned staff cannot perform financial or inventory operations even with a valid session token.
+- **Agreement Version Constant (`src/lib/agreement-constants.ts`):** The `CURRENT_AGREEMENT_VERSION` (e.g. `"2027-Q1"`) is the single source of truth for the version tag. Imported by `AgreementViewer.tsx` and `onboarding/page.tsx`. The frontend sends this tag to the backend RPC, maintaining integrity of the SHA-256 hash. To release a new agreement version, bump this constant — all staff will be required to re-sign.

@@ -14,6 +14,30 @@ const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_R
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUSES = ['scheduled', 'confirmed', 'cancelled'];
 
+/**
+ * Parse a datetime string into a proper Date, treating bare (no-offset)
+ * strings as America/New_York.  If the string already contains 'Z' or an
+ * explicit ±HH:MM offset it is parsed as-is.  This prevents ±5h drift when
+ * the server runs in UTC but the calendar UI sends bare ET datetimes.
+ */
+function parseET(str) {
+  if (!str) return new Date(NaN);
+  // Already has an offset → parse normally
+  if (/Z$/i.test(str) || /[+-]\d{2}:\d{2}$/.test(str)) return new Date(str);
+  // Bare string — assume EST (-05:00) for a rough parse, then compute
+  // the real ET offset (handles DST) using Intl.
+  const rough = new Date(`${str}-05:00`);
+  if (Number.isNaN(rough.getTime())) return rough; // propagate NaN
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    timeZoneName: 'shortOffset',
+  }).formatToParts(rough);
+  const tzPart = (parts.find((p) => p.type === 'timeZoneName') || {}).value || 'GMT-5';
+  const m = tzPart.match(/GMT([+-])(\d+)/);
+  const offset = m ? `${m[1]}${m[2].padStart(2, '0')}:00` : '-05:00';
+  return new Date(`${str}${offset}`);
+}
+
 function getSupabase() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
@@ -118,8 +142,8 @@ exports.handler = async (event) => {
       if (!start_time || !end_time) {
         return corsJson(422, { error: 'start_time and end_time are required' });
       }
-      const startDt = new Date(start_time);
-      const endDt = new Date(end_time);
+      const startDt = parseET(start_time);
+      const endDt = parseET(end_time);
       if (Number.isNaN(startDt.getTime()) || Number.isNaN(endDt.getTime())) {
         return corsJson(422, { error: 'Invalid datetime format' });
       }
@@ -189,8 +213,8 @@ exports.handler = async (event) => {
       if (!start_time || !end_time) {
         return corsJson(422, { error: 'start_time and end_time are required' });
       }
-      const startDt = new Date(start_time);
-      const endDt = new Date(end_time);
+      const startDt = parseET(start_time);
+      const endDt = parseET(end_time);
       if (Number.isNaN(startDt.getTime()) || Number.isNaN(endDt.getTime())) {
         return corsJson(422, { error: 'Invalid datetime format' });
       }
@@ -300,7 +324,13 @@ exports.handler = async (event) => {
 
     return corsJson(405, { error: 'Method not allowed' });
   } catch (err) {
-    logSystemError({ source: 'manage-schedule', message: err?.message, stack: err?.stack });
+    await logSystemError(supabase, {
+      error_type: 'unhandled_exception',
+      severity: 'critical',
+      source_function: 'manage-schedule',
+      error_message: err?.message || 'Unknown error',
+      context: { stack: err?.stack },
+    });
     return sanitizedError(err, 'manage-schedule');
   }
 };

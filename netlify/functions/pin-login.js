@@ -190,6 +190,8 @@ exports.handler = async (event) => {
     const isWorking = staff.is_working ?? false;
     const needsPinRotation = staff.needs_pin_rotation ?? false;
     const tokenVersion = staff.token_version ?? 1;
+    const contractSigned = staff.contract_signed ?? false;
+    const onboardingComplete = staff.onboarding_complete ?? false;
 
     // 🌐 3. Network Check for Staff
     const { data: settings, error: settingsError } = await supabase
@@ -264,6 +266,8 @@ exports.handler = async (event) => {
           email: staffEmail,
           role: staffRole,
           is_working: isWorking,
+          contract_signed: contractSigned,
+          onboarding_complete: onboardingComplete,
         },
       }),
     };

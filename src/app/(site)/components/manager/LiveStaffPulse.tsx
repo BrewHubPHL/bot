@@ -5,6 +5,12 @@ import { useOpsSessionOptional } from "@/components/OpsGate";
 import { fetchOps } from "@/utils/ops-api";
 import { Users, RefreshCw } from "lucide-react";
 
+/* ── Optional AlertManager integration ─────────────────────── */
+import { AlertPriority, AlertContext } from "@/context/AlertManager";
+/* We use useContext(AlertContext) directly because LiveStaffPulse may render
+   outside of the AlertManagerProvider (e.g. admin dashboard). */
+import { useContext } from "react";
+
 /* ================================================================== */
 /*  LiveStaffPulse — persistent header badge showing who's on-site    */
 /*                                                                     */
@@ -30,6 +36,9 @@ export default function LiveStaffPulse() {
   const [refreshing, setRefreshing] = useState(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  /* ── Safe AlertManager access (may be null outside provider) ── */
+  const alertCtx = useContext(AlertContext);
+
   const fetchActiveStaff = useCallback(async () => {
     if (!token) return;
     try {
@@ -47,6 +56,29 @@ export default function LiveStaffPulse() {
   useEffect(() => {
     fetchActiveStaff();
   }, [fetchActiveStaff]);
+
+  /* ── Push P1 alert for staff working > 16h ────────────────── */
+  useEffect(() => {
+    if (!alertCtx) return; // Not inside AlertManagerProvider
+    const exhausted = staff.filter((s) => {
+      const hrs = (Date.now() - new Date(s.clock_in).getTime()) / 3_600_000;
+      return hrs >= 16;
+    });
+    if (exhausted.length > 0) {
+      const names = exhausted.map((s) => s.name).join(", ");
+      alertCtx.pushAlert({
+        id: "staff-exhaustion",
+        priority: AlertPriority.P1,
+        title: "Staff Exhaustion Alert",
+        message: `${exhausted.length} staff member${exhausted.length !== 1 ? "s" : ""} on-site >16 hours: ${names}`,
+        category: "staff",
+        dismissible: true,
+      });
+    } else {
+      // Clear the alert if no one is exhausted anymore
+      alertCtx.dismissAlert("staff-exhaustion");
+    }
+  }, [staff, alertCtx, tick]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);

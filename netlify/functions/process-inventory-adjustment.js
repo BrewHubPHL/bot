@@ -21,7 +21,8 @@ exports.handler = async (event) => {
   }
 
   // 1. Secure Auth (Manager Only — baristas cannot adjust stock)
-  const auth = await authorize(event, { requireManager: true, requirePin: true });
+  // requireOnboarded: block staff who haven't signed their agreement
+  const auth = await authorize(event, { requireManager: true, requirePin: true, requireOnboarded: true });
   if (!auth.ok) return auth.response;
 
   // CSRF protection

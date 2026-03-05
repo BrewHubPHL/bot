@@ -1253,8 +1253,8 @@ exports.handler = async (event) => {
             reply = "For business or marketing inquiries, email info@brewhubphl.com! 📧";
         } else if (lowerText.includes('menu') || lowerText.includes('drinks') || lowerText.includes('coffee') || lowerText.includes('black') || lowerText.includes('latte')) {
             reply = "We'll have all the classics - drip coffee, lattes, cappuccinos, cold brew and more! Can't wait to serve you.";
-        } else if (lowerText.includes('when') || lowerText.includes('open')) {
-            reply = "We're gearing up for our grand opening! Join the waitlist above to be the first to know!";
+        } else if (lowerText.includes('when') || lowerText.includes('open') || lowerText.includes('account')) {
+            reply = "We're gearing up for our grand opening! Create an account or log in above to start earning loyalty points and be the first to know!";
         } else if (lowerText.includes('where') || lowerText.includes('location')) {
             reply = "We're setting up in Point Breeze, Philadelphia! Follow @brewhubphl for updates 📍";
         }

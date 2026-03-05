@@ -168,21 +168,41 @@ export default function CustomerTable({
   activeFilter: CrmFilter;
   onClearFilter: () => void;
 }) {
-  /* ── Search state ────────────────────────────────────── */
+  /* ── State ─────────────────────────────────────────── */
   const [searchTerm, setSearchTerm] = useState("");
   const deferredSearchTerm = useDeferredValue(searchTerm);
-
-  /* ── Toast state ─────────────────────────────────────── */
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+
+  /* ── Refs ─────────────────────────────────────────── */
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /* ── Derived values (memos) ──────────────────────── */
+  const needle = useMemo(() => deferredSearchTerm.trim().toLowerCase(), [deferredSearchTerm]);
+
+  const filtered = useMemo(() => {
+    const safeCustomers = customers ?? [];
+    if (!needle) return safeCustomers;
+    return safeCustomers.filter((c) => {
+      const hay = [
+        c.full_name,
+        c.email,
+        c.phone,
+        c.unit_number,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [customers, needle]);
+
+  /* ── Callbacks ───────────────────────────────────── */
   const showToast = useCallback((msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
-  /* ── Action handler (placeholders) ──────────────────── */
   const handleAction = useCallback(
     (action: string, customer: CustomerRow) => {
       const name = customer.full_name || "Unknown";
@@ -203,247 +223,231 @@ export default function CustomerTable({
     [showToast],
   );
 
-  /* ── Search filter (deferred + memoized) ─────────────── */
-  const filtered = useMemo(() => {
-    const safeCustomers = customers ?? [];
-    const needle = deferredSearchTerm.trim().toLowerCase();
-    if (!needle) return safeCustomers;
-    return safeCustomers.filter((c) => {
-      const hay = [
-        c.full_name,
-        c.email,
-        c.phone,
-        c.unit_number,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(needle);
-    });
-  }, [customers, deferredSearchTerm]);
-  const needle = deferredSearchTerm.trim().toLowerCase();
-
-  /* ── Loading ─────────────────────────────────────────── */
-  if (loading) {
-    return (
-      <div className="rounded-xl bg-stone-800/40 ring-1 ring-stone-700/50 p-8">
-        <div className="flex items-center justify-center gap-3 text-stone-400">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-stone-500 border-t-amber-400" />
-          <span className="text-sm">Loading customers…</span>
-        </div>
-      </div>
-    );
-  }
-
-  /* ── Error ───────────────────────────────────────────── */
-  if (error) {
-    return (
-      <div className="rounded-xl bg-rose-500/10 ring-1 ring-rose-500/30 p-6 text-center">
-        <p className="text-sm text-rose-300">{error}</p>
-      </div>
-    );
-  }
+  /* ── Effects (always last) ───────────────────────── */
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
 
   const label = FILTER_LABELS[activeFilter] || "Customers";
 
-  /* ── Empty (no data from server) ─────────────────────── */
-  if (customers.length === 0) {
-    return (
-      <div className="rounded-xl bg-stone-800/30 ring-1 ring-stone-700/40 p-10 text-center space-y-3">
-        <Users size={32} className="mx-auto text-stone-600" />
-        <p className="text-sm text-stone-400">
-          No customers found for <span className="font-medium text-stone-300">&ldquo;{label}&rdquo;</span>
-        </p>
-        {activeFilter !== "all" && (
-          <button
-            onClick={onClearFilter}
-            className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 transition-colors"
-          >
-            <XCircle size={12} />
-            Clear filter
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  /* ── Table ───────────────────────────────────────────── */
+  /* ── Single return — no early returns to keep hook count stable ── */
   return (
-    <div className="space-y-3">
-      {/* Header bar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h3 className="text-sm font-semibold text-stone-300 flex items-center gap-2">
-          <Users size={14} className="text-amber-500" />
-          {label}
-          <span className="text-xs font-normal text-stone-500">
-            ({filtered.length}
-            {needle && filtered.length !== customers.length
-              ? ` / ${customers.length}`
-              : ""}
-            {customers.length >= 500 ? "+" : ""})
-          </span>
-        </h3>
-
-        <div className="flex items-center gap-2">
-          {/* Search input */}
-          <div className="relative">
-            <Search
-              size={14}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none"
-            />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by name, email, or unit\u2026"
-              className="w-56 rounded-lg bg-stone-800/60 ring-1 ring-stone-700/60 pl-8 pr-8 py-1.5
-                         text-xs text-stone-200 placeholder:text-stone-500
-                         focus:outline-none focus:ring-amber-500/50 transition-shadow"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-500
-                           hover:text-white transition-colors"
-                aria-label="Clear search"
-              >
-                <XCircle size={14} />
-              </button>
-            )}
+    <>
+      {/* ── Loading ─────────────────────────────────────── */}
+      {loading && (
+        <div className="rounded-xl bg-stone-800/40 ring-1 ring-stone-700/50 p-8">
+          <div className="flex items-center justify-center gap-3 text-stone-400">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-stone-500 border-t-amber-400" />
+            <span className="text-sm">Loading customers…</span>
           </div>
+        </div>
+      )}
 
+      {/* ── Error ───────────────────────────────────────── */}
+      {!loading && error && (
+        <div className="rounded-xl bg-rose-500/10 ring-1 ring-rose-500/30 p-6 text-center">
+          <p className="text-sm text-rose-300">{error}</p>
+        </div>
+      )}
+
+      {/* ── Empty (no data from server) ─────────────────── */}
+      {!loading && !error && customers.length === 0 && (
+        <div className="rounded-xl bg-stone-800/30 ring-1 ring-stone-700/40 p-10 text-center space-y-3">
+          <Users size={32} className="mx-auto text-stone-600" />
+          <p className="text-sm text-stone-400">
+            No customers found for <span className="font-medium text-stone-300">&ldquo;{label}&rdquo;</span>
+          </p>
           {activeFilter !== "all" && (
             <button
               onClick={onClearFilter}
-              className="flex items-center gap-1.5 text-xs text-stone-400 hover:text-white
-                         transition-colors px-2 py-1 rounded-md hover:bg-stone-800"
+              className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 transition-colors"
             >
               <XCircle size={12} />
-              Clear Filter
+              Clear filter
             </button>
           )}
         </div>
-      </div>
+      )}
 
-      {/* Search-empty state */}
-      {needle && filtered.length === 0 ? (
-        <div className="rounded-xl bg-stone-800/30 ring-1 ring-stone-700/40 p-10 text-center space-y-3">
-          <Search size={28} className="mx-auto text-stone-600" />
-          <p className="text-sm text-stone-400">
-            No customers match&nbsp;
-            <span className="font-medium text-stone-300">&ldquo;{searchTerm}&rdquo;</span>
-          </p>
-          <button
-            onClick={() => setSearchTerm("")}
-            className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 transition-colors"
-          >
-            <XCircle size={12} />
-            Clear search
-          </button>
-        </div>
-      ) : (
+      {/* ── Table ───────────────────────────────────────── */}
+      {!loading && !error && customers.length > 0 && (
+        <div className="space-y-3">
+          {/* Header bar */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h3 className="text-sm font-semibold text-stone-300 flex items-center gap-2">
+              <Users size={14} className="text-amber-500" />
+              {label}
+              <span className="text-xs font-normal text-stone-500">
+                ({filtered.length}
+                {needle && filtered.length !== customers.length
+                  ? ` / ${customers.length}`
+                  : ""}
+                {customers.length >= 500 ? "+" : ""})
+              </span>
+            </h3>
 
-      /* Scrollable table */
-      <div className="rounded-xl bg-stone-800/40 ring-1 ring-stone-700/50 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-stone-700/60 text-xs uppercase tracking-wider text-stone-500">
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium hidden sm:table-cell">Contact</th>
-                <th className="px-4 py-3 font-medium hidden md:table-cell">Unit</th>
-                <th className="px-4 py-3 font-medium text-center">VIP</th>
-                <th className="px-4 py-3 font-medium text-right hidden sm:table-cell">Loyalty</th>
-                <th className="px-4 py-3 font-medium text-right">Orders</th>
-                <th className="px-4 py-3 font-medium hidden lg:table-cell">Fav Drink</th>
-                <th className="px-4 py-3 font-medium hidden md:table-cell">Joined</th>
-                <th className="px-4 py-3 font-medium text-right sticky right-0 bg-stone-800/90 backdrop-blur">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-700/30">
-              {filtered.map((c) => (
-                <tr
-                  key={c.id}
-                  className="hover:bg-stone-700/20 transition-colors"
+            <div className="flex items-center gap-2">
+              {/* Search input */}
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by name, email, or unit\u2026"
+                  className="w-56 rounded-lg bg-stone-800/60 ring-1 ring-stone-700/60 pl-8 pr-8 py-1.5
+                             text-xs text-stone-200 placeholder:text-stone-500
+                             focus:outline-none focus:ring-amber-500/50 transition-shadow"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-500
+                               hover:text-white transition-colors"
+                    aria-label="Clear search"
+                  >
+                    <XCircle size={14} />
+                  </button>
+                )}
+              </div>
+
+              {activeFilter !== "all" && (
+                <button
+                  onClick={onClearFilter}
+                  className="flex items-center gap-1.5 text-xs text-stone-400 hover:text-white
+                             transition-colors px-2 py-1 rounded-md hover:bg-stone-800"
                 >
-                  <td className="px-4 py-3 font-medium text-white whitespace-nowrap">
-                    {c.full_name || "—"}
-                  </td>
-                  <td className="px-4 py-3 hidden sm:table-cell">
-                    <div className="flex flex-col gap-0.5 text-xs text-stone-400">
-                      {c.email && (
-                        <span className="flex items-center gap-1 truncate max-w-[180px]">
-                          <Mail size={10} className="shrink-0 text-stone-500" />
-                          {c.email}
-                        </span>
-                      )}
-                      {c.phone && (
-                        <span className="flex items-center gap-1">
-                          <Phone size={10} className="shrink-0 text-stone-500" />
-                          {c.phone}
-                        </span>
-                      )}
-                      {!c.email && !c.phone && (
-                        <span className="text-stone-600">—</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell">
-                    {c.unit_number ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-violet-400">
-                        <Package size={10} />
-                        {c.unit_number}
-                      </span>
-                    ) : (
-                      <span className="text-stone-600 text-xs">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    {c.is_vip ? (
-                      <Star size={14} className="inline text-amber-400" fill="currentColor" />
-                    ) : (
-                      <span className="text-stone-700">·</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right hidden sm:table-cell">
-                    <span className="tabular-nums text-xs text-stone-400">
-                      {c.loyalty_points > 0 ? c.loyalty_points.toLocaleString() : "—"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="tabular-nums text-xs text-stone-300">
-                      {c.total_orders}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 hidden lg:table-cell">
-                    {c.favorite_drink ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-emerald-400 truncate max-w-[140px]">
-                        <Coffee size={10} />
-                        {c.favorite_drink}
-                      </span>
-                    ) : (
-                      <span className="text-stone-600 text-xs">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell text-xs text-stone-500 whitespace-nowrap">
-                    {c.created_at
-                      ? new Date(c.created_at).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })
-                      : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right sticky right-0 bg-stone-800/90 backdrop-blur">
-                    <ActionMenu customer={c} onAction={handleAction} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                  <XCircle size={12} />
+                  Clear Filter
+                </button>
+              )}
+            </div>
+          </div>
 
+          {/* Search-empty state */}
+          {needle && filtered.length === 0 ? (
+            <div className="rounded-xl bg-stone-800/30 ring-1 ring-stone-700/40 p-10 text-center space-y-3">
+              <Search size={28} className="mx-auto text-stone-600" />
+              <p className="text-sm text-stone-400">
+                No customers match&nbsp;
+                <span className="font-medium text-stone-300">&ldquo;{searchTerm}&rdquo;</span>
+              </p>
+              <button
+                onClick={() => setSearchTerm("")}
+                className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 transition-colors"
+              >
+                <XCircle size={12} />
+                Clear search
+              </button>
+            </div>
+          ) : (
+            /* Scrollable table */
+            <div className="rounded-xl bg-stone-800/40 ring-1 ring-stone-700/50 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-stone-700/60 text-xs uppercase tracking-wider text-stone-500">
+                      <th className="px-4 py-3 font-medium">Name</th>
+                      <th className="px-4 py-3 font-medium hidden sm:table-cell">Contact</th>
+                      <th className="px-4 py-3 font-medium hidden md:table-cell">Unit</th>
+                      <th className="px-4 py-3 font-medium text-center">VIP</th>
+                      <th className="px-4 py-3 font-medium text-right hidden sm:table-cell">Loyalty</th>
+                      <th className="px-4 py-3 font-medium text-right">Orders</th>
+                      <th className="px-4 py-3 font-medium hidden lg:table-cell">Fav Drink</th>
+                      <th className="px-4 py-3 font-medium hidden md:table-cell">Joined</th>
+                      <th className="px-4 py-3 font-medium text-right sticky right-0 bg-stone-800/90 backdrop-blur">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-700/30">
+                    {filtered.map((c) => (
+                      <tr
+                        key={c.id}
+                        className="hover:bg-stone-700/20 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-medium text-white whitespace-nowrap">
+                          {c.full_name || "—"}
+                        </td>
+                        <td className="px-4 py-3 hidden sm:table-cell">
+                          <div className="flex flex-col gap-0.5 text-xs text-stone-400">
+                            {c.email && (
+                              <span className="flex items-center gap-1 truncate max-w-[180px]">
+                                <Mail size={10} className="shrink-0 text-stone-500" />
+                                {c.email}
+                              </span>
+                            )}
+                            {c.phone && (
+                              <span className="flex items-center gap-1">
+                                <Phone size={10} className="shrink-0 text-stone-500" />
+                                {c.phone}
+                              </span>
+                            )}
+                            {!c.email && !c.phone && (
+                              <span className="text-stone-600">—</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 hidden md:table-cell">
+                          {c.unit_number ? (
+                            <span className="inline-flex items-center gap-1 text-xs text-violet-400">
+                              <Package size={10} />
+                              {c.unit_number}
+                            </span>
+                          ) : (
+                            <span className="text-stone-600 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {c.is_vip ? (
+                            <Star size={14} className="inline text-amber-400" fill="currentColor" />
+                          ) : (
+                            <span className="text-stone-700">·</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right hidden sm:table-cell">
+                          <span className="tabular-nums text-xs text-stone-400">
+                            {c.loyalty_points > 0 ? c.loyalty_points.toLocaleString() : "—"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="tabular-nums text-xs text-stone-300">
+                            {c.total_orders}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 hidden lg:table-cell">
+                          {c.favorite_drink ? (
+                            <span className="inline-flex items-center gap-1 text-xs text-emerald-400 truncate max-w-[140px]">
+                              <Coffee size={10} />
+                              {c.favorite_drink}
+                            </span>
+                          ) : (
+                            <span className="text-stone-600 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 hidden md:table-cell text-xs text-stone-500 whitespace-nowrap">
+                          {c.created_at
+                            ? new Date(c.created_at).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-right sticky right-0 bg-stone-800/90 backdrop-blur">
+                          <ActionMenu customer={c} onAction={handleAction} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── Toast notification ── */}
@@ -459,6 +463,6 @@ export default function CustomerTable({
           {toast.type === "success" ? "✓" : "✗"} {toast.msg}
         </div>
       )}
-    </div>
+    </>
   );
 }

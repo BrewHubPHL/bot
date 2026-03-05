@@ -125,6 +125,12 @@
 | Function | Method | Auth | Purpose |
 |---|---|---|---|
 | `get-crm-customers.js` | GET | Manager PIN | Returns filtered `customers` rows for CRM drill-down (8 filter modes: all, app_users, walk_in, mailbox, vip, loyalty, active_30d, new_7d). Origin-validated CORS, 500-row limit, 15s cache. |
+| `get-true-profit-report.js` | GET | Manager PIN | Monthly profitability report: sums completed-order revenue, subtracts maintenance costs and operating expenses (OpEx from `property_expenses`), returns net profit + maintenance-to-revenue ratio. Net Profit = Revenue − Maintenance − OpEx (aligns with Employee Addendum). Query param `?month=YYYY-MM` (defaults to current month). |
+| `get-profit-share-preview.js` | GET | Manager PIN | Team profit share preview: reuses `computeProfitReport()`, subtracts $5k Profit Floor, computes 10% Staff Pool via `Math.floor` (strict integer cents). Joins `time_logs` with `staff_directory` to enforce 6-month vesting and 90-day probation filters — only vested employee hours counted. Derives Bonus-per-Hour via `Math.floor`. If bonus < 1¢/hr or 0 eligible hours returns $0.00. Returns `eligible_staff_count`, `pending_staff_count`, `vesting_months`, `probation_days`. Logs ops-diagnostics info when no staff are vested. All display strings formatted by shared `centsToDisplay()`. |
+| `cron-monthly-financial-summary.js` | Scheduled | None (cron) | Runs 1st of every month. Emails the previous month's profitability report to all active managers via Resend. CTA to `/manager/assets` when maintenance ratio > 10%. |
+| `record-agreement-signature.js` | POST | Staff PIN | Records a staff member's digital signature on the Mutual Working Agreement. Verifies PIN via `verify_staff_pin` RPC, validates body `staff_id` matches session identity, **canonically normalizes** agreement text via `getCanonicalAgreementText` (`_crypto-utils.js`), hashes (SHA-256) server-side, logs normalization delta, then calls the **atomic** `record_agreement_signature` Postgres RPC (insert + `contract_signed` update in one transaction). Notifies managers via Resend. |
+| `get-signed-certificate.js` | GET | Staff PIN | Certificate of Agreement endpoint. Re-hydrates agreement template, canonically normalizes, re-derives SHA-256 hash, compares against stored hash. Returns `{ staff_name, version_tag, signed_at, signature_id, stored_hash, derived_hash, integrity_ok }`. Staff see own cert only; managers may view any. |
+| `get-schema-health.js` | GET | Manager PIN | Database schema auditor. Queries `information_schema` to verify `agreement_signatures` and `maintenance_logs` tables with full column + type verification (including `cost` as `integer`). Returns structured health report (`healthy`, `missingColumns`, `typeMismatches`) so managers know if a migration is required. |
 
 ---
 
@@ -164,6 +170,8 @@
 | `20260302_scheduled_shifts_staff_fk` | Repairs `scheduled_shifts.user_id` FK to reference `staff_directory(id)` and cascades deletes safely |
 | `20260302_specialty_coffee_menu` | Adds `long_description` (TEXT) and `allowed_modifiers` (JSONB) to `merch_products`; archives legacy menu items; inserts 7 curated specialty coffee items |
 | `20260302_add_staff_phone` | Adds nullable `phone TEXT` column to `staff_directory`; inherited by `v_staff_status` view |
+| `agreement_signatures` (table) | Immutable audit trail for staff agreement signatures: `id` (uuid PK), `staff_id` (uuid FK), `version_tag`, `ip_address` (hashed), `user_agent`, `sha256_hash`, `signed_at`, `created_at`. Verified by `get-schema-health.js`. |
+| `20260304_schema85_onboarding_gate` | Ensures `contract_signed` + `onboarding_complete` columns on `staff_directory`. Updates `verify_staff_pin()` to return them in login/verify flow for OpsGate onboarding gate. |
 
 ---
 
@@ -172,12 +180,11 @@
 ### Public Pages (`(site)` route group)
 | Route | Auth | Description |
 |---|---|---|
-| `/` | None | Homepage — hero, waitlist, AI chat |
+| `/` | None | Homepage — hero, AI chat |
 | `/about`, `/privacy`, `/terms` | None | Informational Pages |
 | ~~`/cafe`~~ | — | *Removed — ordering consolidated into `/shop`* |
 | `/shop` | None | Merch storefront |
 | `/checkout` | None | Cart checkout with Square |
-| `/waitlist` | None | Join waitlist |
 | `/portal` | Supabase JWT | Resident portal (loyalty + parcels) |
 | `/resident` | Supabase JWT | Resident registration |
 | `/parcels` | Supabase JWT + RLS | Parcel lookup |
@@ -195,7 +202,9 @@
 | `/manager/calendar` | Middleware PIN | Shift scheduling with multi-employee drag-and-drop |
 | `/manager/fulfillment` | Middleware PIN | Order fulfillment management |
 | `/manager/parcels/monitor` | Middleware PIN | Smart TV kiosk (PII-masked VIEW) |
+| `/manager/assets` | Middleware PIN | Equipment asset TCO & maintenance health dashboard |
 | `/staff-hub` | Middleware PIN | Staff portal (clock, orders, inventory) |
+| `/staff-hub/onboarding` | Middleware PIN | Onboarding: scroll-to-sign Mutual Working Agreement (AgreementViewer). Unsigned staff are force-redirected here by OpsGate. |
 | `/parcels-pickup` | Middleware PIN | Parcel pickup workflow |
 
 ### API Routes
@@ -210,20 +219,31 @@
 
 | Component | Location | Purpose |
 |---|---|---|
-| `OpsGate.tsx` | `src/components/` | PIN session gate for ops pages |
+| `OpsGate.tsx` | `src/components/` | PIN session gate for ops pages. Includes Onboarding Gate: redirects unsigned staff (`onboarding_complete === false`) to `/staff-hub/onboarding`. |
 | `StaffNavigation.tsx` | `src/components/` | Staff nav bar for ops |
 | `ScrollToTop.tsx` | `src/components/` | Scroll-to-top button |
 | `SwipeCartItem.tsx` | `src/components/` | Swipeable cart item (mobile POS) |
 | `CatalogManager.tsx` | `(site)/components/manager/` | Menu/merch catalog CRUD |
 | `KdsSection.tsx` | `(site)/components/manager/` | KDS overview in dashboard |
 | `ManagerNav.tsx` | `(site)/components/manager/` | Manager dashboard navigation |
+| `LiveStaffPulse.tsx` | `(site)/components/manager/` | Persistent header badge showing on-site staff with live duration timers. Pushes P1 "Staff Exhaustion" alert into `AlertManager` when any staff member exceeds 16h. |
+| `AlertManager.tsx` | `src/context/` | Centralized alert state provider. Defines P0/P1/P2 priority hierarchy with push/dismiss/clear operations. P0 alerts render as blocking modal overlays; P1/P2 as stacking banners. |
+| `AlertModal.tsx` | `src/components/manager/` | Full-screen blocking overlay for P0 (Critical) alerts. Focus-trapped; user must acknowledge before dashboard interaction resumes. |
+| `AlertBannerStack.tsx` | `src/components/manager/` | Stacking banner list for P1 (Amber) and P2 (Blue) alerts. Sorted by priority then age. |
+| `SystemHealthBadge.tsx` | `src/components/manager/` | Header badge showing total active alert count with color-coded severity indicator. Scrolls to alert stack on click. |
+| `AlertRenderer.tsx` | `src/components/manager/` | Orchestrator: renders AlertModal (P0) and AlertBannerStack (P1/P2) together. |
 | `PayrollSection.tsx` | `(site)/components/manager/` | Payroll management |
+| `ProfitShareCard.tsx` | `(site)/components/manager/` | Team Profit Share card: progress bar to $5k floor, Staff Pool amount, team hours, bonus-per-hour, eligible staff count with vesting tooltip |
 | `CrmInsights.tsx` | `(site)/components/manager/` | Unified CRM breakdown (stat cards + top drinks) |
 | `AdminCalendar.tsx` | `src/components/` | Shift calendar with multi-select creation, pill-based rendering, hover tooltips, and grouped drag-and-drop |
 | `ExportOrdersButton.tsx` | `(ops)/manager/` | Client-side CSV export of all `coffee_orders` |
+| `AssetsPage` | `(ops)/manager/assets/` | Equipment TCO dashboard with sortable table, summary cards (inc. projected maintenance spend Finance card), overdue health badges |
+| `MaintenanceLogger` | `src/components/ops/` | Portal modal for logging completed maintenance tasks against an equipment asset |
 | `StaffSection.tsx` | `(ops)/manager/components/` | Data-fetching wrapper: loads staff from `v_staff_status` view |
 | `StaffTable.tsx` | `(ops)/manager/components/` | Interactive staff directory table with search, role filtering, action menus, role badges, working-status indicators |
 | `CustomerTable.tsx` | `(site)/components/manager/` | CRM customer table with 8 filter presets, deferred search, action menus, VIP/loyalty badges |
+| `AgreementViewer.tsx` | `src/components/` | Renders and manages the Mutual Working Agreement for staff digital signing. Canonically normalizes text via `getCanonicalAgreementText` before sending to backend so the displayed seal matches the stored seal. Persists scroll-read state to sessionStorage. On 401 mid-signing: saves recovery vault to localStorage, shows inline re-auth PIN modal, and transparently retries the signature POST with the new token. |
+| `crypto-utils.ts` | `src/lib/` | Shared canonical normalization utility for agreement hashing (`getCanonicalAgreementText`). CJS mirror: `_crypto-utils.js`. |
 
 *(Note: `StatsGrid.tsx`, `InventoryTable.tsx`, `RecentActivity.tsx`, and `MobileNav.tsx` were deprecated and removed during the refactor.)*
 
