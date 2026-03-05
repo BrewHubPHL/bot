@@ -228,13 +228,6 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  // DEBUG: log what the trigger is sending (remove after testing)
-  const incomingSecret = event.headers?.['x-brewhub-secret'] || '';
-  const envSecret = process.env.INTERNAL_SYNC_SECRET || '';
-  console.log('[notion-sync] incoming first4/last4:', incomingSecret.slice(0, 4), '...', incomingSecret.slice(-4));
-  console.log('[notion-sync] env      first4/last4:', envSecret.slice(0, 4), '...', envSecret.slice(-4));
-  console.log('[notion-sync] match?', incomingSecret === envSecret);
-
   const serviceAuth = verifyServiceSecret(event);
   if (!serviceAuth.valid) {
     console.warn('[notion-sync] verifyServiceSecret REJECTED — 401');
@@ -286,32 +279,53 @@ exports.handler = async (event) => {
       target: target.key,
     };
 
-    const { error: gateError } = await supabase
-      .from('processed_notion_syncs')
-      .insert({
-        sync_key: syncKey,
-        source_table: sourceTable,
-        source_record_id: canonicalRecord.id,
-        notion_database: target.key,
-        payload: gatePayload,
+    // Atomically claim idempotency slot via Postgres RPC (advisory-locked)
+    const { data: claimResult, error: claimError } = await supabase
+      .rpc('claim_notion_sync', {
+        p_sync_key: syncKey,
+        p_source_table: sourceTable,
+        p_source_record_id: canonicalRecord.id,
+        p_notion_database: target.key,
+        p_payload: gatePayload,
       });
+    if (claimError) throw claimError;
 
-    if (gateError) {
-      if (gateError.code === '23505') {
-        return json(200, {
-          ok: true,
-          duplicate: true,
-          sync_key: syncKey,
-        });
-      }
-      throw gateError;
+    const claimStatus = claimResult?.result;
+    const rowId = claimResult?.row_id;
+
+    if (claimStatus === 'duplicate') {
+      return json(200, {
+        ok: true,
+        duplicate: true,
+        sync_key: syncKey,
+      });
     }
 
-    const notionPage = await createNotionPage(target.databaseId, target.properties, {
-      source_table: sourceTable,
-      record: target.summary,
-      synced_at: new Date().toISOString(),
-    });
+    // claimStatus is 'claimed' or 'retry' — proceed with Notion API call
+    let notionPage;
+    try {
+      notionPage = await createNotionPage(target.databaseId, target.properties, {
+        source_table: sourceTable,
+        record: target.summary,
+        synced_at: new Date().toISOString(),
+      });
+    } catch (notionError) {
+      // Mark the idempotency row as failed so future retries are not blocked
+      const { error: failErr } = await supabase
+        .rpc('fail_notion_sync', { p_row_id: rowId });
+      if (failErr) {
+        console.error('[notion-sync] fail_notion_sync RPC error:', failErr.message);
+      }
+      throw notionError;
+    }
+
+    // Mark completed with the Notion page ID
+    const { error: completeErr } = await supabase
+      .rpc('complete_notion_sync', {
+        p_row_id: rowId,
+        p_notion_page_id: notionPage?.id || null,
+      });
+    if (completeErr) throw completeErr;
 
     return json(200, {
       ok: true,

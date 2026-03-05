@@ -5,10 +5,11 @@
  *
  * Renders when `useAlertManager().hasBlockingAlert` is true.
  * The user MUST acknowledge each P0 alert before the dashboard becomes
- * interactive again. Focus is trapped inside the modal.
+ * interactive again. Uses Radix AlertDialog which natively blocks
+ * Escape-to-close and outside-click dismissal.
  */
 
-import React, { useEffect, useRef } from "react";
+import React from "react";
 import {
   ShieldAlert,
   Database,
@@ -17,6 +18,12 @@ import {
   AlertOctagon,
 } from "lucide-react";
 import { AlertPriority, useAlertManager, type SystemAlert } from "@/context/AlertManager";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogTitle,
+  AlertDialogDescription,
+} from "@/components/ui/alert-dialog";
 
 /* ── Single P0 card ────────────────────────────────────────── */
 function P0Card({ alert }: { alert: SystemAlert }) {
@@ -131,62 +138,30 @@ function P0Card({ alert }: { alert: SystemAlert }) {
 export default function AlertModal() {
   const { alerts } = useAlertManager();
   const p0Alerts = alerts.filter((a) => a.priority === AlertPriority.P0);
-  const overlayRef = useRef<HTMLDivElement>(null);
-
-  // Trap focus inside the modal
-  useEffect(() => {
-    if (p0Alerts.length === 0) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") return; // don't allow escape — must acknowledge
-      if (e.key !== "Tab" || !overlayRef.current) return;
-
-      const focusable = overlayRef.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (focusable.length === 0) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    // Auto-focus first button
-    const firstBtn = overlayRef.current?.querySelector<HTMLElement>("button");
-    firstBtn?.focus();
-
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [p0Alerts.length]);
 
   if (p0Alerts.length === 0) return null;
 
   return (
-    <div
-      ref={overlayRef}
-      role="alertdialog"
-      aria-modal="true"
-      aria-label="Critical system alerts require acknowledgement"
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-    >
-      <div className="flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
-        <div className="text-center mb-2">
-          <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-red-900/60 border border-red-700/50 text-xs font-bold uppercase tracking-widest text-red-300">
-            <AlertOctagon size={14} className="animate-pulse" />
-            {p0Alerts.length} Critical Alert{p0Alerts.length !== 1 ? "s" : ""} — Action Required
-          </span>
+    <AlertDialog open>
+      <AlertDialogContent
+        className="max-w-xl border-none bg-transparent p-4 shadow-none sm:max-w-xl"
+      >
+        <AlertDialogTitle className="sr-only">Critical system alerts</AlertDialogTitle>
+        <AlertDialogDescription className="sr-only">
+          {p0Alerts.length} critical alert{p0Alerts.length !== 1 ? "s" : ""} require acknowledgement before continuing.
+        </AlertDialogDescription>
+        <div className="flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+          <div className="text-center mb-2">
+            <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-red-900/60 border border-red-700/50 text-xs font-bold uppercase tracking-widest text-red-300">
+              <AlertOctagon size={14} className="animate-pulse" />
+              {p0Alerts.length} Critical Alert{p0Alerts.length !== 1 ? "s" : ""} — Action Required
+            </span>
+          </div>
+          {p0Alerts.map((alert) => (
+            <P0Card key={alert.id} alert={alert} />
+          ))}
         </div>
-        {p0Alerts.map((alert) => (
-          <P0Card key={alert.id} alert={alert} />
-        ))}
-      </div>
-    </div>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

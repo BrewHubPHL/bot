@@ -9,7 +9,12 @@
 // All monetary math uses integer cents and basis-point arithmetic —
 // no floating-point multiplication on money.  Pool share is computed
 // per-minute first, then scaled to per-hour to avoid the "fractional
-// hour" float trap.
+// hour" float trap.  Float division is deferred to the final JSON
+// response formatting stage (display strings / backward-compat fields).
+//
+// (Ticket H-2 — Integer Math Path: floorDiv() wraps every business-math
+//  division; floor_progress is tracked as integer permille; totalStaffHours
+//  is formatted inline at the response — no float intermediate variable.)
 //
 // If net profit is below the floor the pool is $0.
 //
@@ -17,9 +22,10 @@
 //
 // Response:
 //   { month, net_profit_cents, profit_floor_cents, profit_above_floor_cents,
-//     staff_pool_cents, staff_pool_display, total_staff_hours,
+//     staff_pool_cents, staff_pool_display, total_staff_hours (display string),
 //     total_staff_minutes, bonus_per_hour_cents, bonus_per_hour_display,
-//     floor_progress_pct, eligible_staff_count, pending_staff_count,
+//     floor_progress_pct, floor_progress_permille,
+//     eligible_staff_count, pending_staff_count,
 //     vesting_months, probation_days }
 //
 // SECURITY:
@@ -56,6 +62,16 @@ function getClientIP(event) {
     event.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
     'unknown'
   );
+}
+
+/**
+ * Integer floor-division for positive operands.
+ * Keeps all monetary / basis-point arithmetic in the integer domain;
+ * the JS `/` operator returns a float which `Math.floor` immediately
+ * truncates back to a safe integer.
+ */
+function floorDiv(a, b) {
+  return Math.floor(a / b);
 }
 
 // centsToDisplay and monthBounds are now imported from _profit-report.js
@@ -128,17 +144,19 @@ exports.handler = async (event) => {
     // ── 2. Calculate staff pool (integer basis-point math) ─
     const netProfitCents = report.net_profit_cents;
     const profitAboveFloorCents = Math.max(0, netProfitCents - PROFIT_FLOOR_CENTS);
-    // Basis-point formula: (cents × rate_bps) ÷ 10 000  — pure integer math,
-    // no floating-point multiplication on money.
-    const staffPoolCents = Math.floor(
-      (profitAboveFloorCents * STAFF_POOL_RATE_BPS) / BPS_DIVISOR,
+    // Basis-point formula: floor(cents × rate_bps ÷ 10 000) — pure integer
+    // path via floorDiv; no floating-point value escapes into a variable.
+    const staffPoolCents = floorDiv(
+      profitAboveFloorCents * STAFF_POOL_RATE_BPS,
+      BPS_DIVISOR,
     );
 
-    // Floor progress: what % of the way to $5k are we?
-    const floorProgressPct =
+    // Floor progress as integer permille (tenths-of-percent).
+    // e.g. 853 → 85.3 %.  Float division deferred to response formatting.
+    const floorProgressPermille =
       netProfitCents <= 0
         ? 0
-        : Math.min(100, parseFloat(((netProfitCents / PROFIT_FLOOR_CENTS) * 100).toFixed(1)));
+        : Math.min(1000, floorDiv(netProfitCents * 1000, PROFIT_FLOOR_CENTS));
 
     // ── 3. Vesting & probation date boundaries ────────────
     const now = new Date();
@@ -198,16 +216,13 @@ exports.handler = async (event) => {
     const eligibleStaffCount = eligibleStaffIds.size;
     const pendingStaffCount = pendingStaffIds.size;
 
-    // Display-only: total hours rounded to 2 dp (not used in any math)
-    const totalStaffHours = parseFloat((totalEligibleMinutes / 60).toFixed(2));
-
     // ── 5. Bonus per hour (cents-per-minute path) ──────────
-    // Compute via total minutes to sidestep the "fractional hour" float
-    // trap.  Formula:  (poolCents × 60) ÷ totalMinutes  — all integers
-    // until the final floor, so precision is exact.
+    // Formula: floorDiv(poolCents × 60, totalMinutes) — every operand
+    // is an integer; floorDiv returns an integer.  No float escapes
+    // into bonusPerHourCents.
     let bonusPerHourCents =
       totalEligibleMinutes > 0
-        ? Math.floor((staffPoolCents * 60) / totalEligibleMinutes)
+        ? floorDiv(staffPoolCents * 60, totalEligibleMinutes)
         : 0;
 
     if (bonusPerHourCents < 1) {
@@ -236,11 +251,14 @@ exports.handler = async (event) => {
       staff_pool_display: centsToDisplay(staffPoolCents),
       staff_pool_rate: STAFF_POOL_RATE_BPS / BPS_DIVISOR,   // 0.10 for backward compat
       staff_pool_rate_bps: STAFF_POOL_RATE_BPS,              // 1000 (canonical)
-      total_staff_hours: totalStaffHours,                    // display-only
+      // Display-only: float division deferred to response formatting.
+      // totalEligibleMinutes (integer) is the canonical value for any math.
+      total_staff_hours: (totalEligibleMinutes / 60).toFixed(2),
       total_staff_minutes: totalEligibleMinutes,             // integer, used in math
       bonus_per_hour_cents: bonusPerHourCents,
       bonus_per_hour_display: centsToDisplay(bonusPerHourCents),
-      floor_progress_pct: floorProgressPct,
+      floor_progress_pct: floorProgressPermille / 10,        // e.g. 853 → 85.3
+      floor_progress_permille: floorProgressPermille,        // integer — canonical
       eligible_staff_count: eligibleStaffCount,
       pending_staff_count: pendingStaffCount,
       vesting_months: VESTING_MONTHS,

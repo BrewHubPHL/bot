@@ -28,6 +28,7 @@ fi
 
 # Generate new secrets
 INTERNAL_SYNC_SECRET_NEW=$(openssl rand -hex 32)
+SESSION_SIGNING_KEY_NEW=$(openssl rand -hex 32)
 SUPABASE_WEBHOOK_SECRET_NEW=$(openssl rand -hex 32)
 
 # Square webhook signature must be rotated in Square dashboard first
@@ -44,6 +45,7 @@ fi
 
 echo "Updating Netlify environment variables..."
 netlify env:set INTERNAL_SYNC_SECRET "$INTERNAL_SYNC_SECRET_NEW"
+netlify env:set SESSION_SIGNING_KEY "$SESSION_SIGNING_KEY_NEW"
 netlify env:set SUPABASE_WEBHOOK_SECRET "$SUPABASE_WEBHOOK_SECRET_NEW"
 netlify env:set SQUARE_WEBHOOK_SIGNATURE "$SQUARE_WEBHOOK_SIGNATURE_NEW"
 
@@ -51,6 +53,7 @@ echo "Updating Supabase secrets for Edge Functions..."
 supabase secrets set \
   --project-ref "$SUPABASE_PROJECT_REF" \
   INTERNAL_SYNC_SECRET="$INTERNAL_SYNC_SECRET_NEW" \
+  SESSION_SIGNING_KEY="$SESSION_SIGNING_KEY_NEW" \
   SUPABASE_WEBHOOK_SECRET="$SUPABASE_WEBHOOK_SECRET_NEW"
 
 # Optional: also store Square signature in Supabase secrets if you want parity

@@ -108,6 +108,7 @@ export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyR
 
   return (
     <div
+      style={{ viewTransitionName: `order-card-${order.id}` }}
       className={cn(
         "relative flex flex-col rounded-xl border bg-card text-card-foreground shadow-sm transition-all duration-300",
         isGuest && "animate-pulse-border",

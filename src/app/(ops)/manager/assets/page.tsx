@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { toast as sonnerToast } from "sonner";
 import {
   Wrench,
   RefreshCw,
@@ -101,13 +102,10 @@ export default function AssetsPage() {
   const [projectedLoading, setProjectedLoading] = useState(true);
   const [projectedExpanded, setProjectedExpanded] = useState(false);
 
-  /* ── Toast (matches codebase pattern) ────────────────────── */
-  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* ── Toast (delegates to Sonner) ────────────────────── */
   const showToast = useCallback((msg: string, type: "success" | "error" = "success") => {
-    setToast({ msg, type });
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 3500);
+    if (type === "success") sonnerToast.success(msg);
+    else sonnerToast.error(msg);
   }, []);
 
   /* ── Fetch ───────────────────────────────────────────────── */
@@ -402,16 +400,6 @@ export default function AssetsPage() {
       )}
 
       {/* ── Toast ──────────────────────────────────────────── */}
-      {toast && (
-        <div
-          role={toast.type === "error" ? "alert" : "status"}
-          className={`fixed bottom-8 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl shadow-2xl
-                      flex items-center gap-3 text-sm font-semibold transition-all duration-300
-                      ${toast.type === "error" ? "bg-red-600 text-white" : "bg-emerald-600 text-white"}`}
-        >
-          {toast.type === "success" ? "✓" : "✗"} {toast.msg}
-        </div>
-      )}
     </div>
   );
 }

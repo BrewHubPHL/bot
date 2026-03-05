@@ -11,13 +11,13 @@ import { NextRequest, NextResponse } from "next/server";
  * HttpOnly + Secure + SameSite=Strict.
  */
 
-const OPS_PATHS = ["/kds", "/pos", "/scanner", "/manager", "/staff-hub", "/admin"];
+const OPS_PATHS = ["/kds", "/pos", "/scanner", "/manager", "/staff-hub", "/admin", "/parcels-pickup"];
 
 /** Routes that require manager (or higher) role */
 const MANAGER_ONLY_PATHS = ["/manager", "/admin"];
 
 /** Subpaths under manager routes that all staff can access (read-only) */
-const STAFF_ALLOWED_MANAGER_PATHS = ["/manager/calender"];
+const STAFF_ALLOWED_MANAGER_PATHS = ["/manager/calendar"];
 
 function isOpsRoute(pathname: string): boolean {
   // Match /kds, /pos, /scanner, /manager (Next.js removes the (ops) group prefix)

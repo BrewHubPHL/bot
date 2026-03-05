@@ -15,6 +15,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { toast as sonnerToast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { saveKDSSnapshot, getKDSSnapshot } from "@/lib/offlineStore";
 import { KdsOrderCard } from "@/components/KdsOrderCard";
@@ -161,7 +162,6 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
   const [updating, setUpdating]   = useState<string | null>(null);
   const [error, setError]         = useState<string | null>(null);
   const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
-  const [toast, setToast]         = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
 
   const fetchingRef  = useRef(false);
@@ -172,9 +172,6 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
   // KDS double-tap guard: Set of order IDs with in-flight mutations
   const mutatingIdsRef = useRef<Set<string>>(new Set());
 
-  // Toast timer ref for cleanup on unmount
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // Bubble state up to parent whenever any of the three values change
   const onStateChangeRef = useRef(onStateChange);
   onStateChangeRef.current = onStateChange;
@@ -182,12 +179,6 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
     onStateChangeRef.current?.({ orders, source: kdsSource, error });
   }, [orders, kdsSource, error]);
 
-  /* ── Toast ──────────────────────────────────────────────────── */
-  const showToast = useCallback((msg: string, type: "success" | "error") => {
-    setToast({ msg, type });
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
-  }, []);
 
   /* ── Fetch orders ───────────────────────────────────────────── */
   const fetchOrders = useCallback(async () => {
@@ -349,7 +340,6 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
       .subscribe();
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       supabase.removeChannel(channel);
     };
   }, [fetchOrders, debouncedFetch]);
@@ -410,7 +400,7 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
       }
       setAuthzState(null);
       haptic("success");
-      if (nextStatus === "cancelled") showToast(`${orderName} cancelled`, "success");
+      if (nextStatus === "cancelled") sonnerToast.success(`${orderName} cancelled`);
     } catch (err: unknown) {
       // Rollback
       setOrders(snapshot);
@@ -422,7 +412,7 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
       const msg = toUserSafeMessageFromUnknown(err, "Unable to update this order right now.");
       console.error("KdsGrid: Update error");
       setError(msg);
-      showToast(msg, "error");
+      sonnerToast.error(msg);
       haptic("error");
       setTimeout(() => setError(null), 5000);
     } finally {
@@ -448,10 +438,10 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
       haptic("tap");
     } catch (err: unknown) {
       const msg = toUserSafeMessageFromUnknown(err, "Unable to update item.");
-      showToast(msg, "error");
+      sonnerToast.error(msg);
       haptic("error");
     }
-  }, [token, showToast]);
+  }, [token]);
 
   /* ── Render ─────────────────────────────────────────────────── */
   if (authzState) {
@@ -544,19 +534,6 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
           );
         })}
       </div>
-
-      {/* ── Toast notification ── */}
-      {toast && (
-        <div
-          role={toast.type === "error" ? "alert" : "status"}
-          className={[
-            "fixed bottom-8 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 text-sm font-semibold transition-all duration-300",
-            toast.type === "success" ? "bg-emerald-600 text-white" : "bg-red-600 text-white",
-          ].join(" ")}
-        >
-          {toast.type === "success" ? "✓" : "✗"} {toast.msg}
-        </div>
-      )}
     </>
   );
 }

@@ -17,6 +17,8 @@ const {
 } = require('@simplewebauthn/server');
 const crypto = require('crypto');
 const { redactIP } = require('./_ip-hash');
+const { requireCsrfHeader } = require('./_csrf');
+const { webauthnBucket } = require('./_token-bucket');
 
 const RP_ID = process.env.WEBAUTHN_RP_ID || 'brewhubphl.com';
 const ORIGIN = process.env.SITE_URL || 'https://brewhubphl.com';
@@ -90,6 +92,32 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return respond(200, {});
   if (event.httpMethod !== 'POST') return respond(405, { error: 'Method Not Allowed' });
 
+  // CSRF protection
+  const csrfBlock = requireCsrfHeader(event);
+  if (csrfBlock) return csrfBlock;
+
+  // Rate limiting — 5 attempts per IP
+  const clientIp =
+    event.headers['x-nf-client-connection-ip'] ||
+    event.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    '127.0.0.1';
+  const rl = webauthnBucket.consume('webauthn:' + clientIp);
+  if (!rl.allowed) {
+    console.warn(`[WEBAUTHN-LOGIN] Rate limit hit from IP: ${redactIP(clientIp)}`);
+
+    // Audit trail — fire-and-forget, don't block the 429 response
+    const sb = supabase();
+    sb.rpc('log_rate_limit_event', {
+      p_ip_address: clientIp,
+      p_source: 'webauthn-login',
+      p_details: { redacted_ip: redactIP(clientIp) },
+    }).then(({ error: rlErr }) => {
+      if (rlErr) console.error('[WEBAUTHN-LOGIN] Rate-limit audit log failed:', rlErr.message);
+    });
+
+    return respond(429, { error: 'Too many attempts. Please wait.' });
+  }
+
   // ── IP Allowlist Gate (same as pin-login.js) ──────────────────────
   const ipBlock = checkIPAllowlist(event);
   if (ipBlock) return ipBlock;
@@ -117,9 +145,14 @@ exports.handler = async (event) => {
 
 async function handleGenerateOptions(sb, event) {
   // Get ALL registered credentials (for discoverable / non-discoverable flow)
-  const { data: allCreds } = await sb
+  const { data: allCreds, error: credsErr } = await sb
     .from('webauthn_credentials')
     .select('id, transports');
+
+  if (credsErr) {
+    console.error('[WEBAUTHN-LOGIN] Failed to fetch credentials:', credsErr.message);
+    return respond(500, { error: 'Authentication unavailable' });
+  }
 
   const allowCredentials = (allCreds || []).map(c => ({
     id: c.id,
@@ -134,11 +167,16 @@ async function handleGenerateOptions(sb, event) {
   });
 
   // Store the challenge
-  await sb.from('webauthn_challenges').insert({
+  const { error: insertErr } = await sb.from('webauthn_challenges').insert({
     challenge: options.challenge,
     type: 'authenticate',
     staff_id: null, // Unknown until verification
   });
+
+  if (insertErr) {
+    console.error('[WEBAUTHN-LOGIN] Failed to store challenge:', insertErr.message);
+    return respond(500, { error: 'Authentication unavailable' });
+  }
 
   return respond(200, { options });
 }
@@ -196,18 +234,28 @@ async function handleVerifyAuth(sb, body, event) {
   }
 
   // Update the counter (replay protection)
-  await sb.from('webauthn_credentials')
+  const { error: updateErr } = await sb.from('webauthn_credentials')
     .update({
       counter: verification.authenticationInfo.newCounter,
       last_used_at: new Date().toISOString(),
     })
     .eq('id', credRow.id);
 
+  if (updateErr) {
+    console.error('[WEBAUTHN-LOGIN] Failed to update counter:', updateErr.message);
+    return respond(500, { error: 'Authentication failed' });
+  }
+
   // Clean up used challenges
-  await sb.from('webauthn_challenges')
+  const { error: cleanupErr } = await sb.from('webauthn_challenges')
     .delete()
     .eq('type', 'authenticate')
     .lte('created_at', new Date().toISOString());
+
+  if (cleanupErr) {
+    console.error('[WEBAUTHN-LOGIN] Challenge cleanup failed:', cleanupErr.message);
+    // Non-fatal: don't block login for cleanup failure
+  }
 
   // Look up the staff member
   // Schema 77: read from v_staff_status which computes is_working from time_logs
@@ -249,9 +297,9 @@ async function handleVerifyAuth(sb, body, event) {
     authMethod: 'passkey',
   });
 
-  const secret = process.env.INTERNAL_SYNC_SECRET;
+  const secret = process.env.SESSION_SIGNING_KEY || process.env.INTERNAL_SYNC_SECRET;
   if (!secret) {
-    console.error('[WEBAUTHN-LOGIN] INTERNAL_SYNC_SECRET not configured');
+    console.error('[WEBAUTHN-LOGIN] SESSION_SIGNING_KEY / INTERNAL_SYNC_SECRET not configured');
     return respond(500, { error: 'Server misconfiguration' });
   }
 

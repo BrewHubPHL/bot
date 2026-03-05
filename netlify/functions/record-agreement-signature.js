@@ -5,15 +5,17 @@
  * on the Mutual Working Agreement.
  *
  * POST /.netlify/functions/record-agreement-signature
- * Body: { pin: string, staff_id: string, agreement_text: string, version_tag: string }
+ * Body: { pin: string, staff_id: string, version_tag?: string }
  *
  * 1. Verifies PIN against staff_directory via the verify_staff_pin RPC.
  * 2. Validates that body staff_id matches authenticated session identity.
- * 3. Hashes agreement_text server-side (SHA-256).
- * 4. Calls the record_agreement_signature Postgres RPC which ATOMICALLY:
+ * 3. Fetches full_name + hourly_rate from staff_directory and regenerates
+ *    the agreement text entirely server-side via generateStaffAgreement().
+ * 4. SHA-256 hashes the server-generated canonical text (non-repudiation).
+ * 5. Calls the record_agreement_signature Postgres RPC which ATOMICALLY:
  *    a) Inserts an audit row into agreement_signatures.
  *    b) Updates staff_directory: contract_signed = true, onboarding_complete = true.
- * 5. Sends a notification email to all active managers via Resend.
+ * 6. Sends a notification email to all active managers via Resend.
  */
 
 const { createClient } = require('@supabase/supabase-js');
@@ -25,6 +27,7 @@ const { staffBucket } = require('./_token-bucket');
 const { hashIP, redactIP } = require('./_ip-hash');
 const { logSystemError } = require('./_system-errors');
 const { getCanonicalAgreementText } = require('./_crypto-utils');
+const { generateStaffAgreement } = require('./_staff-agreement');
 
 // ── Server-authoritative agreement version ──────────────────────
 // The frontend may send version_tag for display/logging, but the
@@ -95,7 +98,6 @@ exports.handler = async (event) => {
 
   const pin = sanitizeInput(String(body.pin || ''));
   const staffId = sanitizeInput(String(body.staff_id || ''));
-  const agreementText = String(body.agreement_text || '');
   // version_tag from the client is logged for diagnostics but never
   // used for the DB write — CURRENT_VERSION is stamped instead.
   const clientVersionTag = sanitizeInput(String(body.version_tag || ''));
@@ -105,9 +107,6 @@ exports.handler = async (event) => {
   }
   if (!staffId) {
     return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'staff_id is required' }) };
-  }
-  if (!agreementText || agreementText.length < 100) {
-    return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'agreement_text is required' }) };
   }
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -154,34 +153,57 @@ exports.handler = async (event) => {
     const staffName = verifiedStaff.full_name || verifiedStaff.staff_name || 'Staff Member';
 
     // ═══════════════════════════════════════════════════════════
-    // STEP 2: Canonicalize, then SHA-256 hash the agreement text
-    // at the moment of signing — immutable audit proof.
-    // Canonical normalization guarantees that trivial whitespace
-    // or line-ending differences never alter the hash.
+    // STEP 2: Fetch staff data & regenerate agreement server-side
+    // (Ticket H-1 — Canonical Agreement Hashing)
+    // We NEVER hash client-supplied agreement text. Instead we
+    // fetch the employee's full_name + hourly_rate from the DB
+    // and regenerate the canonical agreement entirely on the
+    // server.  This prevents a tampered client from altering the
+    // text that gets hashed into the audit row.
     // ═══════════════════════════════════════════════════════════
-    const originalLength = agreementText.length;
-    const canonicalText = getCanonicalAgreementText(agreementText);
-    const normalizedLength = canonicalText.length;
-    const normDelta = originalLength - normalizedLength;
+    const { data: staffRow, error: staffFetchErr } = await supabase
+      .from('staff_directory')
+      .select('full_name, hourly_rate')
+      .eq('id', staffId)
+      .eq('is_active', true)
+      .single();
 
-    // Ops diagnostic: log the normalization delta so we can
-    // verify the transform is reasonable (not stripping content).
-    console.info(
-      `[RECORD-AGREEMENT] Normalization: original=${originalLength} normalized=${normalizedLength} delta=${normDelta} staff=${staffId}`,
-    );
-
-    // Guard: if normalization removed more than 5 % of content,
-    // something unexpected was in the payload — log a warning.
-    if (normDelta > originalLength * 0.05) {
-      console.warn(
-        `[RECORD-AGREEMENT] Large normalization delta (${normDelta} chars, ${((normDelta / originalLength) * 100).toFixed(1)}%) — review payload for staff=${staffId}`,
-      );
+    if (staffFetchErr) {
+      console.error('[RECORD-AGREEMENT] staff_directory fetch error:', staffFetchErr.message);
+      return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: 'Failed to load employee data' }) };
     }
+    if (!staffRow) {
+      return { statusCode: 404, headers: corsHeaders, body: JSON.stringify({ error: 'Employee record not found' }) };
+    }
+
+    const employeeName = staffRow.full_name || staffName;
+    const baseRate = staffRow.hourly_rate != null
+      ? Number(staffRow.hourly_rate).toFixed(2)
+      : '0.00';
+
+    const today = new Date().toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    const serverAgreement = generateStaffAgreement({
+      employeeName,
+      baseRate,
+      effectiveDate: today,
+      noticePeriodDays: 14,
+    });
+
+    const canonicalText = getCanonicalAgreementText(serverAgreement);
 
     const sha256Hash = crypto
       .createHash('sha256')
       .update(canonicalText, 'utf8')
       .digest('hex');
+
+    console.info(
+      `[RECORD-AGREEMENT] Server-side canonical hash generated for staff=${staffId} version=${CURRENT_VERSION}`,
+    );
 
     const userAgent = (event.headers['user-agent'] || '').slice(0, 500);
 
@@ -216,7 +238,31 @@ exports.handler = async (event) => {
         error_message: `record_agreement_signature RPC failed: ${rpcSignErr.message}`,
         context: { staff_id: staffId, version_tag: CURRENT_VERSION },
       });
+
+      // Surface a specific message when the staff row was not updateable
+      // (deactivated between PIN check and RPC execution). ERRCODE P0002
+      // is raised by the RPC when the UPDATE matches 0 rows.
+      const isStaffMissing = /matched 0 rows|no_data_found|P0002/.test(rpcSignErr.message || '');
+      if (isStaffMissing) {
+        return { statusCode: 409, headers: corsHeaders, body: JSON.stringify({ error: 'Staff record is inactive or missing. Signature was NOT recorded.' }) };
+      }
+
       return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: 'Failed to record signature' }) };
+    }
+
+    // Belt-and-suspenders: verify the RPC returned a success payload.
+    // If the RPC returned without error but without the expected fields,
+    // treat it as a failure — we cannot confirm atomicity.
+    if (!rpcResult?.success || !rpcResult?.signature_id) {
+      console.error('[RECORD-AGREEMENT] RPC returned unexpected payload:', JSON.stringify(rpcResult));
+      await logSystemError(supabase, {
+        error_type: 'db_insert_failed',
+        severity: 'critical',
+        source_function: 'record-agreement-signature',
+        error_message: 'RPC returned no success flag or signature_id',
+        context: { staff_id: staffId, rpc_result: rpcResult },
+      });
+      return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: 'Signature recording could not be confirmed' }) };
     }
 
     const signatureId = rpcResult?.signature_id || null;
@@ -243,10 +289,10 @@ exports.handler = async (event) => {
           .filter(e => e && EMAIL_RE.test(e));
 
         if (recipients.length > 0) {
-          // Truncate agreement for email body (keep first 3000 chars to stay under email limits)
-          const agreementPreview = agreementText.length > 3000
-            ? agreementText.slice(0, 3000) + '\n\n[… truncated — full text on file …]'
-            : agreementText;
+          // Truncate server-generated agreement for email body (keep first 3000 chars to stay under email limits)
+          const agreementPreview = serverAgreement.length > 3000
+            ? serverAgreement.slice(0, 3000) + '\n\n[… truncated — full text on file …]'
+            : serverAgreement;
 
           const signedDate = new Date().toLocaleString('en-US', {
             timeZone: 'America/New_York',

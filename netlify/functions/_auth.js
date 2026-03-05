@@ -109,6 +109,9 @@ async function authorize(event, options = {}) {
     }
   }
 
+  // ── Session signing uses a dedicated key, separate from service-to-service auth
+  const sessionSigningKey = process.env.SESSION_SIGNING_KEY || process.env.INTERNAL_SYNC_SECRET;
+
   const authHeader = event.headers?.authorization || event.headers?.Authorization;
   let token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
@@ -132,12 +135,11 @@ async function authorize(event, options = {}) {
     try {
       const [payloadB64, signature] = parts;
       const payloadStr = Buffer.from(payloadB64, 'base64').toString('utf8');
-      const secret = process.env.INTERNAL_SYNC_SECRET;
-      if (!secret) {
-        console.error('[AUTH] INTERNAL_SYNC_SECRET not configured — cannot verify PIN tokens');
+      if (!sessionSigningKey) {
+        console.error('[AUTH] SESSION_SIGNING_KEY / INTERNAL_SYNC_SECRET not configured — cannot verify PIN tokens');
         return { ok: false, response: json(500, { error: 'Server misconfiguration' }) };
       }
-      const expected = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
+      const expected = crypto.createHmac('sha256', sessionSigningKey).update(payloadStr).digest('hex');
       
       const sigBuf = Buffer.from(signature, 'hex');
       const expBuf = Buffer.from(expected, 'hex');
@@ -401,8 +403,8 @@ function verifyServiceSecret(event) {
  * @returns {string} token
  */
 function signToken(payload) {
-  const secret = process.env.INTERNAL_SYNC_SECRET;
-  if (!secret) throw new Error('INTERNAL_SYNC_SECRET not configured');
+  const secret = process.env.SESSION_SIGNING_KEY || process.env.INTERNAL_SYNC_SECRET;
+  if (!secret) throw new Error('SESSION_SIGNING_KEY or INTERNAL_SYNC_SECRET not configured');
   // Add expiration and issued-at
   const now = Date.now();
   const exp = now + 8 * 60 * 60 * 1000; // 8 hours

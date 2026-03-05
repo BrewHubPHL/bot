@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
 import AuthCleanupProvider from "@/components/AuthCleanupProvider";
+import { NuqsAdapter } from "nuqs/adapters/next/app";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -17,7 +18,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${playfair.variable} antialiased`}>
       <body>
-        <AuthCleanupProvider>{children}</AuthCleanupProvider>
+        <NuqsAdapter>
+          <AuthCleanupProvider>{children}</AuthCleanupProvider>
+        </NuqsAdapter>
       </body>
     </html>
   );

@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { KeyRound, Loader2, AlertCircle, CheckCircle2, X } from "lucide-react";
+import { KeyRound, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 interface PinRotationModalProps {
   /** Manager's email for the rotation RPC */
@@ -130,33 +137,26 @@ export default function PinRotationModal({
   const canInput = step === "old" || step === "new" || step === "confirm";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 relative">
-        {/* Close (defer) button */}
-        {canDefer && onDefer && (
-          <button
-            onClick={onDefer}
-            className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors"
-            aria-label="Skip for now"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
-
+    <Dialog open onOpenChange={(open) => { if (!open && canDefer && onDefer) onDefer(); }}>
+      <DialogContent
+        className="bg-zinc-900 border-zinc-700 rounded-2xl shadow-2xl sm:max-w-md"
+        onInteractOutside={(e) => { if (!canDefer) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (!canDefer) e.preventDefault(); }}
+      >
         {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
+        <DialogHeader className="flex-row items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-600/20 flex items-center justify-center">
             <KeyRound className="w-5 h-5 text-amber-400" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">PIN Rotation Required</h2>
-            <p className="text-zinc-400 text-sm">
+            <DialogTitle className="text-lg font-bold text-white">PIN Rotation Required</DialogTitle>
+            <DialogDescription className="text-zinc-400 text-sm">
               {daysSinceChange
                 ? `Your PIN hasn't been changed in ${daysSinceChange} days.`
                 : "It's time to change your PIN for security."}
-            </p>
+            </DialogDescription>
           </div>
-        </div>
+        </DialogHeader>
 
         {canInput && (
           <>
@@ -270,7 +270,7 @@ export default function PinRotationModal({
             ))}
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

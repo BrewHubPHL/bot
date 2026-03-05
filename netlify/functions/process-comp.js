@@ -71,18 +71,6 @@ const getCorsOrigin = (event) => {
   return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
 };
 
-/**
- * Constant-time PIN comparison (legacy fallback only).
- */
-function safeCompare(a, b) {
-  if (!a || !b) return false;
-  const crypto = require('crypto');
-  const bufA = Buffer.from(String(a));
-  const bufB = Buffer.from(String(b));
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
-}
-
 exports.handler = async (event) => {
   // ── CORS preflight ──────────────────────────────────────────
   if (event.httpMethod === 'OPTIONS') {
@@ -136,43 +124,20 @@ exports.handler = async (event) => {
 
     let manager = null;
 
-    // Try bcrypt-based verification first (post-migration)
-    try {
-      const { data: bcryptResult, error: bcryptErr } = await supabase.rpc('verify_staff_pin', { p_pin: manager_pin });
-      if (!bcryptErr && bcryptResult && bcryptResult.length > 0) {
-        const row = bcryptResult[0];
-        manager = {
-          id: row.staff_id,
-          name: row.staff_name,
-          email: row.staff_email,
-          role: row.staff_role,
-        };
-      } else if (bcryptErr) {
-        console.warn('[PROCESS-COMP] verify_staff_pin RPC unavailable, falling back to legacy:', bcryptErr.message);
-      }
-    } catch (rpcErr) {
-      console.warn('[PROCESS-COMP] bcrypt RPC failed, falling back to legacy:', rpcErr.message);
+    const { data: bcryptResult, error: bcryptErr } = await supabase.rpc('verify_staff_pin', { p_pin: manager_pin });
+    if (bcryptErr) {
+      console.error('[PROCESS-COMP] verify_staff_pin RPC error:', bcryptErr.message);
+      return json(500, { error: 'Failed to verify manager PIN.' });
     }
 
-    // Legacy fallback: plaintext comparison (remove after full migration)
-    if (!manager) {
-      const { data: staff, error: staffErr } = await supabase
-        .from('staff_directory')
-        .select('id, name, email, role, pin, is_active')
-        .not('pin', 'is', null)
-        .eq('is_active', true);
-
-      if (staffErr) {
-        console.error('[PROCESS-COMP] DB error fetching staff:', staffErr.message);
-        return json(500, { error: 'Failed to verify manager PIN.' });
-      }
-
-      // Constant-time comparison across ALL records to prevent timing attacks
-      for (const s of (staff || [])) {
-        if (safeCompare(manager_pin, s.pin)) {
-          manager = { id: s.id, name: s.name, email: s.email, role: s.role };
-        }
-      }
+    if (bcryptResult && bcryptResult.length > 0) {
+      const row = bcryptResult[0];
+      manager = {
+        id: row.staff_id,
+        name: row.staff_name,
+        email: row.staff_email,
+        role: row.staff_role,
+      };
     }
 
     if (!manager) {

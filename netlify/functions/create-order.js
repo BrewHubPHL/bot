@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { calculateTaxInclusive } = require('./_pricing');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -101,9 +102,13 @@ exports.handler = async (event) => {
     return json(400, { error: 'Order total must be positive' });
   }
 
+  const { subtotalCents, taxCents } = calculateTaxInclusive(totalCents);
+
   const { data, error } = await supabase
     .from('orders')
     .insert({
+      subtotal_cents: subtotalCents,
+      tax_amount_cents: taxCents,
       total_amount_cents: totalCents,
       status: 'pending',
       user_id: auth.user?.id || null

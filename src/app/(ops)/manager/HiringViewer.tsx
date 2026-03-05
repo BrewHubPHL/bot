@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useOptimistic, startTransition } from "react";
 import { useOpsSession } from "@/components/OpsGate";
+import { toast } from "sonner";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
@@ -82,6 +83,12 @@ export default function HiringViewer() {
   const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const statusLockRef = useRef(false);
+
+  const [optimisticApplicants, setOptimisticApplicant] = useOptimistic(
+    applicants,
+    (state: Applicant[], update: { id: string; status: string }) =>
+      state.map((a) => (a.id === update.id ? { ...a, status: update.status } : a))
+  );
 
   const fetchApplicants = useCallback(async () => {
     setLoading(true);
@@ -167,13 +174,13 @@ export default function HiringViewer() {
   /* ── Filtered list ─────────────────────────────────────── */
   const filtered =
     filterStatus === "all"
-      ? applicants
-      : applicants.filter((a) => a.status === filterStatus);
+      ? optimisticApplicants
+      : optimisticApplicants.filter((a) => a.status === filterStatus);
 
-  /* ── Counts by status ──────────────────────────────────── */
-  const counts: Record<string, number> = { all: applicants.length };
+  /* ── Counts by status ──────────────────────────────── */
+  const counts: Record<string, number> = { all: optimisticApplicants.length };
   for (const s of STATUS_OPTIONS) {
-    counts[s] = applicants.filter((a) => a.status === s).length;
+    counts[s] = optimisticApplicants.filter((a) => a.status === s).length;
   }
 
   return (
@@ -183,7 +190,7 @@ export default function HiringViewer() {
         <div>
           <h2 className="text-lg font-semibold text-white">Applicants</h2>
           <p className="text-stone-500 text-sm">
-            {applicants.length} total application{applicants.length !== 1 ? "s" : ""}
+            {optimisticApplicants.length} total application{optimisticApplicants.length !== 1 ? "s" : ""}
           </p>
         </div>
         <button

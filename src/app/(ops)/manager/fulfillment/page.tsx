@@ -9,7 +9,8 @@
  * Lives at /manager/fulfillment and inherits the (ops) layout + OpsGate.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useOptimistic, useTransition } from "react";
+import { toast as sonnerToast } from "sonner";
 import {
   Package,
   Truck,
@@ -89,13 +90,6 @@ function timeAgo(iso: string): string {
 
 const POLL_MS = 30_000; // fallback poll interval (visibility change only)
 
-/* ── Toast type ────────────────────────────────────────── */
-interface Toast {
-  id: number;
-  message: string;
-  type: "error" | "success";
-}
-
 /* ═══════════════════════════════════════════════════════════
    FULFILLMENT DASHBOARD
    ═══════════════════════════════════════════════════════════ */
@@ -108,8 +102,12 @@ export default function FulfillmentDashboard() {
   const [activeTab, setActiveTab] = useState<ViewTab>("pending");
   const [shippingIds, setShippingIds] = useState<Set<string>>(new Set());
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const toastIdRef = useRef(0);
+  const [optimisticOrders, removeOptimisticOrder] = useOptimistic(
+    orders,
+    (currentOrders: FulfillmentOrder[], orderId: string) =>
+      currentOrders.filter((o) => o.id !== orderId),
+  );
+  const [, startTransition] = useTransition();
 
   /* ── Fetch orders ──────────────────────────────────────── */
   const fetchOrders = useCallback(
@@ -146,9 +144,8 @@ export default function FulfillmentDashboard() {
 
   /* ── Helper: show a toast ───────────────────────────── */
   const showToast = useCallback((message: string, type: "error" | "success" = "error") => {
-    const id = ++toastIdRef.current;
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
+    if (type === "success") sonnerToast.success(message);
+    else sonnerToast.error(message);
   }, []);
 
   /* ── Initial fetch + Supabase Realtime ─────────────── */
@@ -189,44 +186,46 @@ export default function FulfillmentDashboard() {
   }, [fetchOrders]);
 
   /* ── Mark as Shipped ───────────────────────────────────── */
-  const markAsShipped = async (orderId: string) => {
+  const markAsShipped = (orderId: string) => {
     if (!token) {
       setError("Session expired — please re-authenticate.");
       return;
     }
 
-    // Optimistic removal from pending list
     setShippingIds((prev) => new Set([...prev, orderId]));
-    setOrders((prev) => prev.filter((o) => o.id !== orderId));
 
-    try {
-      const res = await fetchOps("/update-order-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, status: "shipped" }),
-      }, token);
+    startTransition(async () => {
+      removeOptimisticOrder(orderId);
 
-      if (!res.ok) {
-        const info = await getErrorInfoFromResponse(res, "Failed to mark order as shipped");
-        if (info.authz) {
-          setAuthzState(info.authz);
-        } else {
-          showToast(info.message);
+      try {
+        const res = await fetchOps("/update-order-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId, status: "shipped" }),
+        }, token);
+
+        if (!res.ok) {
+          const info = await getErrorInfoFromResponse(res, "Failed to mark order as shipped");
+          if (info.authz) {
+            setAuthzState(info.authz);
+          } else {
+            sonnerToast.error(info.message);
+          }
+          return;
         }
-        // Revert optimistic removal
+
+        // Sync canonical state so optimistic removal becomes permanent
         await fetchOrders(false);
+      } catch (err) {
+        sonnerToast.error(toUserSafeMessageFromUnknown(err, "Network error — ship action rolled back"));
+      } finally {
+        setShippingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(orderId);
+          return next;
+        });
       }
-    } catch (err) {
-      showToast(toUserSafeMessageFromUnknown(err, "Network error — ship action rolled back"));
-      // Revert optimistic removal
-      await fetchOrders(false);
-    } finally {
-      setShippingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(orderId);
-        return next;
-      });
-    }
+    });
   };
 
   /* ── Authz error handler ───────────────────────────────── */
@@ -235,8 +234,8 @@ export default function FulfillmentDashboard() {
   };
 
   /* ── Derived data ──────────────────────────────────────── */
-  const pendingOrders = orders.filter((o) => o.status === "paid" || o.status === "pending");
-  const shippedOrders = orders.filter((o) => o.status === "shipped");
+  const pendingOrders = optimisticOrders.filter((o) => o.status === "paid" || o.status === "pending");
+  const shippedOrders = optimisticOrders.filter((o) => o.status === "shipped");
   const displayOrders = activeTab === "pending" ? pendingOrders : shippedOrders;
 
   /* ═══════════════════════════════════════════════════════════
@@ -319,25 +318,6 @@ export default function FulfillmentDashboard() {
           </div>
         </div>
       </header>
-
-      {/* ── Toast notifications ─────────────────────────── */}
-      {toasts.length > 0 && (
-        <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
-          {toasts.map((t) => (
-            <div
-              key={t.id}
-              className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-fade-in-up ${
-                t.type === "error"
-                  ? "bg-red-600 text-white"
-                  : "bg-emerald-600 text-white"
-              }`}
-            >
-              {t.type === "error" ? <XCircle size={16} /> : <CheckCircle2 size={16} />}
-              {t.message}
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* ── Main content ─────────────────────────────────── */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-28 md:pb-8">

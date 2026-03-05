@@ -4,6 +4,7 @@ const { randomUUID, createHmac } = require('crypto');
 const { checkQuota } = require('./_usage');
 const { requireCsrfHeader } = require('./_csrf');
 const { merchPayBucket } = require('./_token-bucket');
+const { calculateTaxInclusive } = require('./_pricing');
 
 const square = new SquareClient({
   token: process.env.SQUARE_PRODUCTION_TOKEN,
@@ -326,9 +327,13 @@ exports.handler = async (event) => {
     // Store order in Supabase — let Postgres auto-generate the UUID primary key.
     // The MERCH-* reference string goes into square_order_id for traceability.
     const orderStatus = payment.status === 'COMPLETED' ? 'paid' : 'pending';
+    const { subtotalCents, taxCents } = calculateTaxInclusive(totalCents);
+
     const orderData = {
       type: 'merch',
       status: orderStatus,
+      subtotal_cents: subtotalCents,
+      tax_amount_cents: taxCents,
       total_amount_cents: totalCents,
       payment_id: payment.id,
       square_order_id: referenceId,

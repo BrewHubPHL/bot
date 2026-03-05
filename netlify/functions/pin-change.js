@@ -8,6 +8,8 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { staffBucket } = require('./_token-bucket');
+const { redactIP } = require('./_ip-hash');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -47,6 +49,17 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
+  // Rate limiting — prevent PIN brute-force
+  const clientIp =
+    event.headers['x-nf-client-connection-ip'] ||
+    event.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    '127.0.0.1';
+  const rl = staffBucket.consume('pin-change:' + clientIp);
+  if (!rl.allowed) {
+    console.warn(`[PIN-CHANGE] Rate limit hit from IP: ${redactIP(clientIp)}`);
+    return cors(429, { error: 'Too many attempts. Please wait.' });
+  }
+
   // Must be authenticated via PIN session
   const auth = await authorize(event, { requirePin: true });
   if (!auth.ok) return auth.response;
@@ -84,12 +97,6 @@ exports.handler = async (event) => {
     if (!row?.success) {
       return cors(400, { error: row?.error_message || 'PIN change failed' });
     }
-
-    // Also clear the legacy plaintext PIN column (migration cleanup)
-    await supabase
-      .from('staff_directory')
-      .update({ pin: null })
-      .eq('email', email);
 
     console.log(`[PIN-CHANGE] ${email} changed their PIN`);
 

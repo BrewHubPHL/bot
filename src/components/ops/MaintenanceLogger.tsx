@@ -10,10 +10,8 @@
  * and clear any active "Overdue" toasts.
  */
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { createPortal } from "react-dom";
+import React, { useState, useRef, useEffect } from "react";
 import {
-  X,
   Wrench,
   Loader2,
   CalendarDays,
@@ -21,6 +19,14 @@ import {
   FileText,
 } from "lucide-react";
 import { fetchOps } from "@/utils/ops-api";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 /* ── Props ─────────────────────────────────────────────────── */
 interface MaintenanceLoggerProps {
@@ -60,30 +66,12 @@ export default function MaintenanceLogger({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const backdropRef = useRef<HTMLDivElement>(null);
   const firstInput = useRef<HTMLInputElement>(null);
 
-  /* ── Focus trap: focus first input on mount ────────────── */
+  /* ── Focus first input on mount ────────────────────────── */
   useEffect(() => {
     firstInput.current?.focus();
   }, []);
-
-  /* ── Close on Escape key ────────────────────────────────── */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  /* ── Backdrop click ─────────────────────────────────────── */
-  const handleBackdrop = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.target === backdropRef.current) onClose();
-    },
-    [onClose],
-  );
 
   /* ── Submit ─────────────────────────────────────────────── */
   const handleSubmit = async (e: React.FormEvent) => {
@@ -135,42 +123,28 @@ export default function MaintenanceLogger({
     }
   };
 
-  /* ── Render via portal ──────────────────────────────────── */
-  return createPortal(
-    <div
-      ref={backdropRef}
-      onClick={handleBackdrop}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Log maintenance for ${asset.name}`}
-    >
-      <div className="relative w-full max-w-lg rounded-2xl border border-stone-700 bg-stone-900 shadow-2xl">
+  /* ── Render via Dialog ─────────────────────────────────── */
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent
+        className="rounded-2xl border-stone-700 bg-stone-900 shadow-2xl sm:max-w-lg"
+        aria-label={`Log maintenance for ${asset.name}`}
+      >
         {/* ── Header ───────────────────────────────────────── */}
-        <div className="flex items-center justify-between border-b border-stone-800 px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/10">
-              <Wrench size={18} className="text-amber-400" />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-white">Log Maintenance</h2>
-              <p className="text-xs text-stone-400 truncate max-w-[220px]">
-                {asset.name} · <span className="capitalize">{asset.category}</span>
-              </p>
-            </div>
+        <DialogHeader className="flex-row items-center gap-3 border-b border-stone-800 pb-4">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/10">
+            <Wrench size={18} className="text-amber-400" />
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-800 hover:text-white transition-colors"
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
-        </div>
+          <div>
+            <DialogTitle className="text-sm font-bold text-white">Log Maintenance</DialogTitle>
+            <DialogDescription className="text-xs text-stone-400 truncate max-w-[220px]">
+              {asset.name} · <span className="capitalize">{asset.category}</span>
+            </DialogDescription>
+          </div>
+        </DialogHeader>
 
         {/* ── Form ─────────────────────────────────────────── */}
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-5">
           {/* Date */}
           <div>
             <label
@@ -180,7 +154,7 @@ export default function MaintenanceLogger({
               <CalendarDays size={13} className="text-stone-500" />
               Date Performed
             </label>
-            <input
+            <Input
               ref={firstInput}
               id="maint-date"
               type="date"
@@ -188,9 +162,7 @@ export default function MaintenanceLogger({
               max={todayISO()}
               value={performedAt}
               onChange={(e) => setPerformedAt(e.target.value)}
-              className="w-full rounded-lg border border-stone-700 bg-stone-800 px-3 py-2 text-sm text-white
-                         placeholder:text-stone-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40
-                         outline-none transition-colors"
+              className="border-stone-700 bg-stone-800 text-white placeholder:text-stone-500 focus-visible:ring-amber-500/40"
             />
           </div>
 
@@ -203,7 +175,7 @@ export default function MaintenanceLogger({
               <DollarSign size={13} className="text-stone-500" />
               Cost (USD)
             </label>
-            <input
+            <Input
               id="maint-cost"
               type="number"
               required
@@ -213,9 +185,7 @@ export default function MaintenanceLogger({
               placeholder="0.00"
               value={cost}
               onChange={(e) => setCost(e.target.value)}
-              className="w-full rounded-lg border border-stone-700 bg-stone-800 px-3 py-2 text-sm text-white
-                         placeholder:text-stone-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40
-                         outline-none transition-colors"
+              className="border-stone-700 bg-stone-800 text-white placeholder:text-stone-500 focus-visible:ring-amber-500/40"
             />
           </div>
 
@@ -280,8 +250,7 @@ export default function MaintenanceLogger({
             </button>
           </div>
         </form>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }

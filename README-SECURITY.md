@@ -11,7 +11,8 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 | **Customer** | Supabase JWT | Portal, loyalty points, own parcel history. |
 | **Staff** | PIN → HMAC Cookie, WebAuthn/Passkeys | POS, KDS, Scanner, Inventory reads. |
 | **Manager** | PIN + TOTP Challenge | Dashboard, payroll edits, comps, catalog writes. |
-| **Service Role** | Netlify Env Secret | Backend webhooks, cron jobs, atomic RPCs. |
+| **Service Role** | Netlify Env Secret (`INTERNAL_SYNC_SECRET`) | Backend webhooks, cron jobs, atomic RPCs. |
+| **Session Signing** | Dedicated key (`SESSION_SIGNING_KEY`) | HMAC signing of PIN/WebAuthn session tokens. |
 
 *Note: The `anon` Supabase key is public by design. All tables default to `Deny All` Row Level Security (RLS).*
 
@@ -35,10 +36,11 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 ### D. Compliance & Data Integrity
 * **IRS-Compliant Payroll:** `time_logs` are immutable. `atomic_payroll_adjustment()` only inserts new delta rows linked to a manager's UUID and a required reason.
 * **GDPR Right to Erasure:** A `deletion_tombstones` table prevents "zombie data" from being resurrected by external Google Sheets syncs.
-* **Staff Agreement Signatures:** The `agreement_signatures` table provides an immutable cryptographic audit trail. Each row records a SHA-256 hash of the agreement text at signing time, the hashed IP address (via `hashIP()`), truncated user agent, and a timestamped version tag. The `get-schema-health.js` function allows managers to verify schema integrity on-demand.
+* **Staff Agreement Signatures:** The `agreement_signatures` table provides an immutable cryptographic audit trail. Each row records a SHA-256 hash of the agreement text at signing time, the hashed IP address (via `hashIP()`), truncated user agent, and a timestamped version tag. The `get-schema-health.js` function allows managers to verify schema integrity on-demand. **(Ticket H-1 — Canonical Agreement Hashing):** The server no longer hashes client-supplied `agreement_text`. Instead, `record-agreement-signature.js` fetches the employee's `full_name` and `hourly_rate` from `staff_directory`, regenerates the agreement entirely server-side via `generateStaffAgreement()`, and hashes that canonical output. This eliminates a non-repudiation gap where a tampered client could alter the text that gets hashed into the audit row.
 * **Backend Onboarding Gate:** `_auth.js` supports `requireOnboarded: true` — blocks staff with `onboarding_complete = false` from calling sensitive endpoints (`collect-payment`, `process-inventory-adjustment`, `cafe-checkout`) with `403 ONBOARDING_REQUIRED`. Enforced on both PIN-session and JWT auth paths.
 * **POS Fail-Closed Gate:** `cafe-checkout.js` enforces a dual fail-closed check: (1) payment methods `cash`, `terminal`, and `comp` require `authMode === 'staff'` — customers and guests receive an immediate 403; (2) even authenticated staff must have `onboarding_complete === true` (defense-in-depth, independent of the `_auth.js` gate). This prevents any regression in the auth layer from opening POS financial operations to un-onboarded personnel.
-* **Atomic Session Rotation on Signature:** The `record_agreement_signature` RPC atomically bumps `token_version` when an agreement is signed, invalidating all existing sessions and forcing a fresh login that picks up the new `onboarding_complete = true` status.
+* **Profit Share Integer Math (Ticket H-2):** `get-profit-share-preview.js` routes all monetary and basis-point divisions through a `floorDiv()` helper — no floating-point value escapes into a named variable for staff pool, bonus-per-hour, or floor progress. Floor progress is tracked as integer permille; `total_staff_hours` is formatted inline at the response stage with no float intermediate. This eliminates cent-drift from IEEE 754 rounding in payout calculations.
+* **Atomic Session Rotation on Signature:** The `record_agreement_signature` RPC atomically bumps `token_version` when an agreement is signed, invalidating all existing sessions and forcing a fresh login that picks up the new `onboarding_complete = true` status. **(Ticket C-1 — Schema 91):** The RPC now checks `GET DIAGNOSTICS ROW_COUNT` after the `staff_directory` UPDATE; if zero rows match (e.g. staff deactivated between PIN check and RPC), it raises `ERRCODE P0002`, rolling back the entire transaction including the `agreement_signatures` INSERT — eliminating partial audit-trail-without-contract states. The JS endpoint returns 409 for this case and validates the `success` flag in the RPC response payload.
 * **Agreement Version Governance:** The agreement `version_tag` is now pinned server-side via a constant (`CURRENT_VERSION = '2027-Q1'`) in `record-agreement-signature.js`. The frontend-supplied `version_tag` is logged for drift detection but never used in the DB write. This eliminates a class of client-side version spoofing attacks where a tampered frontend could stamp an incorrect version into the immutable audit trail.
 
 ### E. Stateless JWT Revocation ("Ghost Admin")
@@ -47,7 +49,7 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 * **Mechanism:** When a session is minted, the database's `token_version` is embedded into the payload. On each request, the middleware compares `payload.token_version !== staff.token_version`. If a manager hits the "Deactivate Staff" button, the DB integer instantly increments, atomically bricking the revoked tokens globally without requiring intensive database scans.
 
 ## 3. Network & Transport
-* **CSRF:** All mutating Netlify functions require the `X-BrewHub-Action: true` header.
+* **CSRF:** All mutating Netlify functions require the `X-BrewHub-Action: true` header. App Router proxy routes (`/api/revalidate`, `/api/check-in`) also enforce strict `x-brewhub-action === 'true'` with an immediate 403 rejection on mismatch.
 * **Transport:** All authenticated operational calls are routed through the central `fetchOps()` wrapper to rigidly enforce `credentials: "include"`.
 * **CORS:** Strict origin allowlisting (`process.env.SITE_URL`, `brewhubphl.com`).
 * **IP Gating:** Staff clock-in operations enforce an `ALLOWED_IPS` check to guarantee staff are physically on the shop's Wi-Fi network.
@@ -113,9 +115,21 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 ### K. Leaked Password Protection
 * **Status:** Dashboard-only setting. Enable in Supabase Dashboard → Authentication → Settings → Password Security → "Leaked password protection" toggle. Not configurable via SQL.
 
-### L. Schema Integrity Auditing (`get-schema-health.js`)
+### L. store_settings RLS Lockdown (Schema-90)
+* **Vulnerability:** `store_settings` (containing `shop_ip_address`) had no RLS, allowing `anon` or `authenticated` clients to read the shop's network address.
+* **Fix:** `ALTER TABLE store_settings ENABLE ROW LEVEL SECURITY; FORCE ROW LEVEL SECURITY;` + `REVOKE ALL` from `anon`/`authenticated` + explicit deny-all policies. Only `service_role` (Netlify functions) retains access.
+* **Migration:** `20260305_schema90_store_settings_rls.sql`
+
+### M. Schema Integrity Auditing (`get-schema-health.js`)
 * **Purpose:** Automated database schema auditor for the `agreement_signatures` and `maintenance_logs` tables. Detects missing columns, type mismatches, and extra columns by querying `information_schema.tables` and `information_schema.columns`.
 * **Auth:** Manager PIN session required. Rate-limited via `staffBucket`. CORS-locked to `SITE_URL`.
 * **Full Type Comparison:** All tables in `TABLES_TO_CHECK` (including `maintenance_logs`) now receive full `information_schema`-based type comparison when available — not just column existence probes. The `maintenance_logs.cost` column is expected to be `integer` (cents), enabling the M-3 Migration Builder to detect type mismatches (e.g. `numeric` → `integer` migration needed).
 * **Fallback:** When `information_schema` is not exposed via PostgREST, the function falls back to individual column probes (selecting each expected column with `LIMIT 0`) to determine presence without exposing raw metadata.
 * **Frontend integration:** The Manager Dashboard calls this on mount and renders a red System Integrity Alert banner when `healthy === false`, including a "Copy Migration SQL" button that generates the required DDL statements.
+
+### N. Key Separation: Session Signing vs Service Auth
+* **Vulnerability:** A single `INTERNAL_SYNC_SECRET` was used for both HMAC session token signing (PIN/WebAuthn login) and service-to-service authentication (`x-brewhub-secret` header). Compromise of the service secret would allow forging staff sessions.
+* **Fix:** Introduced `SESSION_SIGNING_KEY` as a dedicated key for HMAC session signing in `_auth.js`. `INTERNAL_SYNC_SECRET` is now used exclusively for service-to-service auth. Backward-compatible: `_auth.js` and `webauthn-login.js` fall back to `INTERNAL_SYNC_SECRET` if `SESSION_SIGNING_KEY` is not yet set.
+* **SQL Migration Secret:** The Schema 87 migration no longer stores the sync secret in plaintext. It requires a `psql -v sync_secret` variable at migration time.
+* **Debug Leak Removed:** A `console.log` in `notion-sync.js` that emitted the first/last 4 characters of the secret has been deleted.
+* **Rotation:** Both keys are now rotated independently by `rotate-secrets.mjs` and `rotate-secrets.sh`.

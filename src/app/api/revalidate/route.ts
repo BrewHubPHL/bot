@@ -13,6 +13,11 @@ import { timingSafeEqual } from "crypto";
  * Body: { paths?: string[] }
  */
 export async function POST(request: NextRequest) {
+  // CSRF enforcement — must be an explicit BrewHub action
+  if (request.headers.get("x-brewhub-action") !== "true") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const secret = request.headers.get("x-brewhub-secret") || "";
   const envSecret = process.env.INTERNAL_SYNC_SECRET || "";
 

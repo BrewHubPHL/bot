@@ -22,6 +22,7 @@ function needEnv(name) {
 const SUPABASE_PROJECT_REF = needEnv('SUPABASE_PROJECT_REF');
 
 const INTERNAL_SYNC_SECRET_NEW = randomBytes(32).toString('hex');
+const SESSION_SIGNING_KEY_NEW = randomBytes(32).toString('hex');
 const SUPABASE_WEBHOOK_SECRET_NEW = randomBytes(32).toString('hex');
 
 const skipSquare = process.argv.includes('--skip-square');
@@ -47,6 +48,7 @@ await promptForSquareSignature();
 
 console.log('Updating Netlify environment variables...');
 run('netlify', ['env:set', 'INTERNAL_SYNC_SECRET', INTERNAL_SYNC_SECRET_NEW]);
+run('netlify', ['env:set', 'SESSION_SIGNING_KEY', SESSION_SIGNING_KEY_NEW]);
 run('netlify', ['env:set', 'SUPABASE_WEBHOOK_SECRET', SUPABASE_WEBHOOK_SECRET_NEW]);
 if (!skipSquare) {
   run('netlify', ['env:set', 'SQUARE_WEBHOOK_SIGNATURE', SQUARE_WEBHOOK_SIGNATURE_NEW]);
@@ -59,6 +61,7 @@ run('supabase', [
   'secrets', 'set',
   '--project-ref', SUPABASE_PROJECT_REF,
   `INTERNAL_SYNC_SECRET=${INTERNAL_SYNC_SECRET_NEW}`,
+  `SESSION_SIGNING_KEY=${SESSION_SIGNING_KEY_NEW}`,
   `SUPABASE_WEBHOOK_SECRET=${SUPABASE_WEBHOOK_SECRET_NEW}`
 ]);
 

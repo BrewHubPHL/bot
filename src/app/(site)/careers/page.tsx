@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect, useRef } from "react";
-import { supabase } from "@/lib/supabase";
+import { useActionState, useState, useEffect, useRef } from "react";
+import { submitCareerApplication, initialState } from "@/app/actions/career-actions";
 import { Briefcase, Send, CheckCircle, ShieldCheck, Paperclip, FileText, Loader2 } from "lucide-react";
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
@@ -17,169 +19,35 @@ const AVAILABILITY_OPTIONS = [
   "Open availability",
 ];
 
-interface FormState {
-  name: string;
-  email: string;
-  phone: string;
-  availability: string;
-  scenario_answer: string;
-  vibe_check: string;
-}
-
-const EMPTY_FORM: FormState = {
-  name: "",
-  email: "",
-  phone: "",
-  availability: "",
-  scenario_answer: "",
-  vibe_check: "",
-};
-
 export default function CareersPage() {
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [state, formAction, isPending] = useActionState(submitCareerApplication, initialState);
   const [honeypot, setHoneypot] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  const [fileError, setFileError] = useState("");
   const loadTimeRef = useRef(Date.now());
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const submittingRef = useRef(false);
 
   /* Capture mount timestamp for timing-based bot defense */
   useEffect(() => {
     loadTimeRef.current = Date.now();
   }, []);
 
-  function handleChange(
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
-  ) {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  }
-
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     if (file && file.size > MAX_FILE_SIZE) {
-      setError("File is too large. Please upload a PDF under 5 MB.");
+      setFileError("File is too large. Please upload a PDF under 5 MB.");
       e.target.value = "";
       setResumeFile(null);
       return;
     }
     if (file && file.type !== "application/pdf") {
-      setError("Only PDF files are accepted.");
+      setFileError("Only PDF files are accepted.");
       e.target.value = "";
       setResumeFile(null);
       return;
     }
-    setError("");
+    setFileError("");
     setResumeFile(file);
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-
-    if (!form.name.trim()) return setError("Please enter your full name.");
-    if (!form.email.trim()) return setError("Please enter your email address.");
-    if (!form.availability)
-      return setError("Please select your general availability.");
-    if (!form.scenario_answer.trim())
-      return setError("Please answer the experience question.");
-    if (!form.vibe_check.trim())
-      return setError("Please answer the quick check question.");
-
-    if (submittingRef.current) return;
-    submittingRef.current = true;
-    setLoading(true);
-
-    try {
-      /* ── Upload resume PDF to Supabase Storage ──────── */
-      let resume_url: string | null = null;
-
-      if (resumeFile) {
-        /* ── FIX 1: strict client-side size guard before any network call ── */
-        if (resumeFile.size > MAX_FILE_SIZE) {
-          setLoading(false);
-          submittingRef.current = false;
-          alert("File is too large. Please upload a PDF under 5 MB.");
-          return;
-        }
-
-        setUploading(true);
-        try {
-          const slug = form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
-          const filePath = `${Date.now()}-${slug}.pdf`;
-
-          const { error: uploadErr } = await supabase.storage
-            .from("resumes")
-            .upload(filePath, resumeFile, {
-              contentType: "application/pdf",
-              upsert: false,
-            });
-
-          if (uploadErr) throw new Error(`Resume upload failed: ${uploadErr.message}`);
-
-          const { data: urlData } = supabase.storage
-            .from("resumes")
-            .getPublicUrl(filePath);
-
-          resume_url = urlData.publicUrl;
-        } catch (uploadErr) {
-          throw uploadErr;
-        } finally {
-          setUploading(false);
-        }
-      }
-
-      /* ── Submit application (with 15 s timeout) ───── */
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-
-      let res: Response;
-      try {
-        res = await fetch("/.netlify/functions/submit-application", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-BrewHub-Action": "true" },
-          body: JSON.stringify({
-            name: form.name.trim(),
-            email: form.email.trim(),
-            phone: form.phone.trim() || null,
-            availability: form.availability,
-            scenario_answer: form.scenario_answer.trim(),
-            vibe_check: form.vibe_check.trim(),
-            resume_url,
-            user_zip_verification: honeypot,
-            loadTime: loadTimeRef.current,
-          }),
-          signal: controller.signal,
-        });
-      } catch (fetchErr: unknown) {
-        if (fetchErr instanceof DOMException && fetchErr.name === "AbortError") {
-          throw new Error("Request timed out. Please check your connection and try again.");
-        }
-        throw new Error("Network disconnected. Please check your connection and try again.");
-      } finally {
-        clearTimeout(timeout);
-      }
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(
-        /^(network|fetch|timeout|connection|invalid|required|rate limit)/i.test(data.error || "")
-          ? data.error
-          : "Submission failed"
-      );
-
-      setSuccess(true);
-      setForm(EMPTY_FORM);
-      setResumeFile(null);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
-    }
-    setLoading(false);
-    submittingRef.current = false;
   }
 
   return (
@@ -203,7 +71,7 @@ export default function CareersPage() {
 
         {/* Card */}
         <div className="bg-stone-900 rounded-xl shadow-2xl border border-stone-800 p-8 md:p-10">
-          {success ? (
+          {state.success ? (
             <div className="flex flex-col items-center text-center py-10 gap-4">
               <div className="w-16 h-16 rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center">
                 <CheckCircle size={32} className="text-green-400" />
@@ -223,13 +91,76 @@ export default function CareersPage() {
             </div>
           ) : (
             <>
-              {error && (
+              {(state.error || fileError) && (
                 <div className="mb-5 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                  {error}
+                  {state.error || fileError}
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} noValidate className="space-y-5">
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="mb-8 font-semibold">
+                    What We&apos;re Looking For (Role &amp; Pay Tiers)
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="text-2xl">Cafe &amp; Hub Operator</DialogTitle>
+                    <DialogDescription className="text-base font-medium text-foreground mt-1">
+                      $25.00/hr – $30.00/hr + Premium Stacking (OT &amp; Sunday Pay) + Tips
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-6 text-sm sm:text-base text-muted-foreground mt-4">
+                    <section>
+                      <h3 className="font-semibold text-foreground mb-2">Who We Are</h3>
+                      <p>
+                        BrewHub PHL isn&apos;t just another coffee shop. We are a highly automated, tech-forward neighborhood hub. We serve premium espresso, but we also run a secure Parcel Hub for the Point Breeze community. Our space is run by software we built ourselves, meaning less time dealing with clunky registers and more time connecting with the neighborhood.
+                      </p>
+                    </section>
+                    <section>
+                      <h3 className="font-semibold text-foreground mb-2">Role Overview</h3>
+                      <p className="mb-2">
+                        We believe the barista role is a high-skill position. Instead of &ldquo;throwing baristas to the wolves&rdquo; with poor onboarding, we offer a transparent two-tier system where compensation is tied to measurable milestones and leadership duties. By making firm decisions at the outset regarding pay, we eliminate the headache and heartache caused by erratic wage disparities. We value transparency and professional development as the core of our employee experience.
+                      </p>
+                      <p>
+                        We are hiring for two distinct tiers. Both tiers require you to split your time between pulling perfect espresso shots and securely managing neighborhood package deliveries using our digital scanner system.
+                      </p>
+                    </section>
+                    <section className="bg-muted/50 p-4 rounded-lg border">
+                      <h4 className="font-bold text-foreground text-lg mb-1">Tier 1: Lead Barista ($25.00/hr)</h4>
+                      <p className="italic mb-3">This tier is for experts in both technical precision and effortless hospitality.</p>
+                      <ul className="list-disc pl-5 space-y-2">
+                        <li><span className="font-medium text-foreground">Technical Standards:</span> Dial in espresso, steam milk to standard, demonstrate proficiency in latte art and pour-overs, and seamlessly navigate our custom iPad Kitchen Display System (KDS).</li>
+                        <li><span className="font-medium text-foreground">The Hub (Logistics):</span> Use a Bluetooth scanner to securely check in packages (UPS, FedEx, USPS) and hand them off to residents verifying IDs.</li>
+                        <li><span className="font-medium text-foreground">Hospitality:</span> Proven ability to read a room, turn upset customers into happy regulars, and maintain the &ldquo;Philly Real&rdquo; standard of hospitality.</li>
+                        <li><span className="font-medium text-foreground">Professionalism:</span> High-level workplace communication that helps the entire team thrive.</li>
+                      </ul>
+                    </section>
+                    <section className="bg-muted/50 p-4 rounded-lg border">
+                      <h4 className="font-bold text-foreground text-lg mb-1">Tier 2: Barista Manager ($30.00/hr)</h4>
+                      <p className="italic mb-3">This tier includes all technical and logistics expectations of Tier 1, plus human resource and operational oversight.</p>
+                      <ul className="list-disc pl-5 space-y-2">
+                        <li><span className="font-medium text-foreground">System Building:</span> Developing transparent compensation structures and setting beverage standards to avoid &ldquo;discord and confusion.&rdquo;</li>
+                        <li><span className="font-medium text-foreground">Training &amp; Development:</span> Leading in-house training or education programs to help Tier 1 staff grow their skills.</li>
+                        <li><span className="font-medium text-foreground">HR Functions:</span> Managing conflict, employee wellness, safety, and workplace communication.</li>
+                        <li><span className="font-medium text-foreground">Operational Success:</span> Implementing strategies that result in lower turnover costs and higher sales.</li>
+                      </ul>
+                    </section>
+                    <section>
+                      <h3 className="font-semibold text-foreground mb-2">The Perks (The BrewHub Mutual Agreement)</h3>
+                      <ul className="list-disc pl-5 space-y-2">
+                        <li><span className="font-medium text-foreground">Automated Premium Pay:</span> 1.5x pay for overtime, 1.5x pay for Sundays, and 2.0x for Sunday overtime. (We literally built this into our payroll code—you never have to beg for your correct check).</li>
+                        <li><span className="font-medium text-foreground">&ldquo;Just Cause&rdquo; Protections:</span> We don&apos;t do &ldquo;fired on a whim.&rdquo; We use progressive discipline. You have real job security.</li>
+                        <li><span className="font-medium text-foreground">Free Coffee:</span> Obviously.</li>
+                      </ul>
+                    </section>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <form action={formAction} className="space-y-5">
+                {/* Hidden bot-defense inputs */}
+                <input type="hidden" name="formLoadedAt" value={loadTimeRef.current} />
                 {/* ── Honeypot (invisible to humans) ────────────── */}
                 <div
                   aria-hidden="true"
@@ -261,8 +192,6 @@ export default function CareersPage() {
                     type="text"
                     autoComplete="name"
                     required
-                    value={form.name}
-                    onChange={handleChange}
                     placeholder="Jane Doe"
                     className="w-full px-4 py-3 rounded-lg border border-stone-700 bg-stone-800 text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/50 transition"
                   />
@@ -282,8 +211,6 @@ export default function CareersPage() {
                     type="email"
                     autoComplete="email"
                     required
-                    value={form.email}
-                    onChange={handleChange}
                     placeholder="jane@example.com"
                     className="w-full px-4 py-3 rounded-lg border border-stone-700 bg-stone-800 text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/50 transition"
                   />
@@ -305,8 +232,6 @@ export default function CareersPage() {
                     name="phone"
                     type="tel"
                     autoComplete="tel"
-                    value={form.phone}
-                    onChange={handleChange}
                     placeholder="(215) 555-0100"
                     className="w-full px-4 py-3 rounded-lg border border-stone-700 bg-stone-800 text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/50 transition"
                   />
@@ -324,8 +249,7 @@ export default function CareersPage() {
                     id="availability"
                     name="availability"
                     required
-                    value={form.availability}
-                    onChange={handleChange}
+                    defaultValue=""
                     className="w-full px-4 py-3 rounded-lg border border-stone-700 bg-stone-800 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/50 transition appearance-none"
                   >
                     <option value="" disabled>
@@ -356,8 +280,6 @@ export default function CareersPage() {
                     name="scenario_answer"
                     required
                     rows={5}
-                    value={form.scenario_answer}
-                    onChange={handleChange}
                     placeholder="Share your experience here…"
                     className="w-full px-4 py-3 rounded-lg border border-stone-700 bg-stone-800 text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/50 transition resize-y min-h-[120px]"
                   />
@@ -423,8 +345,6 @@ export default function CareersPage() {
                     name="vibe_check"
                     type="text"
                     required
-                    value={form.vibe_check}
-                    onChange={handleChange}
                     placeholder="Type the city name…"
                     className="w-full px-4 py-3 rounded-lg border border-stone-700 bg-stone-800 text-white placeholder-stone-600 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500/50 transition"
                   />
@@ -433,15 +353,10 @@ export default function CareersPage() {
                 {/* Submit */}
                 <button
                   type="submit"
-                  disabled={loading || uploading}
+                  disabled={isPending}
                   className="w-full flex items-center justify-center gap-2 py-3.5 rounded-lg font-bold text-sm tracking-widest uppercase bg-amber-600 hover:bg-amber-500 text-white active:scale-[0.99] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                 >
-                  {uploading ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" />
-                      Uploading resume…
-                    </>
-                  ) : loading ? (
+                  {isPending ? (
                     <>
                       <Loader2 size={16} className="animate-spin" />
                       Submitting…

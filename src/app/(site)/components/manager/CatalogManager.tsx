@@ -4,6 +4,7 @@ import { useOpsSessionOptional } from "@/components/OpsGate";
 import { fetchOps } from "@/utils/ops-api";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import { RefreshCw } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 /**
  * Sanitise an image URL: only allows https:// (and http://localhost for dev).
@@ -825,34 +826,16 @@ export default function CatalogManager() {
       })()}
 
       {/* ── Shrinkage Report Modal ───────────────────────────── */}
-      {shrinkageTarget && (
-        <>
-          <div
-            className="fixed inset-0 bg-black/60 z-50"
-            onClick={closeShrinkage}
-            aria-hidden
-          />
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div
-              className="bg-stone-950 border border-stone-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-orange-400">📋 Report Shrinkage</h3>
-                <button
-                  type="button"
-                  onClick={closeShrinkage}
-                  className="text-stone-400 hover:text-white text-xl leading-none"
-                  aria-label="Close"
-                >
-                  ✕
-                </button>
-              </div>
+      <Dialog open={!!shrinkageTarget} onOpenChange={(open) => { if (!open) closeShrinkage(); }}>
+        <DialogContent className="max-w-md bg-stone-950 border-stone-800 rounded-2xl shadow-2xl space-y-4">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold text-orange-400">📋 Report Shrinkage</DialogTitle>
+          </DialogHeader>
 
               <p className="text-sm text-stone-300">
-                Product: <strong>{shrinkageTarget.name}</strong>
-                {shrinkageTarget.stock_quantity !== null && (
-                  <> — Current stock: <strong>{shrinkageTarget.stock_quantity}</strong></>
+                Product: <strong>{shrinkageTarget?.name}</strong>
+                {shrinkageTarget?.stock_quantity !== null && (
+                  <> — Current stock: <strong>{shrinkageTarget?.stock_quantity}</strong></>
                 )}
               </p>
 
@@ -930,10 +913,8 @@ export default function CatalogManager() {
               >
                 {shrinkageSaving ? "Recording…" : "Record Shrinkage & Decrement Stock"}
               </button>
-            </div>
-          </div>
-        </>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* Overlay */}
       {drawerOpen && (
@@ -1074,7 +1055,7 @@ export default function CatalogManager() {
           {/* Price */}
           <div>
             <label htmlFor="catalog-price" className="block text-sm text-stone-400 mb-1">
-              Price ($)
+              Final Price (Tax-Inclusive) ($)
             </label>
             <input
               id="catalog-price"
@@ -1092,6 +1073,9 @@ export default function CatalogManager() {
                          text-stone-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="4.50"
             />
+            <p className="text-xs text-stone-500 mt-1">
+              Enter the exact final price the customer will pay. The system will automatically extract the 8% Philadelphia sales tax for receipts and accounting at checkout.
+            </p>
           </div>
 
           {/* Stock Quantity */}

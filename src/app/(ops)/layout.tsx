@@ -1,5 +1,6 @@
 // src/app/(ops)/layout.tsx
 import type { Metadata } from "next";
+import { Toaster } from "sonner";
 import OpsGate from "@/components/OpsGate";
 import StaffNavigation from "@/components/StaffNavigation";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
@@ -21,6 +22,8 @@ export default function OpsLayout({ children }: { children: React.ReactNode }) {
         {children}
         {/* Floating escape-hatch button — returns staff to their dashboard */}
         <StaffNavigation />
+        {/* Global toast provider for all ops pages (Sonner) */}
+        <Toaster position="top-right" theme="dark" richColors />
       </OpsGate>
     </div>
   );

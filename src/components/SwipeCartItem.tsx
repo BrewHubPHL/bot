@@ -55,7 +55,7 @@ export default function SwipeCartItem({
   const startRef = useRef<{ x: number; y: number; locked: boolean } | null>(null);
 
   const lineTotal =
-    (item.price_cents + item.modifiers.reduce((s, m) => s + m.price_cents * m.quantity, 0)) * item.quantity;
+    ((Number(item.price_cents) || 0) + item.modifiers.reduce((s, m) => s + (Number(m.price_cents) || 0) * m.quantity, 0)) * item.quantity;
 
   /* ---- Touch handlers ---- */
   const onTouchStart = useCallback(

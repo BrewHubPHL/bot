@@ -99,4 +99,7 @@ const oauthBucket = createTokenBucket({ capacity: 5, refillRate: 1, refillInterv
 // Staff / manager dashboard polling: 20 per key per 60s
 const staffBucket = createTokenBucket({ capacity: 20, refillRate: 1, refillIntervalMs: 3000 });
 
-module.exports = { createTokenBucket, ttsBucket, chatBucket, orderBucket, publicBucket, merchPayBucket, formBucket, oauthBucket, staffBucket };
+// WebAuthn login: 5 attempts per IP per 60s
+const webauthnBucket = createTokenBucket({ capacity: 5, refillRate: 1, refillIntervalMs: 12000 });
+
+module.exports = { createTokenBucket, ttsBucket, chatBucket, orderBucket, publicBucket, merchPayBucket, formBucket, oauthBucket, staffBucket, webauthnBucket };

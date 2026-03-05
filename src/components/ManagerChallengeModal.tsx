@@ -1,14 +1,17 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Shield, Loader2, AlertCircle, CheckCircle2, X, KeyRound } from "lucide-react";
+import { Shield, Loader2, AlertCircle, CheckCircle2, KeyRound } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
 /* ─── Types ────────────────────────────────────────────── */
-interface ChallengeResult {
-  nonce: string;
-  action_type: string;
-}
-
 interface ManagerChallengeModalProps {
   /** The action type this challenge is for (e.g. 'fix_clock', 'adjust_hours') */
   actionType: string;
@@ -44,7 +47,6 @@ export default function ManagerChallengeModal({
   const [error, setError] = useState("");
   const [verifying, setVerifying] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup success timer on unmount
@@ -115,20 +117,12 @@ export default function ManagerChallengeModal({
     };
   }, [step]);
 
-  // Focus input when entering verify step
-  useEffect(() => {
-    if (step === "verify") {
-      const t = setTimeout(() => inputRef.current?.focus(), 100);
-      return () => clearTimeout(t);
-    }
-  }, [step]);
-
   const handleProceedToVerify = useCallback(() => {
     setStep("verify");
   }, []);
 
-  const handleVerify = useCallback(async () => {
-    if (userCode.length !== 6) {
+  const handleVerify = useCallback(async (code: string) => {
+    if (code.length !== 6) {
       setError("Enter the 6-digit code");
       return;
     }
@@ -145,7 +139,7 @@ export default function ManagerChallengeModal({
           "X-BrewHub-Action": "true",
         },
         credentials: "include",
-        body: JSON.stringify({ mode: "verify", code: userCode, nonce }),
+        body: JSON.stringify({ mode: "verify", code, nonce }),
       });
 
       const data = await res.json();
@@ -166,37 +160,31 @@ export default function ManagerChallengeModal({
     } finally {
       setVerifying(false);
     }
-  }, [userCode, nonce, token, onSuccess]);
+  }, [nonce, token, onSuccess]);
 
-  // Auto-submit on 6 digits
-  useEffect(() => {
-    if (userCode.length === 6 && !verifying && step === "verify") {
-      handleVerify();
-    }
-  }, [userCode, verifying, step, handleVerify]);
+  const handleOtpChange = useCallback(
+    (value: string) => {
+      setUserCode(value);
+      setError("");
+      if (value.length === 6 && !verifying && step === "verify") {
+        handleVerify(value);
+      }
+    },
+    [verifying, step, handleVerify],
+  );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 relative">
-        {/* Close button */}
-        <button
-          onClick={onCancel}
-          className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors"
-          aria-label="Cancel"
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-amber-600/20 flex items-center justify-center">
+    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <DialogContent className="bg-zinc-900 border-zinc-700 rounded-2xl shadow-2xl max-w-md [&>button]:text-zinc-500 [&>button]:hover:text-white">
+        <DialogHeader className="flex-row items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-600/20 flex items-center justify-center shrink-0">
             <Shield className="w-5 h-5 text-amber-400" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">Manager Verification</h2>
-            <p className="text-zinc-400 text-sm">{actionDescription}</p>
+            <DialogTitle className="text-lg font-bold text-white">Manager Verification</DialogTitle>
+            <DialogDescription className="text-zinc-400 text-sm">{actionDescription}</DialogDescription>
           </div>
-        </div>
+        </DialogHeader>
 
         {/* ── Loading ── */}
         {step === "loading" && (
@@ -241,65 +229,24 @@ export default function ManagerChallengeModal({
             <p className="text-zinc-400 text-sm mb-4 text-center">
               Enter the 6-digit code to authorize this action:
             </p>
-            <div className="flex justify-center gap-2 mb-4">
-              {[0, 1, 2, 3, 4, 5].map((i) => (
-                <div
-                  key={i}
-                  className={`w-10 h-12 border rounded-lg flex items-center justify-center text-xl font-mono font-bold transition-all ${
-                    i < userCode.length
-                      ? "bg-amber-600/20 border-amber-500 text-amber-400"
-                      : "bg-zinc-800 border-zinc-600 text-zinc-500"
-                  }`}
-                >
-                  {userCode[i] || "·"}
-                </div>
-              ))}
-            </div>
-            {/* Hidden input for keyboard capture */}
-            <input
-              ref={inputRef}
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              value={userCode}
-              onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, "").slice(0, 6);
-                setUserCode(val);
-                setError("");
-              }}
-              className="sr-only"
-              autoFocus
-            />
-            {/* Numeric keypad for touch devices */}
-            <div className="grid grid-cols-3 gap-2 max-w-xs mx-auto mb-4">
-              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((d) =>
-                d === "" ? (
-                  <div key="empty" />
-                ) : d === "⌫" ? (
-                  <button
-                    key="del"
-                    onClick={() => setUserCode((prev) => prev.slice(0, -1))}
-                    className="h-12 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-lg transition-colors touch-manipulation"
-                  >
-                    ⌫
-                  </button>
-                ) : (
-                  <button
-                    key={d}
-                    onClick={() =>
-                      setUserCode((prev) => {
-                        if (prev.length >= 6) return prev;
-                        return prev + d;
-                      })
-                    }
-                    disabled={verifying}
-                    className="h-12 rounded-lg bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 text-white text-lg font-medium transition-colors disabled:opacity-50 touch-manipulation"
-                  >
-                    {d}
-                  </button>
-                )
-              )}
+            <div className="flex justify-center mb-4">
+              <InputOTP
+                maxLength={6}
+                value={userCode}
+                onChange={handleOtpChange}
+                disabled={verifying}
+                autoFocus
+              >
+                <InputOTPGroup className="gap-2">
+                  {[0, 1, 2, 3, 4, 5].map((i) => (
+                    <InputOTPSlot
+                      key={i}
+                      index={i}
+                      className="w-10 h-12 rounded-lg border bg-zinc-800 border-zinc-600 text-xl font-mono font-bold text-amber-400 ring-amber-500 first:rounded-l-lg last:rounded-r-lg"
+                    />
+                  ))}
+                </InputOTPGroup>
+              </InputOTP>
             </div>
             <p className="text-zinc-500 text-xs text-center">
               Expires in {expiresIn}s
@@ -336,7 +283,7 @@ export default function ManagerChallengeModal({
             Close
           </button>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -31,6 +31,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { checkQuota } = require('./_usage');
 const { orderBucket } = require('./_token-bucket');
 const { sanitizeInput } = require('./_sanitize');
+const { calculateTaxInclusive } = require('./_pricing');
 
 // ═══════════════════════════════════════════════════════════════════
 // ALLERGEN / DIETARY / MEDICAL SAFETY LAYER
@@ -274,12 +275,19 @@ exports.handler = async (event) => {
     const safeCustomerName = sanitizeInput(customer_name).slice(0, 100) || 'AI Order';
     const safeNotes = notes ? sanitizeInput(notes).slice(0, 500) : null;
 
+    // ── Tax-inclusive pricing (Philadelphia 8%) ──
+    // Menu prices are tax-inclusive — totalCents IS the final customer price.
+    // Back-calculate subtotal & tax for accounting records.
+    const { subtotalCents, taxCents: taxAmountCents, totalCents: grandTotalCents } = calculateTaxInclusive(totalCents);
+
     // Create order in database
     const { data: order, error: orderErr } = await supabase
       .from('orders')
       .insert({
         status: 'unpaid',
-        total_amount_cents: totalCents,
+        subtotal_cents: subtotalCents,
+        tax_amount_cents: taxAmountCents,
+        total_amount_cents: grandTotalCents,
         customer_name: safeCustomerName,
         notes: safeNotes,
       })
@@ -327,11 +335,15 @@ exports.handler = async (event) => {
       order_id: order.id,
       order_number: orderNumber,
       items: validatedItems,
-      total_cents: totalCents,
-      total_dollars: totalCents / 100,
-      total_display: `$${(totalCents / 100).toFixed(2)}`,
+      subtotal_cents: subtotalCents,
+      subtotal_dollars: subtotalCents / 100,
+      tax_amount_cents: taxAmountCents,
+      tax_dollars: taxAmountCents / 100,
+      total_cents: grandTotalCents,
+      total_dollars: grandTotalCents / 100,
+      total_display: `$${(grandTotalCents / 100).toFixed(2)}`,
       customer_name: customer_name || null,
-      message: `Order placed successfully! Order number: ${orderNumber}. ${itemSummary} - Total: $${(totalCents / 100).toFixed(2)}. It will be ready shortly.`,
+      message: `Order placed successfully! Order number: ${orderNumber}. ${itemSummary} — Total: $${(grandTotalCents / 100).toFixed(2)} (includes $${(taxAmountCents / 100).toFixed(2)} PA/Philly tax). It will be ready shortly.`,
     });
 
   } catch (err) {

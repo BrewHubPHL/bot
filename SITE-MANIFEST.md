@@ -84,12 +84,13 @@
 |---|---|---|
 | Square | Payments, Terminal, Webhooks, Checkout | `SQUARE_PRODUCTION_TOKEN` |
 | Supabase | Postgres, Realtime, Auth, Storage | `SUPABASE_SERVICE_ROLE_KEY` |
-| Anthropic Claude | AI text chat with tool use | `CLAUDE_API_KEY` |
+| Anthropic Claude | AI text chat via Vercel AI SDK (`ai` + `@ai-sdk/anthropic`) | `CLAUDE_API_KEY` |
 | ElevenLabs | Text-to-Speech (Elise voice) | `ELEVENLABS_API_KEY` |
 | Twilio | SMS notifications | `TWILIO_ACCOUNT_SID` |
 | Resend | Transactional email | `RESEND_API_KEY` |
 | Google Sheets | Marketing data sync | `GOOGLE_SCRIPT_URL` |
 | Google Gemini | AI testing scripts, marketing | `GEMINI_API_KEY` |
+| Sonner | Toast notifications across ops pages and customer-facing order confirmations (EliseChat) | _(none — client-only)_ |
 
 ---
 
@@ -112,6 +113,7 @@
 | `_ip-guard.js` | Rate limiting with timing-safe comparison |
 | `_ip-hash.js` | SHA-256 IP hashing with salt for GDPR-compliant logging |
 | `_receipt.js` | 32-column thermal receipt generator |
+| `_pricing.js` | Tax-inclusive pricing utility (`calculateTaxInclusive`) |
 | `_sanitize.js` | Input sanitization (strip tags, scripts, event handlers) |
 | `_token-bucket.js` | In-memory token bucket for chat/TTS/order rate limiting |
 | `_usage.js` | DB-backed daily API quota tracking (circuit breaker) |
@@ -131,6 +133,7 @@
 | `record-agreement-signature.js` | POST | Staff PIN | Records a staff member's digital signature on the Mutual Working Agreement. Verifies PIN via `verify_staff_pin` RPC, validates body `staff_id` matches session identity, **canonically normalizes** agreement text via `getCanonicalAgreementText` (`_crypto-utils.js`), hashes (SHA-256) server-side, logs normalization delta, then calls the **atomic** `record_agreement_signature` Postgres RPC (insert + `contract_signed` update in one transaction). Notifies managers via Resend. |
 | `get-signed-certificate.js` | GET | Staff PIN | Certificate of Agreement endpoint. Re-hydrates agreement template, canonically normalizes, re-derives SHA-256 hash, compares against stored hash. Returns `{ staff_name, version_tag, signed_at, signature_id, stored_hash, derived_hash, integrity_ok }`. Staff see own cert only; managers may view any. |
 | `get-schema-health.js` | GET | Manager PIN | Database schema auditor. Queries `information_schema` to verify `agreement_signatures` and `maintenance_logs` tables with full column + type verification (including `cost` as `integer`). Returns structured health report (`healthy`, `missingColumns`, `typeMismatches`) so managers know if a migration is required. |
+| `get-override-log.js` | GET | Manager PIN | Returns paginated `manager_override_log` entries (limit/offset). Redacts IP addresses. Used by the `ManagerOverrideLog` Shadcn Data Table component. |
 
 ---
 
@@ -170,8 +173,11 @@
 | `20260302_scheduled_shifts_staff_fk` | Repairs `scheduled_shifts.user_id` FK to reference `staff_directory(id)` and cascades deletes safely |
 | `20260302_specialty_coffee_menu` | Adds `long_description` (TEXT) and `allowed_modifiers` (JSONB) to `merch_products`; archives legacy menu items; inserts 7 curated specialty coffee items |
 | `20260302_add_staff_phone` | Adds nullable `phone TEXT` column to `staff_directory`; inherited by `v_staff_status` view |
+| `20260305_pickup_code_generation` | Adds `code_generated` attempt type + `code_hash` column to `parcel_pickup_log` for secure high-value pickup code generation |
 | `agreement_signatures` (table) | Immutable audit trail for staff agreement signatures: `id` (uuid PK), `staff_id` (uuid FK), `version_tag`, `ip_address` (hashed), `user_agent`, `sha256_hash`, `signed_at`, `created_at`. Verified by `get-schema-health.js`. |
 | `20260304_schema85_onboarding_gate` | Ensures `contract_signed` + `onboarding_complete` columns on `staff_directory`. Updates `verify_staff_pin()` to return them in login/verify flow for OpsGate onboarding gate. |
+| `20260305_add_vector_menu` | Enables pgvector (`CREATE EXTENSION vector`). Adds `embedding` column to `merch_products` with IVFFlat index. Creates `match_menu_items(query_embedding, match_threshold, match_count)` RPC for cosine similarity search. SECURITY INVOKER — respects existing RLS. |
+| `20260305_switch_to_cohere_vectors` | Drops old 1536-d embedding column/index and recreates as `embedding vector(1024)` for Cohere `embed-english-v3.0`. Updates `match_menu_items` RPC to accept `vector(1024)`. Re-grants EXECUTE to `authenticated`/`anon`. |
 
 ---
 
@@ -205,7 +211,7 @@
 | `/manager/assets` | Middleware PIN | Equipment asset TCO & maintenance health dashboard |
 | `/staff-hub` | Middleware PIN | Staff portal (clock, orders, inventory) |
 | `/staff-hub/onboarding` | Middleware PIN | Onboarding: scroll-to-sign Mutual Working Agreement (AgreementViewer). Unsigned staff are force-redirected here by OpsGate. |
-| `/parcels-pickup` | Middleware PIN | Parcel pickup workflow |
+| `/parcels-pickup` | Middleware PIN | Parcel pickup workflow (includes `generatePickupCode` Server Action for high-value parcels) |
 
 ### API Routes
 | Route | Auth | Description |
@@ -232,6 +238,8 @@
 | `AlertBannerStack.tsx` | `src/components/manager/` | Stacking banner list for P1 (Amber) and P2 (Blue) alerts. Sorted by priority then age. |
 | `SystemHealthBadge.tsx` | `src/components/manager/` | Header badge showing total active alert count with color-coded severity indicator. Scrolls to alert stack on click. |
 | `AlertRenderer.tsx` | `src/components/manager/` | Orchestrator: renders AlertModal (P0) and AlertBannerStack (P1/P2) together. |
+| `SecurityAlertToaster.tsx` | `src/components/manager/` | Realtime Sonner toast for `rate_limit_triggered` inserts on `manager_override_log`. Subscribes via Supabase Realtime; only active with a valid staff_pin session. |
+| `ManagerOverrideLog.tsx` | `src/components/manager/` | Shadcn Data Table view of `manager_override_log`. Sortable, paginated, with dropdown actions. Red Badge on `none_legacy` challenge method. Fetches from `get-override-log`. |
 | `PayrollSection.tsx` | `(site)/components/manager/` | Payroll management |
 | `ProfitShareCard.tsx` | `(site)/components/manager/` | Team Profit Share card: progress bar to $5k floor, Staff Pool amount, team hours, bonus-per-hour, eligible staff count with vesting tooltip |
 | `CrmInsights.tsx` | `(site)/components/manager/` | Unified CRM breakdown (stat cards + top drinks) |

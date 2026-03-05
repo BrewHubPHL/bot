@@ -1,12 +1,21 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { toast as sonnerToast } from 'sonner';
 import FullCalendar from '@fullcalendar/react';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import { useOpsSession } from '@/components/OpsGate';
 import { toUserSafeMessage } from '@/lib/errorCatalog';
 import { fetchOps } from '@/utils/ops-api';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,7 +57,6 @@ interface StaffMember {
   role: string;
 }
 
-type ToastState = { msg: string; type: 'success' | 'error' } | null;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -220,17 +228,13 @@ export default function AdminCalendar() {
     employees: EmployeeInShift[];
   } | null>(null);
 
-  // ── Toast state ──────────────────────────────────────────────────────────
-  const [toast, setToast] = useState<ToastState>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventDropLockRef = useRef(false);
 
-  // ── Toast helper ─────────────────────────────────────────────────────────
+  // ── Toast helper (delegates to Sonner) ───────────────────────────────────
 
   const showToast = useCallback((msg: string, type: 'success' | 'error') => {
-    setToast({ msg, type });
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
+    if (type === 'success') sonnerToast.success(msg);
+    else sonnerToast.error(msg);
   }, []);
 
   // ── Data fetching ────────────────────────────────────────────────────────
@@ -295,16 +299,7 @@ export default function AdminCalendar() {
     }
   }, [isModalOpen]);
 
-  // ── Keyboard: Escape closes modal ────────────────────────────────────────
-
-  useEffect(() => {
-    if (!isModalOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsModalOpen(false);
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [isModalOpen]);
+  // Escape handling is built into Shadcn Dialog
 
   // ── Multi-select toggle ──────────────────────────────────────────────────
 
@@ -757,21 +752,19 @@ export default function AdminCalendar() {
       )}
 
       {/* ── Modal (managers only — defense-in-depth) ── */}
-      {isModalOpen && isManager && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-          onClick={() => setIsModalOpen(false)}
-          role="dialog"
-          aria-modal="true"
+      <Dialog open={isModalOpen && isManager} onOpenChange={setIsModalOpen}>
+        <DialogContent
+          className="bg-white sm:max-w-[420px] border-gray-300"
           aria-label={modalMode === 'create' ? 'Assign New Shift' : 'Manage Shift'}
         >
-          <div
-            className="bg-white p-6 rounded-lg shadow-xl w-[420px] max-w-[95vw] border border-gray-300"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-xl font-bold mb-4">
+          <DialogHeader>
+            <DialogTitle>
               {modalMode === 'create' ? 'Assign New Shift' : 'Manage Shift'}
-            </h2>
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              {modalMode === 'create' ? 'Select employees and confirm shift creation' : 'Edit or remove employees from this shift'}
+            </DialogDescription>
+          </DialogHeader>
 
             {/* ── Create mode: multi-select checkboxes ── */}
             {modalMode === 'create' && (
@@ -876,22 +869,22 @@ export default function AdminCalendar() {
                         <div className="mt-2 ml-8 flex items-center gap-2 flex-wrap">
                           <label className="text-xs text-gray-600 flex items-center gap-1">
                             Start
-                            <input
+                            <Input
                               type="time"
                               value={editStart}
                               onChange={(e) => setEditStart(e.target.value)}
                               disabled={submitting}
-                              className="px-2 py-1 border border-gray-300 rounded text-sm"
+                              className="h-8 w-auto px-2 py-1 text-sm"
                             />
                           </label>
                           <label className="text-xs text-gray-600 flex items-center gap-1">
                             End
-                            <input
+                            <Input
                               type="time"
                               value={editEnd}
                               onChange={(e) => setEditEnd(e.target.value)}
                               disabled={submitting}
-                              className="px-2 py-1 border border-gray-300 rounded text-sm"
+                              className="h-8 w-auto px-2 py-1 text-sm"
                             />
                           </label>
                           <button
@@ -945,23 +938,10 @@ export default function AdminCalendar() {
                 </button>
               )}
             </div>
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* ── Toast notification ── */}
-      {toast && (
-        <div
-          role={toast.type === 'error' ? 'alert' : 'status'}
-          className={[
-            'fixed bottom-8 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl shadow-2xl',
-            'flex items-center gap-3 text-sm font-semibold transition-all duration-300',
-            toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white',
-          ].join(' ')}
-        >
-          {toast.type === 'success' ? '✓' : '✗'} {toast.msg}
-        </div>
-      )}
     </div>
   );
 }

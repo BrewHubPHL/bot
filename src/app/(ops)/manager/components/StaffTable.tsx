@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { createPortal } from "react-dom";
+import React, { useCallback, useMemo } from "react";
+import { toast as sonnerToast } from "sonner";
+import { useQueryState, parseAsString, parseAsStringLiteral } from "nuqs";
 import {
   Users,
   Mail,
@@ -13,6 +14,12 @@ import {
   ShieldCheck,
   UserX,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
 /* ================================================================== */
 /*  Types                                                              */
@@ -65,88 +72,39 @@ const ACTIONS = [
 ] as const;
 
 function ActionMenu({ staff, onAction }: ActionMenuProps) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  const openMenu = useCallback(() => {
-    if (!btnRef.current) return;
-    const rect = btnRef.current.getBoundingClientRect();
-    setPos({ top: rect.bottom + 4, left: rect.right - 192 });
-    setOpen(true);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(e.target as Node) &&
-        btnRef.current &&
-        !btnRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
-
   return (
-    <>
-      <button
-        ref={btnRef}
-        onClick={() => (open ? setOpen(false) : openMenu())}
-        aria-haspopup="true"
-        aria-expanded={open}
-        className="p-1.5 rounded-md text-stone-500 hover:text-white hover:bg-stone-700/60
-                   transition-colors focus:outline-none focus:ring-1 focus:ring-amber-500/50"
-        title="Actions"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="p-1.5 rounded-md text-stone-500 hover:text-white hover:bg-stone-700/60
+                     transition-colors focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+          title="Actions"
+        >
+          <EllipsisVertical size={16} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-48 bg-stone-800 ring-1 ring-stone-700 border-stone-700
+                   shadow-xl shadow-black/40"
       >
-        <EllipsisVertical size={16} />
-      </button>
-
-      {open &&
-        pos &&
-        createPortal(
-          <div
-            ref={menuRef}
-            role="menu"
-            className="fixed z-[9999] w-48 rounded-lg bg-stone-800 ring-1 ring-stone-700
-                       shadow-xl shadow-black/40 py-1 animate-in fade-in-0 zoom-in-95"
-            style={{ top: pos.top, left: pos.left }}
+        {ACTIONS.map(({ key, label, Icon }) => (
+          <DropdownMenuItem
+            key={key}
+            onClick={() => onAction(key, staff)}
+            className={[
+              "flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer",
+              key === "deactivate"
+                ? "text-rose-400 focus:bg-rose-500/10 focus:text-rose-300"
+                : "text-stone-300 focus:bg-amber-500/10 focus:text-amber-300",
+            ].join(" ")}
           >
-            {ACTIONS.map(({ key, label, Icon }) => (
-              <button
-                key={key}
-                role="menuitem"
-                onClick={() => {
-                  onAction(key, staff);
-                  setOpen(false);
-                }}
-                className={[
-                  "flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors",
-                  key === "deactivate"
-                    ? "text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
-                    : "text-stone-300 hover:bg-amber-500/10 hover:text-amber-300",
-                ].join(" ")}
-              >
-                <Icon size={14} className="shrink-0" />
-                {label}
-              </button>
-            ))}
-          </div>,
-          document.body,
-        )}
-    </>
+            <Icon size={14} className="shrink-0" />
+            {label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -162,18 +120,17 @@ export default function StaffTable({
   loading: boolean;
   error: string | null;
 }) {
-  /* ── Search & filter state ──────────────────────────── */
-  const [searchTerm, setSearchTerm] = useState("");
-  const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
+  /* ── Search & filter state (URL-synced for bookmarkability) ── */
+  const [searchTerm, setSearchTerm] = useQueryState("q", parseAsString.withDefault(""));
+  const [roleFilter, setRoleFilter] = useQueryState("role",
+    parseAsStringLiteral(["all", "Manager", "Barista", "Admin", "Owner"] as const).withDefault("all")
+  );
 
-  /* ── Toast state ────────────────────────────────────── */
-  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /* ── Toast helper (delegates to Sonner) ──────────────── */
 
   const showToast = useCallback((msg: string, type: "success" | "error" = "success") => {
-    setToast({ msg, type });
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 3500);
+    if (type === "success") sonnerToast.success(msg);
+    else sonnerToast.error(msg);
   }, []);
 
   /* ── Action handler (placeholders) ──────────────────── */
@@ -452,18 +409,7 @@ export default function StaffTable({
       )}
 
       {/* ── Toast notification ── */}
-      {toast && (
-        <div
-          role={toast.type === "error" ? "alert" : "status"}
-          className={[
-            "fixed bottom-8 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl shadow-2xl",
-            "flex items-center gap-3 text-sm font-semibold transition-all duration-300",
-            toast.type === "success" ? "bg-emerald-600 text-white" : "bg-red-600 text-white",
-          ].join(" ")}
-        >
-          {toast.type === "success" ? "✓" : "✗"} {toast.msg}
-        </div>
-      )}
+
     </div>
   );
 }

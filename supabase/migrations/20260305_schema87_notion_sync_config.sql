@@ -9,6 +9,13 @@
 -- trigger functions to read from it.
 --
 -- Idempotent: safe to re-run.
+--
+-- AFTER running this migration, insert the secret via Supabase SQL Editor:
+--
+--   INSERT INTO public.internal_config (key, value)
+--   VALUES ('internal_sync_secret', '<YOUR_SECRET>')
+--   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+--
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ── 1. Config table ──────────────────────────────────────────────────────
@@ -34,10 +41,9 @@ BEGIN
   END IF;
 END$$;
 
--- Upsert the sync secret
-INSERT INTO public.internal_config (key, value)
-VALUES ('internal_sync_secret', 'lNtF5iMep9uTP81OFHfWzfbXe65KICA8Xj9H6NeIh1o=')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+-- Secret must be inserted AFTER migration via Supabase SQL Editor (see header).
+-- The migration only creates the table + webhook URL.
+-- The trigger functions will RAISE WARNING if the secret row is missing.
 
 -- Also store the webhook URL (optional override)
 INSERT INTO public.internal_config (key, value)

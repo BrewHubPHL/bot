@@ -1,6 +1,9 @@
 const { createClient } = require('@supabase/supabase-js');
 const { SquareClient, SquareEnvironment } = require('square');
+const { authorize, json, sanitizedError } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
+const { merchPayBucket } = require('./_token-bucket');
+const { hashIP } = require('./_ip-hash');
 const { confirmPayment } = require('./_process-payment');
 
 const square = new SquareClient({
@@ -39,6 +42,18 @@ exports.handler = async (event) => {
 
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
+
+  const auth = await authorize(event);
+  if (!auth.ok) return auth.response;
+
+  const clientIP = event.headers?.['x-nf-client-connection-ip']
+    || event.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const bucketKey = `poll-merch:${auth.staffId || auth.userId || hashIP(clientIP)}`;
+  const rate = merchPayBucket.consume(bucketKey);
+  if (!rate.allowed) {
+    return { statusCode: 429, headers, body: JSON.stringify({ error: 'Too many requests' }) };
+  }
 
   const origin = (event.headers['origin'] || '').replace(/\/$/, '');
   const referer = (event.headers['referer'] || '');

@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { redactIP } = require('./_ip-hash');
+const { staffBucket } = require('./_token-bucket');
 
 function withSourceComment(query, tag) {
   if (typeof query?.comment === 'function') {
@@ -38,6 +39,17 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return { ...csrfBlock, headers: { ...csrfBlock.headers, ...corsHeaders } };
 
+  // Rate limiting — prevent session-check abuse
+  const clientIp =
+    event.headers['x-nf-client-connection-ip'] ||
+    event.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    '127.0.0.1';
+  const rl = staffBucket.consume('pin-verify:' + clientIp);
+  if (!rl.allowed) {
+    console.warn(`[PIN-VERIFY] Rate limit hit from IP: ${redactIP(clientIp)}`);
+    return { statusCode: 429, headers: corsHeaders, body: JSON.stringify({ error: 'Too many requests. Please wait.' }) };
+  }
+
   // Authenticate (requires PIN token, not JWT)
   const hasCookie = /hub_staff_session=/.test(event.headers?.cookie || '');
   const hasAuth = !!(event.headers?.authorization || event.headers?.Authorization);
@@ -51,9 +63,6 @@ exports.handler = async (event) => {
 
 
   // DB-backed shop_ip_address check for manager/barista
-  const clientIp = event.headers['x-nf-client-connection-ip']
-    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
-    || 'unknown';
   const sessionRole = (auth.role || '').toLowerCase();
 
   if (sessionRole === 'manager' || sessionRole === 'barista') {

@@ -378,21 +378,6 @@ CREATE TABLE public.processed_webhooks (
   payload jsonb,
   CONSTRAINT processed_webhooks_pkey PRIMARY KEY (id)
 );
-CREATE TABLE public.profiles (
-  id uuid NOT NULL,
-  full_name text,
-  phone_number text,
-  favorite_drink text DEFAULT 'Black Coffee'::text,
-  loyalty_points integer DEFAULT 0,
-  barcode_id text,
-  is_vip boolean DEFAULT false,
-  total_orders integer DEFAULT 0,
-  email text,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT profiles_pkey PRIMARY KEY (id),
-  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
-);
 CREATE TABLE public.properties (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   unit_name text NOT NULL,
@@ -444,15 +429,6 @@ CREATE TABLE public.rent_roll (
   notes text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT rent_roll_pkey PRIMARY KEY (id)
-);
-CREATE TABLE public.residents (
-  id integer NOT NULL DEFAULT nextval('residents_id_seq'::regclass),
-  name text NOT NULL,
-  unit_number text,
-  phone text UNIQUE,
-  email text,
-  is_guest boolean NOT NULL DEFAULT false,
-  CONSTRAINT residents_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.revoked_users (
   user_id uuid NOT NULL,

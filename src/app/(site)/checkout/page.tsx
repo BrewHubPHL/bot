@@ -6,13 +6,18 @@ import { ArrowLeft, ShoppingBag, CreditCard, Loader2, CheckCircle, Wallet, Alert
 import Link from 'next/link';
 import Script from 'next/script';
 
+interface CartModifier {
+  name: string;
+  qty: number;
+}
+
 interface CartItem {
   id: string;
   name: string;
-  price_cents: number;
+  base_price_cents: number;
   quantity: number;
   category?: 'menu' | 'merch';
-  customizations?: string[];
+  customizations: CartModifier[];
 }
 
 /* ── Square Web SDK — minimal ambient types ──────────────────────── */
@@ -50,6 +55,24 @@ declare global {
       payments(appId: string, locationId: string): SquarePayments;
     };
   }
+}
+
+/* ── Modifier price lookup (mirrors ShopClient MODIFIER_GROUPS) ─── */
+const MODIFIER_PRICES: Record<string, number> = {
+  'Oat Milk': 75,
+  'Almond Milk': 75,
+  'Vanilla Syrup': 50,
+  'Caramel Syrup': 50,
+  'Chocolate': 75,
+  'Extra Shot': 100,
+};
+
+function lineTotal(item: CartItem): number {
+  const base = Number(item.base_price_cents) || 0;
+  const mods = (item.customizations ?? []).reduce(
+    (s: number, m: CartModifier) => s + (Number(MODIFIER_PRICES[m.name]) || 0) * (m.qty || 1), 0
+  );
+  return (base + mods) * item.quantity;
 }
 
 export default function CheckoutPage() {
@@ -95,7 +118,16 @@ export default function CheckoutPage() {
   // through before the re-render disables the button.
   const submittingRef = useRef(false);
 
-  const totalCents = cart.reduce((sum, item) => sum + (item.price_cents * item.quantity), 0);
+  const totalCents = cart.reduce((sum, item) => {
+    const base = Number(item.base_price_cents) || 0;
+    const mods = (item.customizations ?? []).reduce(
+      (s, m) => s + (Number(MODIFIER_PRICES[m.name]) || 0) * (m.qty || 1), 0
+    );
+    return sum + (base + mods) * item.quantity;
+  }, 0);
+  // Tax-inclusive pricing: menu prices include 8% Philadelphia sales tax
+  const subtotalCents = Math.round(totalCents / 1.08);
+  const taxCents = totalCents - subtotalCents;
   const hasMerch = cart.some((item) => item.category === 'merch');
 
   // Force pickup when cart has no merch (no shipping hot coffee!)
@@ -500,16 +532,24 @@ export default function CheckoutPage() {
                       <div>
                         <p className="font-medium text-[var(--hub-espresso)]">{item.name}</p>
                         {item.customizations && item.customizations.length > 0 && (
-                          <p className="text-xs text-stone-400">{item.customizations.join(', ')}</p>
+                          <p className="text-xs text-stone-400">{item.customizations.map(m => m.qty > 1 ? `${m.name} (x${m.qty})` : m.name).join(', ')}</p>
                         )}
                         <p className="text-sm text-stone-500">Qty: {item.quantity}</p>
                       </div>
-                      <p className="font-semibold">${((item.price_cents * item.quantity) / 100).toFixed(2)}</p>
+                      <p className="font-semibold">${(lineTotal(item) / 100).toFixed(2)}</p>
                     </div>
                   ))}
                 </div>
-                <div className="border-t border-stone-200 pt-4">
+                <div className="border-t border-stone-200 pt-4 space-y-2">
                   <div className="flex justify-between items-center">
+                    <span className="text-sm text-stone-600">Subtotal</span>
+                    <span className="text-sm text-stone-600">${(subtotalCents / 100).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-stone-400 italic">Includes 8% PA/Philly Sales Tax</span>
+                    <span className="text-xs text-stone-400">${(taxCents / 100).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t border-stone-100">
                     <span className="text-lg font-semibold text-[var(--hub-espresso)]">Total</span>
                     <span className="text-2xl font-bold text-[var(--hub-brown)]">${(totalCents / 100).toFixed(2)}</span>
                   </div>

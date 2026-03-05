@@ -31,6 +31,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useQueryState, parseAsString } from "nuqs";
 import { useOpsSession } from "@/components/OpsGate";
 import { useParcelSync } from "@/hooks/useParcelSync";
 import { cn } from "@/lib/utils";
@@ -227,8 +228,8 @@ export default function ParcelDashboardPage() {
   /** Sequence guard — discard out-of-order broadcast messages */
   const lastProcessedSeqRef = useRef(0);
 
-  /* ─── Manual Lookup State ────────────────────────────────────── */
-  const [searchQuery, setSearchQuery] = useState("");
+  /* ─── Manual Lookup State (URL-synced for bookmarkability) ──── */
+  const [searchQuery, setSearchQuery] = useQueryState("q", parseAsString.withDefault(""));
   const [searchResults, setSearchResults] = useState<ResidentInfo[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchDone, setSearchDone] = useState(false);

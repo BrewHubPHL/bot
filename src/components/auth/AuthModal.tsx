@@ -15,6 +15,13 @@
 
 import { useState, useRef, useEffect, useCallback, type FormEvent } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 /* ── Types ── */
 type AuthView = "login" | "register";
@@ -78,24 +85,6 @@ export default function AuthModal({ open, onClose, initialView = "login" }: Auth
     submittingRef.current = false;
     onClose();
   }, [onClose]);
-
-  /* ─── Backdrop click ─── */
-  const handleBackdropClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (e.target === e.currentTarget) handleClose();
-    },
-    [handleClose],
-  );
-
-  /* ─── Escape key ─── */
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, handleClose]);
 
   /* ─── Auth handler ─── */
   const handleAuth = async (e: FormEvent) => {
@@ -164,39 +153,19 @@ export default function AuthModal({ open, onClose, initialView = "login" }: Auth
     setSuccessMsg("");
   };
 
-  /* ─── Don't render when closed ─── */
-  if (!open) return null;
-
   return (
-    /* Backdrop */
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
-      onClick={handleBackdropClick}
-      role="dialog"
-      aria-modal="true"
-      aria-label={view === "login" ? "Log in to BrewHub" : "Create a BrewHub account"}
-    >
-      {/* Modal card */}
-      <div className="relative w-full max-w-md rounded-2xl border-2 border-[var(--hub-tan)] bg-white/95 shadow-2xl backdrop-blur-lg p-8">
-        {/* Close button */}
-        <button
-          type="button"
-          onClick={handleClose}
-          aria-label="Close"
-          className="absolute top-4 right-4 text-2xl leading-none text-stone-400 hover:text-stone-700 transition-colors"
-        >
-          &times;
-        </button>
-
-        {/* Title */}
-        <h2 className="text-center font-[var(--font-playfair)] text-3xl font-bold text-[var(--hub-espresso)] mb-1">
-          {view === "login" ? "Welcome Back" : "Join BrewHub"}
-        </h2>
-        <p className="text-center text-sm text-stone-500 mb-6">
-          {view === "login"
-            ? "Sign in to your account"
-            : "Create your free account"}
-        </p>
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) handleClose(); }}>
+      <DialogContent className="w-full max-w-md rounded-2xl border-2 border-[var(--hub-tan)] bg-white/95 shadow-2xl backdrop-blur-lg p-8 [&>button]:text-stone-400 [&>button]:hover:text-stone-700">
+        <DialogHeader className="text-center">
+          <DialogTitle className="font-[var(--font-playfair)] text-3xl font-bold text-[var(--hub-espresso)]">
+            {view === "login" ? "Welcome Back" : "Join BrewHub"}
+          </DialogTitle>
+          <DialogDescription className="text-sm text-stone-500">
+            {view === "login"
+              ? "Sign in to your account"
+              : "Create your free account"}
+          </DialogDescription>
+        </DialogHeader>
 
         {/* Success banner */}
         {successMsg && (
@@ -325,7 +294,7 @@ export default function AuthModal({ open, onClose, initialView = "login" }: Auth
             </>
           )}
         </p>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -13,7 +13,9 @@ const nextConfig: NextConfig = {
   },
   // Disable automatic scroll restoration - we handle it manually
   experimental: {
+    viewTransition: true,
     scrollRestoration: false,
+    serverActions: { bodySizeLimit: "6mb" },
   },
   // Allow .html files to be served from public folder
   async rewrites() {

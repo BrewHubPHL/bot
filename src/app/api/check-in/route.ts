@@ -22,6 +22,11 @@ function getClientIp(req: NextRequest): string {
 }
 
 export async function POST(request: NextRequest) {
+  // CSRF enforcement — must be an explicit BrewHub action
+  if (request.headers.get("x-brewhub-action") !== "true") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const ip = getClientIp(request);
 
   if (!limiter.check(ip)) {

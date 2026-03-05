@@ -5,6 +5,7 @@ import { useOpsSession } from "@/components/OpsGate";
 import { fetchOps, OPS_API_BASE } from "@/utils/ops-api";
 import { getCanonicalAgreementText } from "@/lib/crypto-utils";
 import { CURRENT_AGREEMENT_VERSION } from "@/lib/agreement-constants";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 /**
  * AgreementViewer — Displays the employee's hydrated staff agreement in a
@@ -81,6 +82,7 @@ export default function AgreementViewer({
   const [checkpointsSeen, setCheckpointsSeen] = useState<Set<Checkpoint>>(new Set());
   const [timeRemaining, setTimeRemaining] = useState(MIN_READ_TIME_SEC);
   const [isPageVisible, setIsPageVisible] = useState(true);
+  const [contentFitsViewport, setContentFitsViewport] = useState(false);
 
   const [pin, setPin] = useState("");
   const [signing, setSigning] = useState(false);
@@ -153,9 +155,32 @@ export default function AgreementViewer({
     } catch { /* sessionStorage unavailable */ }
   }, []);
 
-  // ── Intersection Observer: 3 scroll checkpoints ─────────────
+  // ── Viewport-fit detection: auto-pass scroll gate if no scrollbar ──
   useEffect(() => {
     if (engagementComplete || !agreement) return;
+    const root = scrollRef.current;
+    if (!root) return;
+
+    const checkFit = () => {
+      const fits = root.scrollHeight <= root.clientHeight;
+      setContentFitsViewport(fits);
+      if (fits) {
+        // Content is fully visible — auto-satisfy all checkpoints
+        setCheckpointsSeen(new Set<Checkpoint>(ALL_CHECKPOINTS as unknown as Checkpoint[]));
+      }
+    };
+
+    // Check once on mount, then watch for resizes (e.g. window maximize)
+    checkFit();
+    const ro = new ResizeObserver(checkFit);
+    ro.observe(root);
+
+    return () => ro.disconnect();
+  }, [engagementComplete, agreement]);
+
+  // ── Intersection Observer: 3 scroll checkpoints ─────────────
+  useEffect(() => {
+    if (engagementComplete || !agreement || contentFitsViewport) return;
     const root = scrollRef.current;
     if (!root) return;
 
@@ -182,7 +207,7 @@ export default function AgreementViewer({
     sentinels.forEach((el) => el && observer.observe(el));
 
     return () => observer.disconnect();
-  }, [engagementComplete, agreement]);
+  }, [engagementComplete, agreement, contentFitsViewport]);
 
   // ── Page Visibility API: pause timer when tab hidden ────────
   useEffect(() => {
@@ -478,14 +503,14 @@ export default function AgreementViewer({
       {/* ── Engagement feedback / countdown ──────────────── */}
       {!engagementComplete && (
         <div className="flex flex-col items-center gap-1.5 text-sm">
-          {!allCheckpointsSeen && (
+          {!allCheckpointsSeen && !contentFitsViewport && (
             <p className="text-amber-700 font-medium animate-pulse">
               ↓ Scroll through the full agreement to continue ↓
             </p>
           )}
           {allCheckpointsSeen && timeRemaining > 0 && (
             <p className="text-amber-700 font-medium">
-              ✓ Scrolled — finishing review…
+              {contentFitsViewport ? "✓ Full agreement visible" : "✓ Scrolled"} — finishing review…
             </p>
           )}
           {timeRemaining > 0 && (
@@ -494,17 +519,19 @@ export default function AgreementViewer({
             </p>
           )}
           {/* Checkpoint progress dots */}
-          <div className="flex gap-2 mt-1" aria-label="Reading progress">
-            {ALL_CHECKPOINTS.map((cp) => (
-              <span
-                key={cp}
-                className={`h-2.5 w-2.5 rounded-full transition-colors ${
-                  checkpointsSeen.has(cp) ? "bg-green-500" : "bg-gray-300"
-                }`}
-                title={`Section: ${cp}`}
-              />
-            ))}
-          </div>
+          {!contentFitsViewport && (
+            <div className="flex gap-2 mt-1" aria-label="Reading progress">
+              {ALL_CHECKPOINTS.map((cp) => (
+                <span
+                  key={cp}
+                  className={`h-2.5 w-2.5 rounded-full transition-colors ${
+                    checkpointsSeen.has(cp) ? "bg-green-500" : "bg-gray-300"
+                  }`}
+                  title={`Section: ${cp}`}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -553,71 +580,69 @@ export default function AgreementViewer({
       )}
 
       {/* ── Re-auth Recovery Modal (401 mid-flow) ──────── */}
-      {showReauthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6">
-            <div className="flex flex-col items-center gap-4">
-              {/* Lock icon */}
-              <div className="h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-              </div>
-
-              {/* Title & explanation */}
-              <h3 className="text-lg font-bold text-gray-900">Session Expired</h3>
-              <p className="text-sm text-gray-600 text-center leading-relaxed">
-                Your session timed out during signing. Re-enter your 6-digit PIN to
-                continue&nbsp;&mdash;&nbsp;your progress has been saved.
-              </p>
-
-              {/* Error display */}
-              {reauthError && (
-                <p className="text-red-600 text-sm font-medium bg-red-50 px-4 py-2 rounded-lg w-full text-center">
-                  {reauthError}
-                </p>
-              )}
-
-              {/* PIN form */}
-              <form onSubmit={handleReauthSubmit} className="flex flex-col items-center gap-3 w-full">
-                <input
-                  ref={reauthInputRef}
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  maxLength={6}
-                  value={reauthPin}
-                  onChange={handleReauthPinChange}
-                  placeholder="••••••"
-                  disabled={reauthLoading}
-                  className="w-40 text-center text-2xl tracking-[0.3em] border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50"
-                />
-
-                <button
-                  type="submit"
-                  disabled={reauthPin.length !== 6 || reauthLoading}
-                  className="w-full px-6 py-2.5 rounded-lg font-semibold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {reauthLoading
-                    ? signingPhase === "retrying"
-                      ? "Verifying & Sealing…"
-                      : "Verifying…"
-                    : "Re-authenticate & Sign"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleReauthDismiss}
-                  disabled={reauthLoading}
-                  className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 transition-colors"
-                >
-                  Cancel
-                </button>
-              </form>
+      <Dialog open={showReauthModal} onOpenChange={(open) => { if (!open) handleReauthDismiss(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader className="flex flex-col items-center gap-4">
+            {/* Lock icon */}
+            <div className="h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
             </div>
-          </div>
-        </div>
-      )}
+
+            {/* Title & explanation */}
+            <DialogTitle className="text-lg font-bold text-gray-900">Session Expired</DialogTitle>
+            <DialogDescription className="text-sm text-gray-600 text-center leading-relaxed">
+              Your session timed out during signing. Re-enter your 6-digit PIN to
+              continue&nbsp;&mdash;&nbsp;your progress has been saved.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Error display */}
+          {reauthError && (
+            <p className="text-red-600 text-sm font-medium bg-red-50 px-4 py-2 rounded-lg w-full text-center">
+              {reauthError}
+            </p>
+          )}
+
+          {/* PIN form */}
+          <form onSubmit={handleReauthSubmit} className="flex flex-col items-center gap-3 w-full">
+            <input
+              ref={reauthInputRef}
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              value={reauthPin}
+              onChange={handleReauthPinChange}
+              placeholder="••••••"
+              disabled={reauthLoading}
+              className="w-40 text-center text-2xl tracking-[0.3em] border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50"
+            />
+
+            <button
+              type="submit"
+              disabled={reauthPin.length !== 6 || reauthLoading}
+              className="w-full px-6 py-2.5 rounded-lg font-semibold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {reauthLoading
+                ? signingPhase === "retrying"
+                  ? "Verifying & Sealing…"
+                  : "Verifying…"
+                : "Re-authenticate & Sign"}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleReauthDismiss}
+              disabled={reauthLoading}
+              className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useOptimistic, startTransition } from 'react';
 import { useOpsSession } from '@/components/OpsGate';
 import { fetchOps } from '@/utils/ops-api';
 import { useConnection } from '@/lib/useConnection';
@@ -8,6 +8,7 @@ import OfflineBanner from '@/components/OfflineBanner';
 import LiveClock from '@/components/LiveClock';
 import { KdsGrid } from '@/components/KdsGrid';
 import type { KdsGridState } from '@/components/KdsGrid';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 
 
@@ -32,6 +33,10 @@ export default function KDS() {
   /* ── History / Undo state ─────────────────────────────────── */
   const [showHistory, setShowHistory]         = useState(false);
   const [recentHistory, setRecentHistory]     = useState<HistoryOrder[]>([]);
+  const [optimisticHistory, addOptimisticUndo] = useOptimistic(
+    recentHistory,
+    (state: HistoryOrder[], removedId: string) => state.filter((o) => o.id !== removedId)
+  );
   const [historyLoading, setHistoryLoading]   = useState(false);
   const [undoingId, setUndoingId]             = useState<string | null>(null);
   const undoLockRef = useRef(false);
@@ -70,28 +75,30 @@ export default function KDS() {
     if (undoLockRef.current) return;
     undoLockRef.current = true;
     setUndoingId(orderId);
-    try {
-      const t = session.token;
-      if (!t) throw new Error("No PIN session");
-      const res = await fetchOps("/update-order-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, status: "preparing", completed_at: null, ready_at: null }),
-      }, t);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error((body as { error?: string })?.error || "Undo failed");
+    startTransition(async () => {
+      addOptimisticUndo(orderId);
+      try {
+        const t = session.token;
+        if (!t) throw new Error("No PIN session");
+        const res = await fetchOps("/update-order-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId, status: "preparing", completed_at: null, ready_at: null }),
+        }, t);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error((body as { error?: string })?.error || "Undo failed");
+        }
+        setRecentHistory((prev) => prev.filter((o) => o.id !== orderId));
+        setShowHistory(false);
+      } catch (err) {
+        console.error("[KDS] Undo error:", (err as Error)?.message);
+        setError(`Undo failed: ${(err as Error)?.message || "Unknown error"}`);
+      } finally {
+        setUndoingId(null);
+        undoLockRef.current = false;
       }
-      // Remove from history list, close panel
-      setRecentHistory((prev) => prev.filter((o) => o.id !== orderId));
-      setShowHistory(false);
-    } catch (err) {
-      console.error("[KDS] Undo error:", (err as Error)?.message);
-      setError(`Undo failed: ${(err as Error)?.message || "Unknown error"}`);
-    } finally {
-      setUndoingId(null);
-      undoLockRef.current = false;
-    }
+    });
   }, [session.token]);
 
   /* ── Time helper ──────────────────────────────────────────── */
@@ -143,40 +150,25 @@ export default function KDS() {
       </header>
 
       {/* ── History slide-over panel ─────────────────────────── */}
-      {showHistory && (
-        <div className="fixed inset-0 z-50 flex justify-end" aria-label="Order history panel">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/60"
-            onClick={() => setShowHistory(false)}
-          />
-
-          {/* Panel */}
-          <div className="relative w-full max-w-md bg-stone-900 border-l border-stone-700 shadow-2xl flex flex-col animate-in slide-in-from-right">
-            {/* Panel header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-stone-700">
-              <h2 className="text-lg font-bold text-white font-playfair tracking-tight uppercase">
-                Recent Orders
-              </h2>
-              <button
-                onClick={() => setShowHistory(false)}
-                className="text-stone-400 hover:text-white transition-colors p-1"
-                aria-label="Close history"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+      <Dialog open={showHistory} onOpenChange={setShowHistory}>
+        <DialogContent
+          aria-label="Order history panel"
+          className="left-auto right-0 top-0 h-full translate-x-0 translate-y-0 max-w-md bg-stone-900 border-l border-stone-700 shadow-2xl flex flex-col p-0 gap-0 rounded-none sm:rounded-none data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right"
+        >
+          <DialogHeader className="px-5 py-4 border-b border-stone-700 shrink-0">
+            <DialogTitle className="text-lg font-bold text-white font-playfair tracking-tight uppercase">
+              Recent Orders
+            </DialogTitle>
+          </DialogHeader>
 
             {/* Panel body */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {historyLoading ? (
                 <p className="text-stone-500 font-mono text-sm text-center py-8">Loading&hellip;</p>
-              ) : recentHistory.length === 0 ? (
+              ) : optimisticHistory.length === 0 ? (
                 <p className="text-stone-500 font-mono text-sm text-center py-8">No recent orders in the last 30 minutes.</p>
               ) : (
-                recentHistory.map((order) => (
+                optimisticHistory.map((order) => (
                   <div
                     key={order.id}
                     className="bg-stone-800 rounded-lg p-4 border border-stone-700"
@@ -220,9 +212,8 @@ export default function KDS() {
                 Undo returns order to PREPARING
               </p>
             </div>
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       <KdsGrid token={session.token} staffId={session.staff.id} onStateChange={handleStateChange} />
     </main>

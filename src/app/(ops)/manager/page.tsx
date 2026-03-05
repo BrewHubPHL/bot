@@ -47,10 +47,14 @@ import ParcelOpsPanel from "./ParcelOpsPanel";
 import LiveStaffPulse from "@/app/(site)/components/manager/LiveStaffPulse";
 /* ─── Unified CRM Insights (post-migration dashboard) ── */
 import CrmInsights from "@/app/(site)/components/manager/CrmInsights";
+/* ─── Realtime rate-limit security toasts ─────────────── */
+import SecurityAlertToaster from "@/components/manager/SecurityAlertToaster";
 /* ─── Export Orders CSV ─────────────────────────────────── */
 import ExportOrdersButton from "./ExportOrdersButton";
 /* ─── Staff directory (interactive table) ────────────────── */
 import StaffSection from "./components/StaffSection";
+/* ─── Manager override audit log (Shadcn Data Table) ─────── */
+import ManagerOverrideLog from "@/components/manager/ManagerOverrideLog";
 /* ─── Ops session + fetchOps for asset health check ──────── */
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { fetchOps } from "@/utils/ops-api";
@@ -291,6 +295,9 @@ function ManagerDashboardInner() {
       {/* ── Centralized alert renderer (P0 modal + P1/P2 banners) ── */}
       <AlertRenderer />
 
+      {/* ── Realtime rate-limit security toasts ── */}
+      <SecurityAlertToaster />
+
       {/* ── Tab content ─────────────────────────────────── */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 pb-28 md:pb-8">
         {activeTab === "overview" && (
@@ -301,6 +308,7 @@ function ManagerDashboardInner() {
             </div>
             <DashboardOverhaul />
             <CrmInsights />
+            <ManagerOverrideLog />
             <ReceiptRoll />
           </div>
         )}

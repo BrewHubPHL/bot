@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { fetchOps } from "@/utils/ops-api";
 import { Download, RefreshCw, X, Clock, AlertTriangle, Pencil, Info } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ManagerChallengeModal from "@/components/ManagerChallengeModal";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 
@@ -899,30 +900,13 @@ export default function PayrollSection() {
       )}
 
       {/* -- Adjust Hours Modal -- */}
-      {adjustTarget && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-40 bg-black/60"
-            onClick={() => { if (!adjustBusy) setAdjustTarget(null); }}
-            aria-hidden="true"
-          />
-
-          {/* Modal panel */}
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="adjust-modal-title"
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          >
-            <div
-              className="w-full max-w-md bg-stone-900 border border-stone-700 rounded-2xl shadow-2xl overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
+      <Dialog open={!!adjustTarget} onOpenChange={(open) => { if (!open && !adjustBusy) setAdjustTarget(null); }}>
+        <DialogContent className="max-w-md bg-stone-900 border-stone-700 rounded-2xl p-0 gap-0 overflow-hidden shadow-2xl">
+          {adjustTarget && (<>
               {/* Header */}
               <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-stone-800">
                 <div className="min-w-0 flex-1 pr-3">
-                  <h2 id="adjust-modal-title" className="text-base font-bold text-white flex items-center gap-2">
+                  <h2 className="text-base font-bold text-white flex items-center gap-2">
                     <Pencil size={16} className="text-amber-400 flex-shrink-0" />
                     Adjust Hours
                   </h2>
@@ -1069,10 +1053,9 @@ export default function PayrollSection() {
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
-        </>
-      )}
+          </>)}
+        </DialogContent>
+      </Dialog>
 
       {/* -- Manager Challenge Modal (fix-clock) -- */}
       {showChallengeModal && token && (

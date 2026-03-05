@@ -17,9 +17,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import React from "react";
+import { toast, Toaster } from "sonner";
+import LoyaltyPointsCard, { type LoyaltyCardData } from "./LoyaltyPointsCard";
 
 /* ── Types ── */
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ChatMessage = { role: "user" | "assistant"; content: string; loyaltyCard?: LoyaltyCardData; orderConfirmation?: OrderConfirmation };
+
+type OrderConfirmation = { order_id: string; customer_name: string; amount_cents: number };
 
 /* ── Helpers ── */
 
@@ -117,6 +121,7 @@ export default function EliseChat() {
   const isSpeakingRef = useRef(false);
   const isVoiceActiveRef = useRef(false);
   const voiceStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastedOrdersRef = useRef<Set<string>>(new Set());
 
   /* ─── Keep mutable refs in sync ─── */
   useEffect(() => {
@@ -125,6 +130,19 @@ export default function EliseChat() {
   useEffect(() => {
     isVoiceActiveRef.current = isVoiceActive;
   }, [isVoiceActive]);
+
+  /* ── Order confirmation toast (fires once per unique order_id) ── */
+  useEffect(() => {
+    for (const msg of messages) {
+      if (msg.orderConfirmation && !toastedOrdersRef.current.has(msg.orderConfirmation.order_id)) {
+        const { order_id, customer_name, amount_cents } = msg.orderConfirmation;
+        toastedOrdersRef.current.add(order_id);
+        toast.success('Order Confirmed! \u2615', {
+          description: `#${order_id.slice(-4).toUpperCase()} for ${customer_name} \u2014 $${(amount_cents / 100).toFixed(2)}`,
+        });
+      }
+    }
+  }, [messages]);
 
   /* Anti-echo: hard-abort the recogniser while TTS plays */
   useEffect(() => {
@@ -158,7 +176,7 @@ export default function EliseChat() {
   }, []);
 
   /* ── Shared helper: send text to Claude and return the reply ── */
-  const sendToClaude = useCallback(async (userText: string): Promise<string> => {
+  const sendToClaude = useCallback(async (userText: string): Promise<{ reply: string; loyaltyCard: LoyaltyCardData | null; orderConfirmation: OrderConfirmation | null }> => {
     const chatHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "X-BrewHub-Action": "true",
@@ -187,10 +205,10 @@ export default function EliseChat() {
         }),
       });
       const data = await response.json();
-      return data.reply || "Sorry, I didn't catch that.";
+      return { reply: data.reply || "Sorry, I didn't catch that.", loyaltyCard: data.loyaltyCard || null, orderConfirmation: data.orderConfirmation || null };
     } catch (err) {
       if ((err as Error)?.name === "AbortError") {
-        return "Sorry, that took too long! Give me a second and try again.";
+        return { reply: "Sorry, that took too long! Give me a second and try again.", loyaltyCard: null, orderConfirmation: null };
       }
       throw err;
     } finally {
@@ -307,12 +325,12 @@ export default function EliseChat() {
       setVoiceStatus("Thinking...");
 
       try {
-        const reply = await sendToClaude(transcript);
+        const { reply, loyaltyCard, orderConfirmation } = await sendToClaude(transcript);
         if (voiceCancelledRef.current) {
-          setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+          setMessages((prev) => [...prev, { role: "assistant", content: reply, ...(loyaltyCard ? { loyaltyCard } : {}), ...(orderConfirmation ? { orderConfirmation } : {}) }]);
           return;
         }
-        setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+        setMessages((prev) => [...prev, { role: "assistant", content: reply, ...(loyaltyCard ? { loyaltyCard } : {}), ...(orderConfirmation ? { orderConfirmation } : {}) }]);
         await speakReply(reply);
       } catch {
         setMessages((prev) => [
@@ -481,8 +499,8 @@ export default function EliseChat() {
     setChatTyping(true);
 
     try {
-      const reply = await sendToClaude(userText);
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+      const { reply, loyaltyCard, orderConfirmation } = await sendToClaude(userText);
+      setMessages((prev) => [...prev, { role: "assistant", content: reply, ...(loyaltyCard ? { loyaltyCard } : {}), ...(orderConfirmation ? { orderConfirmation } : {}) }]);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -500,6 +518,7 @@ export default function EliseChat() {
 
   return (
     <>
+      <Toaster position="bottom-left" richColors />
       {/* ── FAB toggle button ── */}
       <button
         type="button"
@@ -591,6 +610,7 @@ export default function EliseChat() {
                   {m.role === "user" ? "You" : "Elise"}
                 </span>
                 {linkify(m.content)}
+                {m.loyaltyCard && <LoyaltyPointsCard data={m.loyaltyCard} />}
               </div>
             ))}
             {chatTyping && (

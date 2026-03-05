@@ -5,6 +5,7 @@ const { checkQuota } = require('./_usage');
 const { requireCsrfHeader } = require('./_csrf');
 const { merchPayBucket } = require('./_token-bucket');
 const { sanitizeInput } = require('./_sanitize');
+const { calculateTaxInclusive } = require('./_pricing');
 
 const square = new SquareClient({
   token: process.env.SQUARE_PRODUCTION_TOKEN,
@@ -151,6 +152,8 @@ exports.handler = async (event) => {
     });
 
     // 3. Insert Parent Transaction (orders)
+    const { subtotalCents, taxCents } = calculateTaxInclusive(totalCents);
+
     const { error: parentError } = await supabase
       .from('orders')
       .insert([{
@@ -158,6 +161,8 @@ exports.handler = async (event) => {
         user_id: verifiedUserId,
         customer_name: safeName,
         customer_email: safeEmail,
+        subtotal_cents: subtotalCents,
+        tax_amount_cents: taxCents,
         total_amount_cents: totalCents,
         status: 'pending',
         square_order_id: result.paymentLink.orderId

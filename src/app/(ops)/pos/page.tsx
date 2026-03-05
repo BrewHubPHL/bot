@@ -17,6 +17,7 @@ import OfflineBanner from "@/components/OfflineBanner";
 import LiveClock from "@/components/LiveClock";
 import OnscreenKeyboard from "@/components/OnscreenKeyboard";
 import { toUserSafeMessage, toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   cacheMenu, getCachedMenu, queueOfflineOrder, getUnsyncedOrders,
   markOrderSynced, clearSyncedOrders, type OfflineOrder, type CachedMenuItem,
@@ -550,7 +551,7 @@ export default function POSPage() {
   const handleOfflineOrder = useCallback(async () => {
     if (cart.length === 0) return;
     const total = cart.reduce(
-      (sum, ci) => sum + (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents * m.quantity, 0)) * ci.quantity, 0
+      (sum, ci) => sum + ((Number(ci.price_cents) || 0) + ci.modifiers.reduce((s, m) => s + (Number(m.price_cents) || 0) * m.quantity, 0)) * ci.quantity, 0
     );
 
     // ── Check cap BEFORE accepting the order ──
@@ -640,7 +641,7 @@ export default function POSPage() {
         product_id: ci.productId,
         name: ci.name,
         quantity: ci.quantity,
-        price_cents: ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents * m.quantity, 0),
+        price_cents: (Number(ci.price_cents) || 0) + ci.modifiers.reduce((s, m) => s + (Number(m.price_cents) || 0) * m.quantity, 0),
         customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => formatModifier(m)) : undefined,
       })),
       total_cents: total,
@@ -744,7 +745,7 @@ export default function POSPage() {
   /* ─── Derived ────────────────────────────────────────────────── */
   const filteredItems = menuItems.filter((i) => categorize(i.name) === activeCategory);
   const cartTotal = cart.reduce(
-    (sum, ci) => sum + (ci.price_cents + ci.modifiers.reduce((s, m) => s + m.price_cents * m.quantity, 0)) * ci.quantity,
+    (sum, ci) => sum + ((Number(ci.price_cents) || 0) + ci.modifiers.reduce((s, m) => s + (Number(m.price_cents) || 0) * m.quantity, 0)) * ci.quantity,
     0
   );
   const cartCount = cart.reduce((s, ci) => s + ci.quantity, 0);
@@ -1888,10 +1889,11 @@ export default function POSPage() {
     setVoucherRetryCode(null);
   };
 
-  /* ─── Tax rate (Philadelphia 8% sales tax) ─────────────────── */
-  const TAX_RATE = 0.08;
-  const taxCents = Math.round(cartTotal * TAX_RATE);
-  const grandTotalCents = cartTotal + taxCents;
+  /* ─── Tax-inclusive pricing (Philadelphia 8% sales tax) ─────── */
+  // Menu prices already include tax — back-calculate the breakdown.
+  const subtotalCents = Math.round(cartTotal / 1.08);
+  const taxCents = cartTotal - subtotalCents;
+  const grandTotalCents = cartTotal;
 
   /* ─── Render ─────────────────────────────────────────────────── */
   return (
@@ -2403,7 +2405,7 @@ export default function POSPage() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-stone-500">Subtotal ({cartCount} {cartCount === 1 ? "item" : "items"})</span>
-                <span className="font-semibold text-stone-300 tabular-nums">{cents(cartTotal)}</span>
+                <span className="font-semibold text-stone-300 tabular-nums">{cents(subtotalCents)}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-stone-500">Tax (8%)</span>
@@ -2767,7 +2769,7 @@ export default function POSPage() {
             <div className="space-y-1">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-stone-500">Subtotal</span>
-                <span className="text-stone-300 tabular-nums">{cents(cartTotal)}</span>
+                <span className="text-stone-300 tabular-nums">{cents(subtotalCents)}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-stone-500">Tax</span>
@@ -2982,19 +2984,11 @@ export default function POSPage() {
       {/* ═══════ Modals (shared between desktop + mobile) ═══════ */}
 
       {/* Guest name modal */}
-      {guestModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="guest-modal-title"
-          onKeyDown={(e) => {
-            if (e.key === "Escape") { setGuestModalOpen(false); }
-            if (e.key === "Tab") { e.preventDefault(); guestInputRef.current?.focus(); }
-          }}
-        >
-          <div className="w-full max-w-md bg-stone-900 border border-stone-800 rounded-lg p-6">
-            <h3 id="guest-modal-title" className="text-lg font-bold mb-2">Enter customer first name</h3>
+      <Dialog open={guestModalOpen} onOpenChange={setGuestModalOpen}>
+        <DialogContent className="max-w-md bg-stone-900 border-stone-800">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Enter customer first name</DialogTitle>
+          </DialogHeader>
             <p className="text-sm text-stone-400 mb-4">This will appear on the KDS as the customer&apos;s first name.</p>
             <input
               ref={guestInputRef}
@@ -3040,29 +3034,18 @@ export default function POSPage() {
                 />
               </div>
             )}
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* Open-price modal (shipping / TBD items) */}
-      {openPriceModalOpen && openPriceItem && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="open-price-modal-title"
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setOpenPriceModalOpen(false);
-            if (e.key === "Tab") { e.preventDefault(); openPriceInputRef.current?.focus(); }
-          }}
-        >
-          <div className="w-full max-w-md bg-stone-900 border border-stone-800 rounded-lg p-6">
+      <Dialog open={openPriceModalOpen && !!openPriceItem} onOpenChange={(open) => { if (!open) { setOpenPriceModalOpen(false); setOpenPriceItem(null); } }}>
+        <DialogContent className="max-w-md bg-stone-900 border-stone-800">
             <div className="flex items-center gap-3 mb-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/20">
                 <Truck className="h-5 w-5 text-amber-400" />
               </div>
               <div>
-                <h3 id="open-price-modal-title" className="text-lg font-bold">{openPriceItem.name}</h3>
+                <h3 className="text-lg font-bold">{openPriceItem?.name}</h3>
                 <p className="text-sm text-stone-400">Enter the quoted shipping price</p>
               </div>
             </div>
@@ -3104,9 +3087,8 @@ export default function POSPage() {
                 Add to Cart
               </button>
             </div>
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* ═══════ Order Success Toast ═══════ */}
       {orderSuccess && (
@@ -3150,9 +3132,8 @@ export default function POSPage() {
       )}
 
       {/* ═══════ Manager PIN Modal ═══════ */}
-      {compPinModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 animate-in fade-in duration-200">
-          <div className="bg-stone-900 border border-stone-700 rounded-2xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
+      <Dialog open={compPinModalOpen} onOpenChange={setCompPinModalOpen}>
+        <DialogContent className="max-w-sm bg-stone-900 border-stone-700 rounded-2xl p-0 gap-0 overflow-hidden shadow-2xl">
             <div className="px-5 py-4 border-b border-stone-800">
               <div className="flex items-center gap-2">
                 <ShieldCheck size={16} className="text-amber-400" />
@@ -3196,14 +3177,12 @@ export default function POSPage() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* ═══════ Comp Reason Modal ═══════ */}
-      {compModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 animate-in fade-in duration-200">
-          <div className="bg-stone-900 border border-stone-700 rounded-2xl w-full max-w-sm mx-4 overflow-hidden shadow-2xl">
+      <Dialog open={compModalOpen} onOpenChange={setCompModalOpen}>
+        <DialogContent className="max-w-sm bg-stone-900 border-stone-700 rounded-2xl p-0 gap-0 overflow-hidden shadow-2xl">
             <div className="px-5 py-4 border-b border-stone-800">
               <h3 className="font-bold text-sm uppercase tracking-[0.15em] text-stone-300">Comp Reason</h3>
               <p className="text-xs text-stone-500 mt-1">Required — logged for audit (authorized by {compManagerRef.current?.name || "Manager"})</p>
@@ -3235,23 +3214,18 @@ export default function POSPage() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* ═══════ Loyalty QR Camera Modal ═══════ */}
-      {loyaltyModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 animate-in fade-in duration-200">
-          <div className="bg-stone-900 border border-stone-700 rounded-2xl w-full max-w-md mx-4 overflow-hidden shadow-2xl">
+      <Dialog open={loyaltyModalOpen} onOpenChange={(open) => { if (!open) closeLoyaltyScanner(); }}>
+        <DialogContent className="max-w-md bg-stone-900 border-stone-700 rounded-2xl p-0 gap-0 overflow-hidden shadow-2xl">
             {/* Modal Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-stone-800">
               <div className="flex items-center gap-2">
                 <ScanLine size={16} className="text-amber-400" />
                 <h3 className="font-bold text-sm uppercase tracking-[0.15em] text-stone-300">Scan Loyalty QR</h3>
               </div>
-              <button onClick={closeLoyaltyScanner} className="p-2 hover:bg-stone-800 rounded-lg transition-colors">
-                <X size={18} className="text-stone-400" />
-              </button>
             </div>
 
             {/* Camera Viewfinder */}
@@ -3288,9 +3262,8 @@ export default function POSPage() {
                 Point camera at the customer&apos;s QR code in the BrewHub app
               </p>
             </div>
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

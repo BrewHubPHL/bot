@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { toast as sonnerToast } from "sonner";
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { useStaffOptional } from "@/context/StaffContext";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
@@ -97,19 +98,16 @@ export default function DashboardOverhaul() {
   });
   const [statsLoading, setStatsLoading] = useState(true);
 
-  /* ── Toast messages ──────────────────────────────────── */
-  const [toast, setToast] = useState<{
-    type: "success" | "error" | "info";
-    message: string;
-  } | null>(null);
+  /* ── Toast messages (delegates to Sonner) ────────────── */
 
   // ──────────────────────────────────────────────────────
-  //  Auto-dismissing toast
+  //  Sonner toast wrapper
   // ──────────────────────────────────────────────────────
   const showToast = useCallback(
     (type: "success" | "error" | "info", message: string) => {
-      setToast({ type, message });
-      setTimeout(() => setToast(null), 5000);
+      if (type === "success") sonnerToast.success(message);
+      else if (type === "error") sonnerToast.error(message);
+      else sonnerToast.info(message);
     },
     []
   );
@@ -239,35 +237,6 @@ export default function DashboardOverhaul() {
       )}
 
       {/* ═══════════════════════════════════════════════════
-          TOAST — floating notification
-          ═══════════════════════════════════════════════════ */}
-      {toast && (
-        <div
-          className={`flex items-center gap-3 min-h-[56px] rounded-xl px-5 py-3
-                     text-sm font-semibold transition-all animate-in fade-in
-                     ${
-                       toast.type === "success"
-                         ? "bg-green-500/10 border border-green-500/30 text-green-400"
-                         : toast.type === "error"
-                           ? "bg-red-500/10 border border-red-500/30 text-red-400"
-                           : "bg-blue-500/10 border border-blue-500/30 text-blue-400"
-                     }`}
-        >
-          {toast.type === "success" && <CheckCircle size={20} />}
-          {toast.type === "error" && <XCircle size={20} />}
-          {toast.type === "info" && <RefreshCw size={20} />}
-          <span>{toast.message}</span>
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            className="ml-auto p-1 hover:opacity-70"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════
           QUICK STATS — touch-friendly cards
           ═══════════════════════════════════════════════════ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -337,7 +306,7 @@ export default function DashboardOverhaul() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setToast({ type: 'info', message: `Restock for "${item.name}" — order logic coming soon.` })}
+                    onClick={() => sonnerToast.info(`Restock for "${item.name}" — order logic coming soon.`)}
                     className="text-xs font-semibold px-2.5 py-1 rounded-md bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-colors"
                   >
                     Quick&nbsp;Restock

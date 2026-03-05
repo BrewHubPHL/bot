@@ -187,9 +187,9 @@ function generateReceiptString(order, items) {
     const subGap = W - subLabel.length - subStr.length;
     lines.push(`${subLabel}${' '.repeat(Math.max(1, subGap))}${subStr}`);
 
-    // Tax line (show rate if non-zero)
+    // Tax line (tax-inclusive: show as "included" rather than "added")
     const taxStr = formatMoney(taxCents);
-    const taxLabel = taxCents > 0 ? 'Tax (8%)' : 'Tax';
+    const taxLabel = taxCents > 0 ? 'Tax (8% incl.)' : 'Tax';
     const taxGap = W - taxLabel.length - taxStr.length;
     lines.push(`${taxLabel}${' '.repeat(Math.max(1, taxGap))}${taxStr}`);
 

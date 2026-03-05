@@ -27,7 +27,7 @@ VALUES (
   'test-notion-trigger@brewhubphl.com',           -- dummy manager email
   'orders',                                       -- target_entity
   '00000000-0000-0000-0000-000000000000',         -- placeholder target_id
-  '{"test": "Live from Supabase!", "triggered_at": "' || now()::text || '"}',
+  jsonb_build_object('test', 'Live from Supabase!', 'triggered_at', now()),
   'none_legacy'                                   -- allowed by CHECK constraint
 )
 RETURNING id, action_type, created_at;
@@ -99,13 +99,14 @@ END$$;
 
 
 -- ── 3. Verify: Check pg_net request queue ───────────────────────────────
--- pg_net stores outbound requests in net._http_response. Query the most
--- recent entries to confirm the webhooks were enqueued.
+-- pg_net stores outbound responses in net._http_response.
+-- Query the most recent entries to confirm the webhooks were sent.
 
 SELECT
   id,
   status_code,
-  url,
+  timed_out,
+  error_msg,
   created AS queued_at
 FROM net._http_response
 ORDER BY created DESC

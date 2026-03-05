@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ShoppingCart, X, Plus, Minus, Trash2, Coffee, ShoppingBag, Info } from 'lucide-react';
 import Link from 'next/link';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 
 /* ═══════════════════════════════════════════════════════════════════
    Types
@@ -616,62 +617,43 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
       </div>
 
       {/* ═══ Info Modal (long_description / origin story) ═══ */}
-      {infoProduct && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setInfoProduct(null)} />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`About ${infoProduct.name}`}
-            className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[60] mx-auto max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up"
-          >
-            <div className="bg-gradient-to-r from-[var(--hub-tan)] to-[var(--hub-cream)] px-6 py-5 flex items-center justify-between">
-              <div className="flex items-center gap-3">
+      <Dialog open={!!infoProduct} onOpenChange={(open) => { if (!open) setInfoProduct(null); }}>
+        <DialogContent className="max-w-lg p-0 overflow-hidden">
+          {infoProduct && (
+            <>
+              <div className="bg-gradient-to-r from-[var(--hub-tan)] to-[var(--hub-cream)] px-6 py-5 flex items-center gap-3">
                 <Info size={20} className="text-[var(--hub-brown)]" />
-                <h3 className="font-playfair text-xl text-[var(--hub-espresso)]">{infoProduct.name}</h3>
+                <DialogTitle className="font-playfair text-xl text-[var(--hub-espresso)]">{infoProduct.name}</DialogTitle>
               </div>
-              <button
-                onClick={() => setInfoProduct(null)}
-                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-black/10 transition-colors"
-                aria-label="Close"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="px-6 py-5 max-h-[60vh] overflow-y-auto">
-              <p className="text-stone-600 leading-relaxed whitespace-pre-line">
-                {infoProduct.long_description}
-              </p>
-            </div>
-            <div className="px-6 py-4 border-t border-stone-200">
-              <button
-                type="button"
-                onClick={() => { setInfoProduct(null); handleProductClick(infoProduct); }}
-                className="w-full py-3 rounded-lg bg-[var(--hub-brown)] text-white font-semibold hover:bg-[var(--hub-espresso)] transition-colors text-sm"
-              >
-                Add to Cart
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+              <div className="px-6 py-5 max-h-[60vh] overflow-y-auto">
+                <p className="text-stone-600 leading-relaxed whitespace-pre-line">
+                  {infoProduct.long_description}
+                </p>
+              </div>
+              <div className="px-6 py-4 border-t border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => { setInfoProduct(null); handleProductClick(infoProduct); }}
+                  className="w-full py-3 rounded-lg bg-[var(--hub-brown)] text-white font-semibold hover:bg-[var(--hub-espresso)] transition-colors text-sm"
+                >
+                  Add to Cart
+                </button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ═══ Customization Modal (POS-parity modifier qty picker) ═══ */}
-      {customizeProduct && (() => {
-        const groups = getModifierGroupsForItem(customizeProduct);
-        return (
-          <>
-            <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setCustomizeProduct(null)} />
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={`Customize ${customizeProduct.name}`}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[60] mx-auto max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up"
-            >
-              {/* Header */}
-              <div className="bg-gradient-to-r from-[var(--hub-tan)] to-[var(--hub-cream)] px-6 py-5 flex items-center justify-between">
-                <div>
-                  <h3 className="font-playfair text-xl text-[var(--hub-espresso)]">{customizeProduct.name}</h3>
+      <Dialog open={!!customizeProduct} onOpenChange={(open) => { if (!open) setCustomizeProduct(null); }}>
+        <DialogContent className="max-w-md p-0 overflow-hidden">
+          {customizeProduct && (() => {
+            const groups = getModifierGroupsForItem(customizeProduct);
+            return (
+              <>
+                {/* Header */}
+                <div className="bg-gradient-to-r from-[var(--hub-tan)] to-[var(--hub-cream)] px-6 py-5">
+                  <DialogTitle className="font-playfair text-xl text-[var(--hub-espresso)]">{customizeProduct.name}</DialogTitle>
                   <p className="text-sm text-[var(--hub-brown)] mt-0.5">
                     ${(customizeProduct.price_cents / 100).toFixed(2)}
                     {customizeModCents > 0 && (
@@ -679,91 +661,84 @@ export default function ShopClient({ products, shopEnabled, isMaintenanceMode }:
                     )}
                   </p>
                 </div>
-                <button
-                  onClick={() => setCustomizeProduct(null)}
-                  className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg hover:bg-black/10 transition-colors"
-                  aria-label="Close"
-                >
-                  <X size={20} />
-                </button>
-              </div>
 
-              <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto">
-                {groups.length === 0 ? (
-                  <p className="text-sm text-stone-500 text-center py-4">No customizations available for this item.</p>
-                ) : (
-                  groups.map(group => (
-                    <div key={group.label}>
-                      <p className="text-sm font-semibold text-stone-700 mb-2">{group.label}</p>
-                      <div className="space-y-2">
-                        {group.mods.map(mod => {
-                          const qty = modQtys[mod.name] || 0;
-                          return (
-                            <div
-                              key={mod.name}
-                              className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
-                                qty > 0
-                                  ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/5'
-                                  : 'border-stone-200'
-                              }`}
-                            >
-                              <div>
-                                <span className="text-sm font-medium text-stone-700">{mod.name}</span>
-                                {mod.price_cents > 0 && (
-                                  <span className="text-xs text-stone-400 ml-1.5">+${(mod.price_cents / 100).toFixed(2)}</span>
-                                )}
+                <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto">
+                  {groups.length === 0 ? (
+                    <p className="text-sm text-stone-500 text-center py-4">No customizations available for this item.</p>
+                  ) : (
+                    groups.map(group => (
+                      <div key={group.label}>
+                        <p className="text-sm font-semibold text-stone-700 mb-2">{group.label}</p>
+                        <div className="space-y-2">
+                          {group.mods.map(mod => {
+                            const qty = modQtys[mod.name] || 0;
+                            return (
+                              <div
+                                key={mod.name}
+                                className={`flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
+                                  qty > 0
+                                    ? 'border-[var(--hub-brown)] bg-[var(--hub-brown)]/5'
+                                    : 'border-stone-200'
+                                }`}
+                              >
+                                <div>
+                                  <span className="text-sm font-medium text-stone-700">{mod.name}</span>
+                                  {mod.price_cents > 0 && (
+                                    <span className="text-xs text-stone-400 ml-1.5">+${(mod.price_cents / 100).toFixed(2)}</span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateModQty(mod.name, -1)}
+                                    disabled={qty === 0}
+                                    className="min-h-[36px] min-w-[36px] flex items-center justify-center border border-stone-300 rounded-md hover:bg-stone-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                    aria-label={`Decrease ${mod.name}`}
+                                  >
+                                    <Minus size={14} />
+                                  </button>
+                                  <span className="w-6 text-center text-sm font-semibold tabular-nums">{qty}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateModQty(mod.name, 1)}
+                                    disabled={qty >= MAX_MOD_QTY}
+                                    className="min-h-[36px] min-w-[36px] flex items-center justify-center border border-stone-300 rounded-md hover:bg-stone-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                    aria-label={`Increase ${mod.name}`}
+                                  >
+                                    <Plus size={14} />
+                                  </button>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => updateModQty(mod.name, -1)}
-                                  disabled={qty === 0}
-                                  className="min-h-[36px] min-w-[36px] flex items-center justify-center border border-stone-300 rounded-md hover:bg-stone-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                  aria-label={`Decrease ${mod.name}`}
-                                >
-                                  <Minus size={14} />
-                                </button>
-                                <span className="w-6 text-center text-sm font-semibold tabular-nums">{qty}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => updateModQty(mod.name, 1)}
-                                  disabled={qty >= MAX_MOD_QTY}
-                                  className="min-h-[36px] min-w-[36px] flex items-center justify-center border border-stone-300 rounded-md hover:bg-stone-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                  aria-label={`Increase ${mod.name}`}
-                                >
-                                  <Plus size={14} />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))
-                )}
-              </div>
+                    ))
+                  )}
+                </div>
 
-              {/* Actions */}
-              <div className="px-6 py-4 border-t border-stone-200 flex gap-3">
-                <button
-                  type="button"
-                  onClick={addAsIs}
-                  className="flex-1 py-3 rounded-lg border border-stone-300 text-stone-600 font-semibold hover:bg-stone-50 transition-colors text-sm"
-                >
-                  Add As-Is
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmCustomization}
-                  className="flex-1 py-3 rounded-lg bg-[var(--hub-brown)] text-white font-semibold hover:bg-[var(--hub-espresso)] transition-colors text-sm"
-                >
-                  {customizeModCents > 0 ? `Add · $${((customizeProduct.price_cents + customizeModCents) / 100).toFixed(2)}` : 'Add with Options'}
-                </button>
-              </div>
-            </div>
-          </>
-        );
-      })()}
+                {/* Actions */}
+                <div className="px-6 py-4 border-t border-stone-200 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={addAsIs}
+                    className="flex-1 py-3 rounded-lg border border-stone-300 text-stone-600 font-semibold hover:bg-stone-50 transition-colors text-sm"
+                  >
+                    Add As-Is
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmCustomization}
+                    className="flex-1 py-3 rounded-lg bg-[var(--hub-brown)] text-white font-semibold hover:bg-[var(--hub-espresso)] transition-colors text-sm"
+                  >
+                    {customizeModCents > 0 ? `Add · $${((customizeProduct.price_cents + customizeModCents) / 100).toFixed(2)}` : 'Add with Options'}
+                  </button>
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
