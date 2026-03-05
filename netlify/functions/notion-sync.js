@@ -229,10 +229,11 @@ exports.handler = async (event) => {
   if (csrfBlock) return csrfBlock;
 
   // DEBUG: log what the trigger is sending (remove after testing)
-  console.log('[notion-sync] x-brewhub-secret present:', !!event.headers?.['x-brewhub-secret']);
-  console.log('[notion-sync] x-brewhub-secret length:', (event.headers?.['x-brewhub-secret'] || '').length);
-  console.log('[notion-sync] INTERNAL_SYNC_SECRET present:', !!process.env.INTERNAL_SYNC_SECRET);
-  console.log('[notion-sync] INTERNAL_SYNC_SECRET length:', (process.env.INTERNAL_SYNC_SECRET || '').length);
+  const incomingSecret = event.headers?.['x-brewhub-secret'] || '';
+  const envSecret = process.env.INTERNAL_SYNC_SECRET || '';
+  console.log('[notion-sync] incoming first4/last4:', incomingSecret.slice(0, 4), '...', incomingSecret.slice(-4));
+  console.log('[notion-sync] env      first4/last4:', envSecret.slice(0, 4), '...', envSecret.slice(-4));
+  console.log('[notion-sync] match?', incomingSecret === envSecret);
 
   const serviceAuth = verifyServiceSecret(event);
   if (!serviceAuth.valid) {
