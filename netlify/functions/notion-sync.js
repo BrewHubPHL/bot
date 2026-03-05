@@ -52,7 +52,7 @@ function resolveTargetDatabase(sourceTable, canonicalRecord) {
           title: [{ text: { content: truncate(`Order ${canonicalRecord.id}`, 200) } }],
         },
         Status: {
-          select: { name: canonicalRecord.status },
+          status: { name: canonicalRecord.status },
         },
         Total: {
           number: totalDollars,
