@@ -265,6 +265,11 @@ exports.handler = async (event) => {
       probation_days: PROBATION_DAYS,
       order_count: report.order_count,
       revenue_display: report.revenue_display,
+      // Expense breakdown for manager visibility
+      maintenance_cost_display: report.maintenance_cost_display,
+      opex_display: report.opex_display,
+      cogs_display: report.cogs_display,
+      total_expenses_display: report.total_expenses_display,
     });
   } catch (err) {
     console.error('[PROFIT-SHARE] Failed:', err.message);

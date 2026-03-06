@@ -60,6 +60,11 @@ const KNOWN_MODIFIERS = {
   'Sugar': 0,
 };
 
+// Case-insensitive lookup: maps lowercase → canonical name
+const MOD_LOOKUP = Object.fromEntries(
+  Object.keys(KNOWN_MODIFIERS).map(k => [k.toLowerCase(), k])
+);
+
 // CORS origin allowlist
 const ALLOWED_ORIGINS = [
   process.env.URL,
@@ -210,10 +215,14 @@ exports.handler = async (event) => {
       }
       const validMods = [];
       for (const mod of rawMods) {
-        if (typeof mod !== 'string' || !Object.prototype.hasOwnProperty.call(KNOWN_MODIFIERS, mod)) {
+        if (typeof mod !== 'string') {
           return json(400, { error: `Unknown modifier: ${String(mod).slice(0, 50)}` });
         }
-        validMods.push(mod);
+        const canonical = MOD_LOOKUP[mod.toLowerCase()];
+        if (!canonical) {
+          return json(400, { error: `Unknown modifier: ${mod.slice(0, 50)}` });
+        }
+        validMods.push(canonical);
       }
 
       // Open-price for shipping items

@@ -1,5 +1,5 @@
 /**
- * NO-SHOW ALERT — Dual-mode Netlify Function
+ * NO-SHOW ALERT — Dual-mode Netlify Function (v2 ESM)
  * Path: netlify/functions/no-show-alert.js
  *
  * MODE A  "Relay"  — called by the Supabase check_for_noshows() pg_cron
@@ -13,9 +13,9 @@
  *   updates status, and writes audit -- the original behaviour.
  */
 
-const { createClient } = require('@supabase/supabase-js');
-const crypto = require('crypto');
-const twilio = require('twilio');
+import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
+import twilio from 'twilio';
 
 function withSourceComment(query, tag) {
   if (typeof query?.comment === 'function') {
@@ -34,11 +34,12 @@ function safeCompare(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-const json = (code, data) => ({
-  statusCode: code,
-  headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  body: JSON.stringify(data),
-});
+function jsonResponse(code, data) {
+  return new Response(JSON.stringify(data), {
+    status: code,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  });
+}
 
 function buildSmsBody({ employeeName, shiftTime, latenessMinutes }) {
   const mins = Number(latenessMinutes) || 0;
@@ -51,27 +52,27 @@ function buildSmsBody({ employeeName, shiftTime, latenessMinutes }) {
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 
-exports.handler = async (event) => {
+export default async function handler(req, context) {
+  // Normalize headers
   const hdrs = {};
-  for (const k of Object.keys(event.headers || {})) {
-    hdrs[k.toLowerCase()] = event.headers[k];
+  for (const [k, v] of req.headers.entries()) {
+    hdrs[k.toLowerCase()] = v;
   }
 
   // ── Parse body (may be empty for scheduled triggers) ──────────────────
   let body = {};
-  try { body = JSON.parse(event.body || '{}'); } catch { /* no-op */ }
+  try { body = await req.json(); } catch { /* no-op */ }
 
   // ── Security Gate ─────────────────────────────────────────────────────
-  // Accept: Netlify scheduled event header  OR  x-cron-secret header/body
-  const isScheduled = hdrs['x-netlify-event'] === 'schedule';
+  // Accept: Netlify scheduled event (context)  OR  x-cron-secret header/body
   const secret = process.env.CRON_SECRET;
   const hasCronSecret = secret
     ? (safeCompare(hdrs['x-cron-secret'], secret) || safeCompare(body.cronSecret, secret))
     : false;
 
-  if (!isScheduled && !hasCronSecret) {
+  if (!hasCronSecret) {
     console.error('[NO-SHOW] Access Denied: Invalid Secret or Unauthorized Request');
-    return json(403, { error: 'Forbidden' });
+    return jsonResponse(403, { error: 'Forbidden' });
   }
 
   // ── Environment ───────────────────────────────────────────────────────
@@ -85,10 +86,10 @@ exports.handler = async (event) => {
   } = process.env;
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    return json(500, { error: 'Missing Supabase Config' });
+    return jsonResponse(500, { error: 'Missing Supabase Config' });
   }
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
-    return json(500, { error: 'Missing Twilio Config' });
+    return jsonResponse(500, { error: 'Missing Twilio Config' });
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -111,14 +112,10 @@ exports.handler = async (event) => {
       });
       console.log(`[NO-SHOW][RELAY] SMS sent to ${phone}`);
 
-      // Note: shift_audit_log is NOT inserted manually — the DB trigger
-      // `log_shift_change` on scheduled_shifts handles it automatically.
-      // The SQL check_for_noshows() function already marks the shift as no_show.
-
-      return json(200, { alerted: 1, mode: 'relay', employee: body.employeeName });
+      return jsonResponse(200, { alerted: 1, mode: 'relay', employee: body.employeeName });
     } catch (err) {
       console.error('[NO-SHOW][RELAY] CRASH:', err.message);
-      return json(500, { error: err.message });
+      return jsonResponse(500, { error: err.message });
     }
   }
 
@@ -128,10 +125,6 @@ exports.handler = async (event) => {
   console.log('[NO-SHOW][DETECT] Heartbeat: Starting full detection check...');
 
   try {
-    // ── Bulletproof UTC time math ────────────────────────────────
-    // All timestamps from Supabase are UTC. Netlify runs in UTC.
-    // We build explicit ISO-8601 strings from Date.now() to avoid
-    // any locale or timezone drift.
     const nowMs = Date.now();
     const now = new Date(nowMs);
     const nowISO = now.toISOString();
@@ -141,14 +134,8 @@ exports.handler = async (event) => {
     console.log(`[NO-SHOW][DETECT] Current UTC time : ${nowISO}`);
     console.log(`[NO-SHOW][DETECT] Window           : ${twoHoursAgoISO}  →  ${fifteenAgoISO}`);
 
-    // ── Eligible statuses ───────────────────────────────────────
-    // A shift is "alertable" if the employee was expected but hasn't
-    // clocked in. Both 'scheduled' AND 'confirmed' count.
     const ALERTABLE_STATUSES = ['scheduled', 'confirmed'];
 
-    // ── Query 1: Fetch ALL shifts in the 2-hour window (broad) ──
-    // We intentionally do NOT filter by status in the query so we
-    // can log exactly why each shift was kept or skipped.
     const { data: allShifts, error: shiftErr } = await withSourceComment(
       supabase
         .from('scheduled_shifts')
@@ -164,10 +151,9 @@ exports.handler = async (event) => {
 
     if (!allShifts || allShifts.length === 0) {
       console.log('[NO-SHOW][DETECT] No shifts found in the 2h→15m window. All clear.');
-      return json(200, { alerted: 0, mode: 'detect', status: 'Clear' });
+      return jsonResponse(200, { alerted: 0, mode: 'detect', status: 'Clear' });
     }
 
-    // ── Filter by status with detailed skip logging ─────────────
     const shifts = [];
     for (const s of allShifts) {
       if (ALERTABLE_STATUSES.includes(s.status)) {
@@ -184,10 +170,10 @@ exports.handler = async (event) => {
     console.log(`[NO-SHOW][DETECT] Alertable shifts after status filter: ${shifts.length}`);
 
     if (shifts.length === 0) {
-      return json(200, { alerted: 0, mode: 'detect', status: 'Clear — all shifts filtered out' });
+      return jsonResponse(200, { alerted: 0, mode: 'detect', status: 'Clear — all shifts filtered out' });
     }
 
-    // ── Query 2: Batch-fetch staff info ─────────────────────────
+    // ── Batch-fetch staff info ──────────────────────────────────
     const userIds = [...new Set(shifts.map(s => s.user_id).filter(Boolean))];
     const { data: staffRows, error: staffErr } = userIds.length > 0
       ? await supabase
@@ -209,7 +195,7 @@ exports.handler = async (event) => {
       shift._staff = staffById.get(shift.user_id) || null;
     }
 
-    // ── Query 3: Batch-fetch ALL relevant time_logs ─────────────
+    // ── Batch-fetch ALL relevant time_logs ──────────────────────
     const shiftStarts = shifts.map(s => new Date(s.start_time).getTime());
     const broadWindowStart = new Date(Math.min(...shiftStarts) - 30 * 60_000).toISOString();
     const broadWindowEnd   = new Date(Math.max(...shiftStarts) + 15 * 60_000).toISOString();
@@ -244,7 +230,6 @@ exports.handler = async (event) => {
     let alertedCount = 0;
     let skippedCount = 0;
 
-    // ── Iterate locally — zero additional DB queries ────────────
     for (const shift of shifts) {
       const staff = shift._staff;
       if (!staff || !staff.name || !staff.email) {
@@ -259,7 +244,6 @@ exports.handler = async (event) => {
       const shiftStartMs = new Date(shift.start_time).getTime();
       const latenessMin = Math.round((nowMs - shiftStartMs) / 60_000);
 
-      // Check for a clock-in within this shift's ±30/+15 window
       const windowStartMs = shiftStartMs - 30 * 60_000;
       const windowEndMs   = shiftStartMs + 15 * 60_000;
 
@@ -312,9 +296,6 @@ exports.handler = async (event) => {
           console.error(`[NO-SHOW][DETECT] Failed to update shift ${shift.id} status: ${statusErr.message}`);
         }
 
-        // Note: shift_audit_log is NOT inserted manually — the DB trigger
-        // `log_shift_change` on scheduled_shifts handles it automatically.
-
         alertedCount++;
       } catch (smsErr) {
         console.error(`[NO-SHOW][DETECT] SMS Failed for shift ${shift.id}: ${smsErr.message}`);
@@ -326,7 +307,7 @@ exports.handler = async (event) => {
       `${shifts.length} checked (from ${allShifts.length} total in window)`
     );
 
-    return json(200, {
+    return jsonResponse(200, {
       alerted: alertedCount,
       skipped: skippedCount,
       mode: 'detect',
@@ -336,6 +317,10 @@ exports.handler = async (event) => {
 
   } catch (err) {
     console.error('[NO-SHOW][DETECT] CRASH:', err.message);
-    return json(500, { error: err.message });
+    return jsonResponse(500, { error: err.message });
   }
+}
+
+export const config = {
+  schedule: "*/5 * * * *"
 };

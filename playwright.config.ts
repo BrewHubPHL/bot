@@ -21,4 +21,11 @@ export default defineConfig({
     },
   ],
   reporter: [['html', { open: 'never' }]],
+  /* Auto-start Next.js dev server when no PLAYWRIGHT_BASE_URL is set */
+  webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : {
+    command: 'npm run dev',
+    port: 3000,
+    reuseExistingServer: true,
+    timeout: 60_000,
+  },
 })

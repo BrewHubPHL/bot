@@ -21,6 +21,7 @@ import { saveKDSSnapshot, getKDSSnapshot } from "@/lib/offlineStore";
 import { KdsOrderCard } from "@/components/KdsOrderCard";
 import type { KdsOrder } from "@/components/KdsOrderCard";
 import AuthzErrorStateCard from "@/components/AuthzErrorState";
+import ManagerChallengeModal from "@/components/ManagerChallengeModal";
 import { getErrorInfoFromResponse, type AuthzErrorState } from "@/lib/authz";
 import { toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
 import { fetchOps } from "@/utils/ops-api";
@@ -163,6 +164,8 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
   const [error, setError]         = useState<string | null>(null);
   const [authzState, setAuthzState] = useState<AuthzErrorState | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
+  const [acknowledgedIds, setAcknowledgedIds] = useState<Set<string>>(new Set());
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string } | null>(null);
 
   const fetchingRef  = useRef(false);
   const debounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -344,16 +347,26 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
     };
   }, [fetchOrders, debouncedFetch]);
 
-  /* ── Urgency ring: >10m = pulsing red, >5m = amber ─────────── */
+  /* ── Urgency ring: >10m = soft red, >5m = amber (no infinite pulse) */
   function urgencyRing(createdAt: string, status: string): string {
     const s = ns(status);
     if (s === "ready" || s === "completed" || s === "cancelled") return "";
     const ts = new Date(createdAt).getTime();
     if (Number.isNaN(ts)) return "";
     const mins = Math.floor((Date.now() - ts) / 60000);
-    if (mins >= 10) return "ring-2 ring-red-500/60 animate-pulse";
+    if (mins >= 10) return "ring-2 ring-red-500/60 animate-kds-glow";
     if (mins >= 5)  return "ring-2 ring-amber-500/40";
     return "";
+  }
+
+  /** Mark a card as acknowledged (stops flash/glow) */
+  function acknowledge(orderId: string) {
+    setAcknowledgedIds((prev) => {
+      if (prev.has(orderId)) return prev;
+      const next = new Set(prev);
+      next.add(orderId);
+      return next;
+    });
   }
 
   /* ── Optimistic status update with rollback ─────────────────── */
@@ -496,9 +509,10 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
               createdAt={new Date(order.created_at)}
               isExiting={isExiting}
               isAwaitingPayment={isAwaitingPayment}
+              isAcknowledged={acknowledgedIds.has(order.id)}
               urgencyRing={urgencyRing(order.created_at, status)}
               className={borderTop}
-              onItemToggle={handleItemToggle}
+              onItemToggle={(itemId) => { acknowledge(order.id); handleItemToggle(itemId); }}
               actionSlot={
                 <div
                   className="space-y-2"
@@ -508,7 +522,7 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
                   {nextStatus && (
                     <button
                       disabled={updating === order.id || isExiting || isLocked}
-                      onClick={() => updateStatus(order.id, nextStatus)}
+                      onClick={() => { acknowledge(order.id); updateStatus(order.id, nextStatus); }}
                       title={isLocked ? "Claimed by another barista" : undefined}
                       className={`w-full min-h-[48px] py-3 text-xs font-bold tracking-[0.3em] uppercase transition-colors disabled:opacity-50 disabled:cursor-wait rounded-lg ${
                         isLocked
@@ -519,14 +533,19 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
                       {updating === order.id ? "Updating…" : isLocked ? "🔒 Locked" : BUTTON_LABEL[status] || "Next"}
                     </button>
                   )}
+
+                  {/* Cancel separated from status button with divider + manager PIN gate */}
                   {status !== "cancelled" && !isLocked && (
-                    <button
-                      disabled={updating === order.id || isExiting}
-                      onClick={() => updateStatus(order.id, "cancelled")}
-                      className="w-full min-h-[44px] py-2.5 text-xs font-bold tracking-[0.2em] uppercase text-red-400 hover:text-red-300 hover:bg-red-950/50 active:bg-red-950/70 transition-colors rounded-lg disabled:opacity-50"
-                    >
-                      Cancel Order
-                    </button>
+                    <>
+                      <div className="border-t border-border/40 my-1" />
+                      <button
+                        disabled={updating === order.id || isExiting}
+                        onClick={() => setCancelTarget({ id: order.id, name: order.customer_name || "Guest" })}
+                        className="w-full min-h-[36px] py-1.5 text-[10px] font-medium tracking-[0.15em] uppercase text-red-400/70 hover:text-red-300 hover:bg-red-950/30 active:bg-red-950/50 transition-colors rounded-lg disabled:opacity-50"
+                      >
+                        🔒 Cancel Order
+                      </button>
+                    </>
                   )}
                 </div>
               }
@@ -534,6 +553,21 @@ export function KdsGrid({ token, staffId, onStateChange, fetchRef }: KdsGridProp
           );
         })}
       </div>
+
+      {/* Manager Challenge Modal for cancel confirmation */}
+      {cancelTarget && token && (
+        <ManagerChallengeModal
+          actionType="cancel_order"
+          actionDescription={`Cancel order for ${cancelTarget.name}`}
+          token={token}
+          onSuccess={() => {
+            const id = cancelTarget.id;
+            setCancelTarget(null);
+            updateStatus(id, "cancelled");
+          }}
+          onCancel={() => setCancelTarget(null)}
+        />
+      )}
     </>
   );
 }

@@ -33,6 +33,8 @@ export interface KdsOrder {
   total_amount_cents: number
   claimed_by?: string | null
   items: KdsOrderItem[]
+  /** Set to true once a barista has interacted with this card */
+  acknowledged?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -68,9 +70,11 @@ interface KdsOrderCardProps {
   isAwaitingPayment?: boolean
   /** Called when a barista toggles an item checkbox — fires DB write */
   onItemToggle?: (itemId: string) => void
+  /** True once the barista has clicked any control on this card */
+  isAcknowledged?: boolean
 }
 
-export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyRing, isExiting = false, isAwaitingPayment = false, onItemToggle }: KdsOrderCardProps) {
+export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyRing, isExiting = false, isAwaitingPayment = false, isAcknowledged = false, onItemToggle }: KdsOrderCardProps) {
   // Optimistic toggle state: tracks items being toggled (waiting for Realtime)
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set())
   const toggleTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -111,9 +115,9 @@ export function KdsOrderCard({ order, createdAt, className, actionSlot, urgencyR
       style={{ viewTransitionName: `order-card-${order.id}` }}
       className={cn(
         "relative flex flex-col rounded-xl border bg-card text-card-foreground shadow-sm transition-all duration-300",
-        isGuest && "animate-pulse-border",
+        isGuest && !isAcknowledged && "animate-kds-glow",
         isAwaitingPayment && "border-dashed border-amber-500/50 opacity-70",
-        urgencyRing,
+        !isAcknowledged ? urgencyRing : "",
         isExiting
           ? "opacity-0 scale-95 translate-y-4"
           : allDone

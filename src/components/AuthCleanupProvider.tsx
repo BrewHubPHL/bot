@@ -2,7 +2,8 @@
 
 /**
  * AuthCleanupProvider — thin client-side wrapper that activates
- * session-cleanup listeners (Supabase auth state → localStorage wipe).
+ * session-cleanup listeners (Supabase auth state → localStorage wipe)
+ * and the customer visibility-based session timeout.
  *
  * Mounted once in RootLayout. Renders children transparently.
  *
@@ -10,6 +11,7 @@
  */
 
 import { useAuthCleanup } from "@/lib/useAuthCleanup";
+import { useCustomerSessionTimeout } from "@/hooks/useSmartSessionTimeout";
 
 export default function AuthCleanupProvider({
   children,
@@ -17,5 +19,6 @@ export default function AuthCleanupProvider({
   children: React.ReactNode;
 }) {
   useAuthCleanup();
+  useCustomerSessionTimeout();
   return <>{children}</>;
 }

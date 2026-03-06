@@ -154,28 +154,7 @@ export default function StaffTable({
     [showToast],
   );
 
-  /* ── Loading ────────────────────────────────────────── */
-  if (loading) {
-    return (
-      <div className="rounded-xl bg-stone-800/40 ring-1 ring-stone-700/50 p-8">
-        <div className="flex items-center justify-center gap-3 text-stone-400">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-stone-500 border-t-amber-400" />
-          <span className="text-sm">Loading staff directory…</span>
-        </div>
-      </div>
-    );
-  }
-
-  /* ── Error ──────────────────────────────────────────── */
-  if (error) {
-    return (
-      <div className="rounded-xl bg-rose-500/10 ring-1 ring-rose-500/30 p-6 text-center">
-        <p className="text-sm text-rose-300">{error}</p>
-      </div>
-    );
-  }
-
-  /* ── Derived: filter + search ───────────────────────── */
+  /* ── Derived: filter + search (must be before any early returns to obey Rules of Hooks) ── */
   const needle = searchTerm.trim().toLowerCase();
 
   const filtered = useMemo(() => {
@@ -201,6 +180,27 @@ export default function StaffTable({
 
     return result;
   }, [staff, roleFilter, needle]);
+
+  /* ── Loading ────────────────────────────────────────── */
+  if (loading) {
+    return (
+      <div className="rounded-xl bg-stone-800/40 ring-1 ring-stone-700/50 p-8">
+        <div className="flex items-center justify-center gap-3 text-stone-400">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-stone-500 border-t-amber-400" />
+          <span className="text-sm">Loading staff directory…</span>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Error ──────────────────────────────────────────── */
+  if (error) {
+    return (
+      <div className="rounded-xl bg-rose-500/10 ring-1 ring-rose-500/30 p-6 text-center">
+        <p className="text-sm text-rose-300">{error}</p>
+      </div>
+    );
+  }
 
   /* ── Empty (no data from server) ────────────────────── */
   if (staff.length === 0) {

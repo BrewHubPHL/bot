@@ -4,13 +4,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Package, Search, Plus, ScanLine, RefreshCw, Loader2,
   CheckCircle2, AlertTriangle, ArrowUpCircle, ChevronDown,
-  ChevronUp, X,
+  ChevronUp, X, Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOpsSession } from "@/components/OpsGate";
 import { fetchOps } from "@/utils/ops-api";
 import EnvironmentToggle, { type DataEnv } from "@/components/manager/EnvironmentToggle";
 import InventoryAddModal from "./InventoryAddModal";
+import InventoryEditModal from "./InventoryEditModal";
 
 /* ─── Types ────────────────────────────────────────────── */
 interface InventoryItem {
@@ -20,10 +21,11 @@ interface InventoryItem {
   current_stock: number | null;
   min_threshold: number | null;
   unit: string;
+  unit_cost_cents: number | null;
   data_integrity_level: DataEnv;
 }
 
-type SortField = "item_name" | "category" | "current_stock";
+type SortField = "item_name" | "category" | "current_stock" | "unit_cost_cents";
 type SortDir = "asc" | "desc";
 
 /* ─── Helpers ──────────────────────────────────────────── */
@@ -56,6 +58,7 @@ export default function InventoryPanel() {
   const [promoting, setPromoting] = useState(false);
   const [promoteResult, setPromoteResult] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editItem, setEditItem] = useState<InventoryItem | null>(null);
 
   const fetchRef = useRef(0); // stale-closure guard
 
@@ -104,6 +107,7 @@ export default function InventoryPanel() {
     if (sortField === "item_name") cmp = a.item_name.localeCompare(b.item_name);
     else if (sortField === "category") cmp = a.category.localeCompare(b.category);
     else if (sortField === "current_stock") cmp = (a.current_stock ?? 0) - (b.current_stock ?? 0);
+    else if (sortField === "unit_cost_cents") cmp = (a.unit_cost_cents ?? 0) - (b.unit_cost_cents ?? 0);
     return sortDir === "asc" ? cmp : -cmp;
   });
 
@@ -193,6 +197,12 @@ export default function InventoryPanel() {
             {outOfStockCount > 0 && (
               <span className="text-red-400 ml-2">&middot; {outOfStockCount} out of stock</span>
             )}
+            {(() => {
+              const val = items.reduce((s, i) => s + (i.current_stock ?? 0) * (i.unit_cost_cents ?? 0), 0);
+              return val > 0 ? (
+                <span className="text-emerald-400 ml-2">&middot; ${(val / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })} value</span>
+              ) : null;
+            })()}
           </p>
         </div>
 
@@ -360,9 +370,18 @@ export default function InventoryPanel() {
                     Stock <SortIcon field="current_stock" />
                   </span>
                 </th>
+                <th
+                  className="px-4 py-3 text-right cursor-pointer hover:text-stone-200 transition-colors"
+                  onClick={() => toggleSort("unit_cost_cents")}
+                >
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    Unit Cost <SortIcon field="unit_cost_cents" />
+                  </span>
+                </th>
                 <th className="px-4 py-3 text-right">Threshold</th>
                 <th className="px-4 py-3 text-left">Unit</th>
                 <th className="px-4 py-3 text-center">Level</th>
+                <th className="px-2 py-3 text-center w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-800/60">
@@ -397,6 +416,11 @@ export default function InventoryPanel() {
                     <td className={cn("px-4 py-2.5 text-right font-mono tabular-nums", stockBadge(item.current_stock, item.min_threshold))}>
                       {item.current_stock ?? "—"}
                     </td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums text-stone-300">
+                      {item.unit_cost_cents != null
+                        ? `$${(item.unit_cost_cents / 100).toFixed(2)}`
+                        : <span className="text-stone-600">—</span>}
+                    </td>
                     <td className="px-4 py-2.5 text-right text-stone-500 font-mono tabular-nums">
                       {item.min_threshold ?? "—"}
                     </td>
@@ -408,6 +432,15 @@ export default function InventoryPanel() {
                       )}>
                         {item.data_integrity_level === "production" ? "prod" : "sim"}
                       </span>
+                    </td>
+                    <td className="px-2 py-2.5 text-center">
+                      <button
+                        onClick={() => setEditItem(item)}
+                        className="p-1.5 rounded-md text-stone-500 hover:text-amber-400 hover:bg-stone-700/60 transition-colors"
+                        title="Edit item"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
                     </td>
                   </tr>
                 );
@@ -430,6 +463,15 @@ export default function InventoryPanel() {
           token={token}
           onClose={() => setShowAddModal(false)}
           onCreated={() => { setShowAddModal(false); fetchInventory(); }}
+        />
+      )}
+
+      {editItem && (
+        <InventoryEditModal
+          token={token}
+          item={editItem}
+          onClose={() => setEditItem(null)}
+          onUpdated={() => { setEditItem(null); fetchInventory(); }}
         />
       )}
     </div>

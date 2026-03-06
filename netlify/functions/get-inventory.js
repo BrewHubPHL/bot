@@ -53,7 +53,7 @@ exports.handler = async (event) => {
     const levelFilter = (event.queryStringParameters || {}).level;
     let query = supabase
       .from('inventory')
-      .select('id, item_name, category, current_stock, min_threshold, unit, data_integrity_level')
+      .select('id, item_name, category, current_stock, min_threshold, unit, unit_cost_cents, data_integrity_level')
       .order('item_name', { ascending: true })
       .limit(INVENTORY_LIMIT);
 
@@ -72,6 +72,7 @@ exports.handler = async (event) => {
       current_stock: Number.isFinite(Number(i.current_stock)) ? Number(i.current_stock) : null,
       min_threshold: Number.isFinite(Number(i.min_threshold)) ? Number(i.min_threshold) : null,
       unit: sanitizeInput(String(i.unit || '')).slice(0, 20),
+      unit_cost_cents: Number.isFinite(Number(i.unit_cost_cents)) ? Number(i.unit_cost_cents) : null,
       data_integrity_level: i.data_integrity_level || 'simulation',
     }));
 

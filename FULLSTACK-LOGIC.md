@@ -75,6 +75,16 @@ If the LLM hallucinated or was prompt-injected, unsanitised content would flow i
 
 ### LOW — Missing `logSystemError` for Parcel Query Failures
 
+---
+
+### CRITICAL — Scheduled Functions Returning 500 in Production (Fixed June 2025)
+
+**Symptom:** `no-show-alert`, `cancel-stale-orders`, `reconcile-pending-payments` all returned HTTP 500 in production. SMS alerts never sent. Stale orders not cleaned.
+
+**Root Cause:** CJS v1 function format (`exports.handler`, `require()`) incompatible with `@netlify/plugin-nextjs` v5 runtime for scheduled functions. Additionally, `netlify.toml` had a `node_bundle = {}` typo (should be `node_bundler = "esbuild"`).
+
+**Fix:** Converted all 3 functions to ESM v2 (`.mjs` files with `export default`, `import`, `new Response()`, in-file `export const config = { schedule }`). Removed schedule blocks from `netlify.toml`. See SYSTEM-BLUEPRINT.md Part 9.
+
 **File:** `netlify/functions/claude-chat.js`
 
 The `check_parcels` catch block only called `console.error()`. Per project standards (`CLAUDE.md` — Standard Libraries & Helpers), persistent error logging via `logSystemError()` is required.

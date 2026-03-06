@@ -9,6 +9,7 @@ import { useRouter, usePathname } from "next/navigation";
 import PinRotationModal from "./PinRotationModal";
 import ManagerChallengeModal from "./ManagerChallengeModal";
 import { StaffShiftProvider, broadcastShiftChange, useStaff as useStaffHook } from "@/context/StaffContext";
+import { useStaffSessionTimeout } from "@/hooks/useSmartSessionTimeout";
 
 /* ─── Types ────────────────────────────────────────────── */
 interface StaffInfo {
@@ -99,6 +100,16 @@ let _cachedSession: OpsSessionState | null = null;
  * to display shift badge + clock buttons in the persistent header.
  * Must be rendered INSIDE <StaffShiftProvider>.
  */
+/**
+ * Invisible guard — mounts inside <StaffShiftProvider> to activate
+ * the 12-hour / clock-out visibility timeout for staff sessions.
+ */
+function StaffSessionTimeoutGuard() {
+  const { isClockedIn } = useStaffHook();
+  useStaffSessionTimeout(isClockedIn);
+  return null;
+}
+
 function ShiftControls({
   clockLoading,
   onClock,
@@ -737,6 +748,8 @@ export default function OpsGate({ children, requireManager = false }: { children
             initialIsWorking={session.staff.is_working}
             ready={sessionVerified}
           >
+          {/* 12-hour / clock-out visibility timeout guard */}
+          <StaffSessionTimeoutGuard />
           {/* Schema 47: PIN Rotation Modal */}
           {showPinRotation && !pinRotationDeferred && (
             <PinRotationModal

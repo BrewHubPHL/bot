@@ -28,6 +28,7 @@ export default function InventoryAddModal({ token, onClose, onCreated }: Invento
   const [name, setName] = useState("");
   const [barcode, setBarcode] = useState("");
   const [category, setCategory] = useState<string>(CATEGORY_OPTIONS[0]);
+  const [unitCost, setUnitCost] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,11 +48,21 @@ export default function InventoryAddModal({ token, onClose, onCreated }: Invento
       return;
     }
 
+    let unitCostCents: number | null = null;
+    if (unitCost.trim() !== "") {
+      const parsed = parseFloat(unitCost.trim());
+      if (isNaN(parsed) || parsed < 0 || parsed > 999999) {
+        setError("Unit cost must be a positive dollar amount (e.g. 4.50).");
+        return;
+      }
+      unitCostCents = Math.round(parsed * 100);
+    }
+
     setSaving(true);
     try {
       const res = await fetchOps("/create-inventory-item", {
         method: "POST",
-        body: JSON.stringify({ name: trimmedName, barcode: trimmedBarcode, category }),
+        body: JSON.stringify({ name: trimmedName, barcode: trimmedBarcode, category, unit_cost_cents: unitCostCents }),
       }, token);
 
       if (!res.ok) {
@@ -66,7 +77,7 @@ export default function InventoryAddModal({ token, onClose, onCreated }: Invento
     } finally {
       setSaving(false);
     }
-  }, [name, barcode, category, token, onCreated]);
+  }, [name, barcode, category, unitCost, token, onCreated]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -142,6 +153,27 @@ export default function InventoryAddModal({ token, onClose, onCreated }: Invento
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
+          </div>
+
+          {/* Unit Cost */}
+          <div>
+            <label htmlFor="inv-cost" className="block text-xs font-medium text-stone-300 mb-1.5">
+              Unit Cost <span className="text-stone-500">(optional)</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500 text-sm">$</span>
+              <input
+                id="inv-cost"
+                type="text"
+                inputMode="decimal"
+                value={unitCost}
+                onChange={(e) => setUnitCost(e.target.value)}
+                placeholder="0.00"
+                maxLength={10}
+                className="w-full pl-7 pr-3 py-2.5 bg-stone-800 border border-stone-700 rounded-xl text-white text-sm placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-mono"
+                disabled={saving}
+              />
+            </div>
           </div>
 
           {/* Error */}

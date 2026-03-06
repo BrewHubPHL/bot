@@ -7,7 +7,7 @@ const { hashIP } = require('./_ip-hash');
 const { sanitizeInput } = require('./_sanitize');
 const { logSystemError } = require('./_system-errors');
 const { calculateTaxInclusive } = require('./_pricing');
-const { generateText, tool, embed, jsonSchema } = require('ai');
+const { generateText, tool, embed, jsonSchema, stepCountIs } = require('ai');
 const { createAnthropic } = require('@ai-sdk/anthropic');
 const { createCohere } = require('@ai-sdk/cohere');
 
@@ -257,7 +257,7 @@ function createTools({ supabase, authedUser, clientIp }) {
                                 }
                             }
                             if (!matchedName) {
-                                const COFFEE_ALIASES = { 'black coffee': 'drip coffee', 'black': 'drip coffee', 'regular coffee': 'drip coffee', 'plain coffee': 'drip coffee', 'house coffee': 'drip coffee', 'just coffee': 'drip coffee', 'shot': 'espresso', 'espresso shot': 'espresso', 'cap': 'cappuccino' };
+                                const COFFEE_ALIASES = { 'black coffee': 'drip coffee', 'black': 'drip coffee', 'regular coffee': 'drip coffee', 'plain coffee': 'drip coffee', 'house coffee': 'drip coffee', 'just coffee': 'drip coffee', 'pour over': 'drip coffee', 'pourover': 'drip coffee', 'shot': 'espresso', 'espresso shot': 'espresso', 'cap': 'cappuccino' };
                                 const aliased = COFFEE_ALIASES[cleaned] || COFFEE_ALIASES[(item.name || '').toLowerCase().trim()];
                                 if (aliased) matchedName = menuItemNames.find(n => n.toLowerCase() === aliased);
                             }
@@ -966,16 +966,16 @@ exports.handler = async (event) => {
                 // Create tools with request-scoped context (supabase, auth, IP)
                 const tools = createTools({ supabase, authedUser, clientIp: getClientIP(event) });
 
-                // AI SDK handles the full tool call loop automatically via maxSteps
-                // maxSteps: 8 gives the model room for multi-tool flows (e.g. search_catalog
+                // AI SDK v6: stopWhen replaces maxSteps, maxOutputTokens replaces maxTokens.
+                // stepCountIs(8) gives the model room for multi-tool flows (e.g. search_catalog
                 // → get_menu → place_order → retry) AND still produce a final text reply.
                 const result = await generateText({
                     model: anthropic('claude-sonnet-4-20250514'),
                     system: SYSTEM_PROMPT,
                     messages,
                     tools,
-                    maxSteps: 8,
-                    maxTokens: 600,
+                    stopWhen: stepCountIs(8),
+                    maxOutputTokens: 1024,
                 });
 
                 // When all steps are consumed by tool calls, result.text is empty.

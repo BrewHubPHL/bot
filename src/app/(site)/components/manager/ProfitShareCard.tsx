@@ -32,6 +32,10 @@ interface ProfitShareData {
   probation_days: number;
   order_count: number;
   revenue_display: string;
+  maintenance_cost_display?: string;
+  opex_display?: string;
+  cogs_display?: string;
+  total_expenses_display?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -160,6 +164,16 @@ export default function ProfitShareCard() {
             <span>Net Profit: {data.net_profit_display}</span>
             <span>Floor: {data.profit_floor_display}</span>
           </div>
+          {/* ── Expense breakdown ─────────────────────── */}
+          {data.total_expenses_display && (
+            <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-stone-600 mt-1">
+              <span>Revenue: {data.revenue_display}</span>
+              {data.maintenance_cost_display && <span>Maint: {data.maintenance_cost_display}</span>}
+              {data.opex_display && <span>OpEx: {data.opex_display}</span>}
+              {data.cogs_display && <span>COGS: {data.cogs_display}</span>}
+              <span>Total Expenses: {data.total_expenses_display}</span>
+            </div>
+          )}
         </div>
 
         {/* ── Key metrics grid ─────────────────────────── */}

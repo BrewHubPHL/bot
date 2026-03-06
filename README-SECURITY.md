@@ -167,3 +167,10 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 * **Fix:** Added `allowCustomer: false` option to `authorize(event, options)`. When `true`, valid customer JWTs exit immediately after revocation and token-age checks with `{ ok: true, via: 'jwt', role: 'customer' }`, bypassing the `staff_directory` lookup entirely.
 * **Default:** `allowCustomer` defaults to `false` — all existing ops/manager endpoints remain staff-only with zero changes required.
 * **Consumer:** `create-customer.js` now calls `authorize(event, { allowCustomer: true })`.
+
+### S. Visibility-Based Session Timeout (`useSmartSessionTimeout`) (March 2026)
+* **Risk:** On shared devices (POS iPads, public kiosks) a user could leave a tab backgrounded indefinitely, allowing the next person to inherit an active session.
+* **Mechanism:** `src/hooks/useSmartSessionTimeout.ts` listens to `document.visibilitychange`. On `hidden`, it stamps `Date.now()` into `localStorage` (`brewhub_last_active`). On `visible`, it reads the stamp, computes elapsed time, and fires the `onExpire` callback if the threshold is exceeded; otherwise clears the stamp silently.
+* **Customer threshold:** 15 minutes → `supabase.auth.signOut()` + redirect to `/login`. Mounted globally via `AuthCleanupProvider` in root `layout.tsx`.
+* **Staff threshold:** 12 hours OR clock-out (whichever comes first) → `forceOpsLogout()` (bounces to PIN screen). Mounted inside the `<StaffShiftProvider>` tree in `OpsGate.tsx` via `<StaffSessionTimeoutGuard>`.
+* **Clock-out detection:** The staff hook monitors `isClockedIn` from `StaffContext`. If the value transitions from `true → false` (e.g. clock-out in another tab via BroadcastChannel), the session is terminated immediately regardless of elapsed time.

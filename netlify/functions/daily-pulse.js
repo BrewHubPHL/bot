@@ -20,7 +20,7 @@ export default async function (req, context) {
 
     const [orders, parcelsIn, parcelsOut, newCustomers] = await Promise.all([
       withSourceComment(supabase.from('orders').select('status, total_amount_cents').gte('created_at', startTime.toISOString()), 'pulse-orders'),
-      withSourceComment(supabase.from('parcels').select('id', { count: 'exact', head: true }).eq('status', 'logged').gte('logged_at', startTime.toISOString()), 'pulse-parcels-inbound'),
+      withSourceComment(supabase.from('parcels').select('id', { count: 'exact', head: true }).eq('status', 'arrived').gte('received_at', startTime.toISOString()), 'pulse-parcels-inbound'),
       withSourceComment(supabase.from('parcels').select('id', { count: 'exact', head: true }).eq('status', 'picked_up').gte('picked_up_at', startTime.toISOString()), 'pulse-parcels-outbound'),
       supabase.from('customers').select('*', { count: 'exact', head: true }).gte('created_at', startTime.toISOString())
     ]);

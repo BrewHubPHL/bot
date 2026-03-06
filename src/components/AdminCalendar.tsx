@@ -94,6 +94,33 @@ function getEmployeeColor(userId: string): string {
   return PILL_COLORS[Math.abs(hash) % PILL_COLORS.length];
 }
 
+/**
+ * Convert an ISO timestamp (typically UTC from Supabase) to a bare datetime
+ * string in America/New_York *without* an offset suffix.
+ *
+ * FullCalendar with `timeZone="America/New_York"` — but no timezone plugin —
+ * positions events by their raw timestamp value when an offset is present.
+ * By stripping the offset and expressing the time in ET, FullCalendar treats
+ * the bare string as already in the target timezone and positions it correctly
+ * on the grid.
+ */
+function toNaiveET(iso: string): string {
+  const d = new Date(iso);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(d);
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`;
+}
+
 /** Group individual shift rows by matching (start, end) into single calendar events */
 function groupShiftsBySlot(rawShifts: RawShift[]): GroupedShiftEvent[] {
   const groups = new Map<string, RawShift[]>();
@@ -116,8 +143,8 @@ function groupShiftsBySlot(rawShifts: RawShift[]): GroupedShiftEvent[] {
     return {
       id: shifts.map((s) => s.id).sort().join('|'),
       title: employees.map((e) => e.name).join(', '),
-      start: shifts[0].start_time,
-      end: shifts[0].end_time,
+      start: toNaiveET(shifts[0].start_time),
+      end: toNaiveET(shifts[0].end_time),
       backgroundColor: '#f8fafc',
       borderColor: '#3b82f6',
       textColor: '#1e293b',

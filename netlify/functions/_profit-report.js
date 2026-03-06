@@ -68,17 +68,29 @@ async function computeProfitReport(supabase, monthStr, { productionOnly = true }
   // so NULL costs can never silently become NaN in JavaScript.
   // If the RPC is not yet deployed we fall back to the row-level approach
   // with an explicit null guard.
-  const [ordersResult, maintRpcResult, opexResult] = await Promise.all([
-    (() => {
-      let q = supabase
-        .from('orders')
-        .select('total_amount_cents')
-        .eq('status', 'completed')
-        .gte('created_at', start)
-        .lt('created_at', end);
-      if (productionOnly) q = q.eq('data_integrity_level', 'production');
-      return q;
-    })(),
+  // Orders query: try with data_integrity_level filter first; if the column
+  // hasn't been deployed yet (schema 94), fall back to unfiltered query so
+  // the profit report still renders while migrations are pending.
+  const ordersQuery = async () => {
+    const base = () => supabase
+      .from('orders')
+      .select('total_amount_cents')
+      .eq('status', 'completed')
+      .gte('created_at', start)
+      .lt('created_at', end);
+
+    if (!productionOnly) return base();
+
+    const result = await base().eq('data_integrity_level', 'production');
+    if (result.error && /data_integrity_level|column.*does not exist/i.test(result.error.message || '')) {
+      console.warn('[PROFIT-REPORT] data_integrity_level column not found, querying without filter.');
+      return base();
+    }
+    return result;
+  };
+
+  const [ordersResult, maintRpcResult, opexResult, cogsRpcResult] = await Promise.all([
+    ordersQuery(),
 
     supabase
       .rpc('agg_maintenance_costs', {
@@ -94,6 +106,13 @@ async function computeProfitReport(supabase, monthStr, { productionOnly = true }
       .select('amount, category')
       .gte('due_date', start.slice(0, 10))
       .lt('due_date', end.slice(0, 10)),
+
+    // Automated COGS from inventory consumption (schema 96)
+    supabase
+      .rpc('agg_inventory_cogs', {
+        start_date: start.slice(0, 10),
+        end_date:   end.slice(0, 10),
+      }),
   ]);
 
   // Explicit Supabase error checks (non-negotiable)
@@ -154,11 +173,25 @@ async function computeProfitReport(supabase, monthStr, { productionOnly = true }
     console.warn('[PROFIT-REPORT] property_expenses query unavailable, OpEx defaults to $0.', opexResult.error?.message);
   }
 
-  // ── Net Profit = Revenue − Maintenance − OpEx ─────────────
+  // ── Automated COGS (inventory consumption) ─────────────────
+  let cogsCents = 0;
+  let cogsEventCount = 0;
+
+  if (!cogsRpcResult.error && cogsRpcResult.data) {
+    const row = Array.isArray(cogsRpcResult.data)
+      ? cogsRpcResult.data[0]
+      : cogsRpcResult.data;
+    cogsCents = Number(row?.total_cogs_cents) || 0;
+    cogsEventCount = Number(row?.event_count) || 0;
+  } else {
+    console.warn('[PROFIT-REPORT] agg_inventory_cogs RPC unavailable, COGS defaults to $0.', cogsRpcResult.error?.message);
+  }
+
+  // ── Net Profit = Revenue − Maintenance − OpEx − COGS ─────
   // Aligns with Employment Addendum: "Revenue minus all Operating
   // Expenses (OpEx), including rent, payroll, COGS, and Equipment
   // Maintenance Costs."
-  const totalExpensesCents = maintenanceCostCents + opexCents;
+  const totalExpensesCents = maintenanceCostCents + opexCents + cogsCents;
   const netProfitCents = revenueCents - totalExpensesCents;
 
   const maintenanceToRevenueRatio =
@@ -174,6 +207,8 @@ async function computeProfitReport(supabase, monthStr, { productionOnly = true }
     maintenance_cost_display: centsToDisplay(maintenanceCostCents),
     opex_cents: opexCents,
     opex_display: centsToDisplay(opexCents),
+    cogs_cents: cogsCents,
+    cogs_display: centsToDisplay(cogsCents),
     total_expenses_cents: totalExpensesCents,
     total_expenses_display: centsToDisplay(totalExpensesCents),
     net_profit_cents: netProfitCents,
@@ -183,6 +218,7 @@ async function computeProfitReport(supabase, monthStr, { productionOnly = true }
     order_count: orders.length,
     maintenance_event_count: maintenanceEventCount,
     opex_event_count: opexEventCount,
+    cogs_event_count: cogsEventCount,
   };
 }
 

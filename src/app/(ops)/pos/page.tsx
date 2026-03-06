@@ -17,7 +17,7 @@ import OfflineBanner from "@/components/OfflineBanner";
 import LiveClock from "@/components/LiveClock";
 import OnscreenKeyboard from "@/components/OnscreenKeyboard";
 import { toUserSafeMessage, toUserSafeMessageFromUnknown } from "@/lib/errorCatalog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   cacheMenu, getCachedMenu, queueOfflineOrder, getUnsyncedOrders,
   markOrderSynced, clearSyncedOrders, type OfflineOrder, type CachedMenuItem,
@@ -516,9 +516,11 @@ export default function POSPage() {
                   quantity: i.quantity,
                   customizations: i.customizations,
                 })),
+                terminal: true,
+                paymentMethod: order.payment_method,
+                customer_name: order.customer_name || "Offline Order",
                 offline_id: order.id,
                 offline_created_at: order.created_at,
-                payment_method: order.payment_method,
               }),
             }, token);
             await markOrderSynced(order.id);
@@ -642,9 +644,12 @@ export default function POSPage() {
         name: ci.name,
         quantity: ci.quantity,
         price_cents: (Number(ci.price_cents) || 0) + ci.modifiers.reduce((s, m) => s + (Number(m.price_cents) || 0) * m.quantity, 0),
-        customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => formatModifier(m)) : undefined,
+        customizations: ci.modifiers.length > 0
+          ? ci.modifiers.flatMap(m => Array.from({ length: m.quantity }, () => m.name))
+          : undefined,
       })),
       total_cents: total,
+      customer_name: loyaltyCustomer?.name || guestFirstName || undefined,
       payment_method: "cash",
       created_at: new Date().toISOString(),
       synced: false,
@@ -755,7 +760,9 @@ export default function POSPage() {
     return cart.map((ci) => ({
       product_id: ci.productId,
       quantity: ci.quantity,
-      customizations: ci.modifiers.length > 0 ? ci.modifiers.map(m => formatModifier(m)) : undefined,
+      customizations: ci.modifiers.length > 0
+        ? ci.modifiers.flatMap(m => Array.from({ length: m.quantity }, () => m.name))
+        : undefined,
       ...(ci.isOpenPrice ? { open_price_cents: ci.price_cents } : {}),
     }));
   }, [cart]);
@@ -2988,8 +2995,8 @@ export default function POSPage() {
         <DialogContent className="max-w-md bg-stone-900 border-stone-800">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold">Enter customer first name</DialogTitle>
+            <DialogDescription className="text-sm text-stone-400">This will appear on the KDS as the customer&apos;s first name.</DialogDescription>
           </DialogHeader>
-            <p className="text-sm text-stone-400 mb-4">This will appear on the KDS as the customer&apos;s first name.</p>
             <input
               ref={guestInputRef}
               autoFocus
@@ -3040,6 +3047,8 @@ export default function POSPage() {
       {/* Open-price modal (shipping / TBD items) */}
       <Dialog open={openPriceModalOpen && !!openPriceItem} onOpenChange={(open) => { if (!open) { setOpenPriceModalOpen(false); setOpenPriceItem(null); } }}>
         <DialogContent className="max-w-md bg-stone-900 border-stone-800">
+            <DialogTitle className="sr-only">{openPriceItem?.name ?? 'Shipping Price'}</DialogTitle>
+            <DialogDescription className="sr-only">Enter the quoted shipping price for this item</DialogDescription>
             <div className="flex items-center gap-3 mb-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/20">
                 <Truck className="h-5 w-5 text-amber-400" />
@@ -3134,6 +3143,8 @@ export default function POSPage() {
       {/* ═══════ Manager PIN Modal ═══════ */}
       <Dialog open={compPinModalOpen} onOpenChange={setCompPinModalOpen}>
         <DialogContent className="max-w-sm bg-stone-900 border-stone-700 rounded-2xl p-0 gap-0 overflow-hidden shadow-2xl">
+            <DialogTitle className="sr-only">Manager Authorization</DialogTitle>
+            <DialogDescription className="sr-only">Enter a 6-digit Manager PIN to authorize this comp</DialogDescription>
             <div className="px-5 py-4 border-b border-stone-800">
               <div className="flex items-center gap-2">
                 <ShieldCheck size={16} className="text-amber-400" />
@@ -3183,6 +3194,8 @@ export default function POSPage() {
       {/* ═══════ Comp Reason Modal ═══════ */}
       <Dialog open={compModalOpen} onOpenChange={setCompModalOpen}>
         <DialogContent className="max-w-sm bg-stone-900 border-stone-700 rounded-2xl p-0 gap-0 overflow-hidden shadow-2xl">
+            <DialogTitle className="sr-only">Comp Reason</DialogTitle>
+            <DialogDescription className="sr-only">Enter a reason for this comp order</DialogDescription>
             <div className="px-5 py-4 border-b border-stone-800">
               <h3 className="font-bold text-sm uppercase tracking-[0.15em] text-stone-300">Comp Reason</h3>
               <p className="text-xs text-stone-500 mt-1">Required — logged for audit (authorized by {compManagerRef.current?.name || "Manager"})</p>
@@ -3220,6 +3233,8 @@ export default function POSPage() {
       {/* ═══════ Loyalty QR Camera Modal ═══════ */}
       <Dialog open={loyaltyModalOpen} onOpenChange={(open) => { if (!open) closeLoyaltyScanner(); }}>
         <DialogContent className="max-w-md bg-stone-900 border-stone-700 rounded-2xl p-0 gap-0 overflow-hidden shadow-2xl">
+            <DialogTitle className="sr-only">Scan Loyalty QR</DialogTitle>
+            <DialogDescription className="sr-only">Scan a customer loyalty QR code</DialogDescription>
             {/* Modal Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-stone-800">
               <div className="flex items-center gap-2">

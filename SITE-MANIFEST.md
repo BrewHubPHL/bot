@@ -127,7 +127,7 @@
 | Function | Method | Auth | Purpose |
 |---|---|---|---|
 | `get-crm-customers.js` | GET | Manager PIN | Returns filtered `customers` rows for CRM drill-down (8 filter modes: all, app_users, walk_in, mailbox, vip, loyalty, active_30d, new_7d). Origin-validated CORS, 500-row limit, 15s cache. |
-| `get-true-profit-report.js` | GET | Manager PIN | Monthly profitability report: sums completed-order revenue, subtracts maintenance costs and operating expenses (OpEx from `property_expenses`), returns net profit + maintenance-to-revenue ratio. Net Profit = Revenue − Maintenance − OpEx (aligns with Employee Addendum). Query param `?month=YYYY-MM` (defaults to current month). |
+| `get-true-profit-report.js` | GET | Manager PIN | Monthly profitability report: sums completed-order revenue, subtracts maintenance costs, operating expenses (OpEx from `property_expenses`), and automated COGS (from `agg_inventory_cogs` RPC), returns net profit + maintenance-to-revenue ratio. Net Profit = Revenue − Maintenance − OpEx − COGS (aligns with Employee Addendum). Query param `?month=YYYY-MM` (defaults to current month). |
 | `get-profit-share-preview.js` | GET | Manager PIN | Team profit share preview: reuses `computeProfitReport()`, subtracts $5k Profit Floor, computes 10% Staff Pool via `Math.floor` (strict integer cents). Joins `time_logs` with `staff_directory` to enforce 6-month vesting and 90-day probation filters — only vested employee hours counted. Derives Bonus-per-Hour via `Math.floor`. If bonus < 1¢/hr or 0 eligible hours returns $0.00. Returns `eligible_staff_count`, `pending_staff_count`, `vesting_months`, `probation_days`. Logs ops-diagnostics info when no staff are vested. All display strings formatted by shared `centsToDisplay()`. |
 | `cron-monthly-financial-summary.js` | Scheduled | None (cron) | Runs 1st of every month. Emails the previous month's profitability report to all active managers via Resend. CTA to `/manager/assets` when maintenance ratio > 10%. |
 | `record-agreement-signature.js` | POST | Staff PIN | Records a staff member's digital signature on the Mutual Working Agreement. Verifies PIN via `verify_staff_pin` RPC, validates body `staff_id` matches session identity, **canonically normalizes** agreement text via `getCanonicalAgreementText` (`_crypto-utils.js`), hashes (SHA-256) server-side, logs normalization delta, then calls the **atomic** `record_agreement_signature` Postgres RPC (insert + `contract_signed` update in one transaction). Notifies managers via Resend. |
@@ -204,7 +204,7 @@
 | Route | Auth | Description |
 |---|---|---|
 | `/pos` | Middleware + OpsGate | 3-column POS with Square Terminal |
-| `/kds` | Middleware + OpsGate | Kitchen Display System (realtime) |
+| `/kds` | Middleware + OpsGate | Kitchen Display System (realtime). Cancel requires Manager TOTP challenge. |
 | `/scanner` | Middleware + OpsGate | Inventory barcode scanner |
 | `/manager` | Middleware PIN | Manager dashboard |
 | `/manager/calendar` | Middleware PIN | Shift scheduling with multi-employee drag-and-drop |

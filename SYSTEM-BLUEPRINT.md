@@ -117,6 +117,11 @@
 - All ops-side toast notifications use **Sonner** (`sonner` npm package) via a single `<Toaster>` provider in the `(ops)` layout (`src/app/(ops)/layout.tsx`).
 - Legacy hand-rolled toast state (`useState` + `setTimeout` + fixed-position divs) has been replaced across 7 components: `KdsGrid`, `AdminCalendar`, `StaffTable`, `CustomerTable`, `FulfillmentDashboard`, `AssetsPage`, and `DashboardOverhaul`.
 
+### KDS Interaction Model
+- **New-order glow**: Guest and urgent (>10 min) orders use a gentle `animate-kds-glow` animation (3 cycles, ~5.4 s total) defined in `globals.css`. Replaces the previous infinite `animate-pulse`.
+- **Acknowledge on first touch**: Any barista interaction (status button, item toggle) marks the card as acknowledged and stops all attention animations.
+- **Cancel gate**: The Cancel Order button is visually separated from status buttons (divider + smaller text) and requires a **Manager TOTP Challenge** (`ManagerChallengeModal`) before executing.
+
 ---
 
 ## Part 5a: Schema Evolution (29–43)
@@ -196,7 +201,7 @@
 - **Scope:** 25+ Netlify functions audited and patched to enforce the #1 architectural non-negotiable: explicit `if (error)` checks after every Supabase query.
 - **Problem:** Supabase JS does not throw on query failures. Many functions used bare `await` or relied solely on `try/catch`, silently swallowing database errors.
 - **Fix Pattern:** Every Supabase call now destructures `{ data, error }` and explicitly checks `if (error)` before proceeding. All catch paths call `logSystemError()` for persistent tracking.
-- **Functions patched:** `_auth.js`, `_process-payment.js`, `_sms.js`, `_system-errors.js`, `cafe-checkout.js`, `claude-chat.js`, `daily-pulse.js`, `fix-clock.js`, `get-arrived-parcels.js`, `get-loyalty.js`, `get-manager-stats.js`, `get-menu.js`, `get-shift-status.js`, `get-staff-loyalty.js`, `manage-catalog.js`, `manage-schedule.js`, `manager-challenge.js`, `oauth/callback.js`, `parcel-check-in.js`, `parcel-pickup.js`, `process-merch-payment.js`, `queue-processor.js`, `reconcile-pending-payments.js`, `square-webhook.js`, `update-hours.js`, `update-order-status.js`.
+- **Functions patched:** `_auth.js`, `_process-payment.js`, `_sms.js`, `_system-errors.js`, `cafe-checkout.js`, `claude-chat.js`, `daily-pulse.js`, `fix-clock.js`, `get-arrived-parcels.js`, `get-loyalty.js`, `get-manager-stats.js`, `get-menu.js`, `get-shift-status.js`, `get-staff-loyalty.js`, `manage-catalog.js`, `manage-schedule.js`, `manager-challenge.js`, `oauth/callback.js`, `parcel-check-in.js`, `parcel-pickup.js`, `process-merch-payment.js`, `queue-processor.js`, `reconcile-pending-payments.mjs`, `square-webhook.js`, `update-hours.js`, `update-order-status.js`.
 - **Key pattern changes:**
   - `.single()` → `.maybeSingle()` where zero results are valid (receipts, payment reuse checks).
   - Rollback operations (`orders.delete`, `coffee_orders.delete`) now capture and log errors instead of silently discarding.
@@ -270,7 +275,7 @@
 - **Netlify Function:** `log-maintenance-action.js` — manager-only POST endpoint that inserts into `maintenance_logs`; the existing `trg_update_last_maint_date` trigger atomically updates `equipment.last_maint_date` in the same transaction. Validates UUID, date (no future), cost bounds, and sanitizes notes via `sanitizeInput()`.
 - **Frontend:** `/manager/assets` page with sortable equipment table, summary cards (Total Assets, Total TCO, Overdue, Projected Maintenance Spend), and overdue badges. The Finance card shows "Est. Maint. Spend (Next 90d)" with an expandable flagged equipment list. Each row has a "Log Maint." button that opens the `MaintenanceLogger` portal modal. Manager dashboard shows a persistent toast notification on mount when any asset is overdue.
 - **MaintenanceLogger Component:** `src/components/ops/MaintenanceLogger.tsx` — portal-based modal for logging completed maintenance. Posts via `fetchOps()` (auto CSRF header), refreshes asset table on success and clears overdue status.
-- **Shared Module:** `_profit-report.js` — extracts `computeProfitReport(supabase, monthStr)` so both the HTTP endpoint and the cron job share identical business logic. Returns revenue, maintenance cost, operating expenses (OpEx from `property_expenses`), total expenses, net profit, ratio, and event counts. Net Profit is computed as Revenue − Maintenance − OpEx, aligning with the Employee Addendum definition: "Revenue minus all Operating Expenses (OpEx), including rent, payroll, COGS, and Equipment Maintenance Costs." Also exports `centsToDisplay(cents)` (locale-formatted via `Intl.NumberFormat`), `monthBounds(monthStr)`, `MONTH_RE`, `checkVestingEligibility(hireDateStr, asOf?)`, `VESTING_MONTHS` (6), and `PROBATION_DAYS` (90). `checkVestingEligibility` validates whether a staff member's hire date clears both the 90-day probation and 6-month vesting requirements — returns `{ eligible, reason }`. **Maintenance cost aggregation** uses the `agg_maintenance_costs(start_date, end_date)` Postgres RPC which applies `COALESCE(cost, 0)` at the SQL level — never relies on JavaScript `Number() || 0`. Falls back to a row-level fetch with `.not('cost', 'is', null)` filter if the RPC is not yet deployed.
+- **Shared Module:** `_profit-report.js` — extracts `computeProfitReport(supabase, monthStr)` so both the HTTP endpoint and the cron job share identical business logic. Returns revenue, maintenance cost, operating expenses (OpEx from `property_expenses`), automated COGS (from `agg_inventory_cogs` RPC), total expenses, net profit, ratio, and event counts. Net Profit is computed as Revenue − Maintenance − OpEx − COGS, aligning with the Employee Addendum definition: "Revenue minus all Operating Expenses (OpEx), including rent, payroll, COGS, and Equipment Maintenance Costs." Also exports `centsToDisplay(cents)` (locale-formatted via `Intl.NumberFormat`), `monthBounds(monthStr)`, `MONTH_RE`, `checkVestingEligibility(hireDateStr, asOf?)`, `VESTING_MONTHS` (6), and `PROBATION_DAYS` (90). `checkVestingEligibility` validates whether a staff member's hire date clears both the 90-day probation and 6-month vesting requirements — returns `{ eligible, reason }`. **Maintenance cost aggregation** uses the `agg_maintenance_costs(start_date, end_date)` Postgres RPC which applies `COALESCE(cost, 0)` at the SQL level — never relies on JavaScript `Number() || 0`. Falls back to a row-level fetch with `.not('cost', 'is', null)` filter if the RPC is not yet deployed.
 - **Netlify Function:** `get-true-profit-report.js` — manager-only GET endpoint (`?month=YYYY-MM`, defaults to current month). Calls `computeProfitReport()` from `_profit-report.js`. Powers the "Profitability" card on the Manager Dashboard. Rate-limited via `staffBucket`, PIN session required.
 - **Netlify Function:** `get-profit-share-preview.js` — manager-only GET endpoint (`?month=YYYY-MM`, defaults to current month). Reuses `computeProfitReport()`, then subtracts a $5,000 Profit Floor (`500_000` cents) and computes a 10% Staff Pool via **integer basis-point arithmetic** using `floorDiv()` (`floorDiv(surplusCents × 1000, 10000)` — no floating-point value escapes into a named variable). Joins `time_logs` with `staff_directory` on `staff_id` and only counts **integer minutes** (`Math.floor`) for employees whose `hire_date` is on or before the 6-month vesting date; employees within the 90-day probation window are hard-excluded from all pool calculations. Derives a Bonus-per-Hour via **cents-per-minute path**: `floorDiv(staffPoolCents × 60, totalEligibleMinutes)` — avoids the "fractional hour" float trap. If the bonus-per-hour is less than 1¢ or `totalEligibleMinutes` is 0, it returns $0.00 (never Infinity). **(Ticket H-2 — Integer Math Path):** floor progress is tracked as integer permille (`floor_progress_permille`); `total_staff_hours` is a display-formatted string computed inline at response time — no float intermediate variable. All business-math divisions route through `floorDiv()`. Response includes `total_staff_minutes` (integer) alongside `total_staff_hours` (display string) and `staff_pool_rate_bps` (1000) alongside `staff_pool_rate` (0.10, backward compat). Logs an ops-diagnostics info event when no staff are vested yet. Rate-limited via `staffBucket`, PIN session required. Imports `centsToDisplay` and `monthBounds` from `_profit-report.js` (no duplicate helpers).
 - **Shared Utility:** `src/utils/currency-utils.ts` — exports `formatCentsToDollars(cents: number): string`. Converts integer cents to a locale-formatted US dollar string via `Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })`. Used by all frontend components that display monetary values; no division or multiplication occurs in React components.
@@ -360,6 +365,32 @@
 
 ---
 
+## Part 9: Scheduled Functions ESM v2 Migration (June 2025)
+
+### Root Cause
+All three scheduled Netlify functions (`no-show-alert`, `cancel-stale-orders`, `reconcile-pending-payments`) returned **HTTP 500** in production. The CJS v1 format (`exports.handler`, `require()`) is incompatible with Netlify's `@netlify/plugin-nextjs` runtime for scheduled functions. Working scheduled functions (`daily-pulse.js`, `cron-monthly-financial-summary.js`) already used ESM v2.
+
+### Migration
+| Old File (CJS, deleted) | New File (ESM v2) | Schedule |
+|---|---|---|
+| `no-show-alert.js` | `no-show-alert.mjs` | `*/5 * * * *` |
+| `cancel-stale-orders.js` | `cancel-stale-orders.mjs` | `*/5 * * * *` |
+| `reconcile-pending-payments.js` | `reconcile-pending-payments.mjs` | `*/2 * * * *` |
+
+### Key Changes
+- `require()` → ESM `import` (CJS helper `_process-payment.js` imported via `createRequire`)
+- `exports.handler = async (event, context)` → `export default async function handler(req, context)`
+- `event.headers` → `req.headers.entries()` iterator
+- `JSON.parse(event.body)` → `await req.json()`
+- `return { statusCode, body }` → `return new Response(body, { status, headers })`
+- Schedule defined in-file via `export const config = { schedule: "..." }` (removed from `netlify.toml`)
+
+### netlify.toml Fixes
+- Fixed `node_bundle = {}` typo → `node_bundler = "esbuild"`
+- Removed `[functions."..."]` schedule blocks (schedules now live in each `.mjs` file)
+
+---
+
 ## Part 8: Data Integrity Level — Simulation vs. Production (Schema 94)
 
 ### Problem Statement
@@ -382,7 +413,7 @@ BrewHub PHL is in a "Testing vs. Real Procurement" phase for Q1 2027. Real-world
 - Revenue: `SUM(orders.total_amount_cents)` WHERE `status='completed'` AND `data_integrity_level='production'`.
 - Maintenance: `SUM(maintenance_logs.cost)` WHERE `data_integrity_level='production'`.
 - OpEx: All `property_expenses` included (assumed production by nature — rent, payroll, COGS).
-- Net Profit: Revenue − Maintenance − OpEx.
+- Net Profit: Revenue − Maintenance − OpEx − COGS.
 - Generates a month series from earliest production order through current month.
 - Granted to `service_role` only.
 
@@ -391,7 +422,32 @@ BrewHub PHL is in a "Testing vs. Real Procurement" phase for Q1 2027. Real-world
   - Default behavior: Only production-level items trigger P1/P2 stock alerts.
   - Dev Mode: Pass `p_include_simulation=true` to see all items (frontend sends `?dev_mode=true`).
 - **`inventory-check.js`**: Passes `dev_mode` query param through to the RPC.
-- **`get-inventory.js`**: Returns `data_integrity_level` column; supports optional `?level=production|simulation` filter.
+- **`get-inventory.js`**: Returns `data_integrity_level` and `unit_cost_cents` columns; supports optional `?level=production|simulation` filter.
+- **`update-inventory-item.js`**: Manager-only POST endpoint. CSRF + PIN + rate-limited. Partial-update for `item_name`, `category`, `unit`, `min_threshold`, `unit_cost_cents`. Validates all fields server-side.
+- **`create-inventory-item.js`**: Accepts optional `unit_cost_cents` (integer, ≥ 0) and `category` on creation.
+
+### Schema 95 — `inventory.unit_cost_cents`
+- `integer DEFAULT NULL CHECK (unit_cost_cents IS NULL OR unit_cost_cents >= 0)`.
+- NULL = unknown cost. Existing rows default to NULL.
+- Used for: inventory valuation (stock × unit cost), COGS derivation, shrinkage loss calculations.
+- Displayed in Manager Dashboard → Inventory tab with per-row cost and total valuation header.
+- Editable via InventoryEditModal (pencil icon per row) and settable on creation via InventoryAddModal.
+
+### Schema 96 — Automated COGS Pipeline
+Closes the loop between inventory consumption and the profit-sharing formula.
+
+**DB Changes:**
+1. `inventory_audit_log.unit_cost_cents` — snapshots the item's cost at adjustment time so historical COGS is immune to price edits.
+2. `adjust_inventory_quantity(p_item_id, p_delta, p_source, p_triggered_by, p_order_id, p_note)` — replaced RPC. Locks the inventory row with `FOR UPDATE`, decrements/increments `current_stock`, snapshots `unit_cost_cents` into audit log. Optional params default to `NULL`/'manual'.
+3. `agg_inventory_cogs(start_date date, end_date date)` — new STABLE RPC. Sums `ABS(delta) × unit_cost_cents` for negative-delta audit rows (consumption events) within the date range. Returns `(total_cogs_cents bigint, event_count bigint)`.
+4. `v_accounting_ledger_live` — updated view. Adds `monthly_cogs` CTE, joins with maintenance/opex CTEs, deducts COGS from `net_profit_cents`. Exposes `cogs_cents` and `cogs_event_count` columns.
+
+**Profit Formula (updated):**
+`Net Profit = Revenue − Maintenance − OpEx − COGS`
+
+- `_profit-report.js`: `computeProfitReport()` now fires 4 parallel queries (orders, maintenance RPC, property_expenses, `agg_inventory_cogs` RPC). Returns `cogs_cents`, `cogs_display`, `cogs_event_count` alongside existing fields.
+- `get-profit-share-preview.js`: Passes through `maintenance_cost_display`, `opex_display`, `cogs_display`, `total_expenses_display` so the ProfitShareCard can show a compact expense breakdown.
+- `ProfitShareCard.tsx`: Renders expense breakdown row (Revenue / Maint / OpEx / COGS / Total Expenses) below the progress bar when data is available.
 
 ### Profit Report Integration
 - **`_profit-report.js`**: `computeProfitReport(supabase, monthStr, { productionOnly })` now accepts an options object.

@@ -31,9 +31,9 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  let barcode, name;
+  let barcode, name, category, unit_cost_cents;
   try {
-    ({ barcode, name } = JSON.parse(event.body || '{}'));
+    ({ barcode, name, category, unit_cost_cents } = JSON.parse(event.body || '{}'));
   } catch {
     return cors(400, { error: 'Invalid JSON body' });
   }
@@ -68,6 +68,24 @@ exports.handler = async (event) => {
     return cors(409, { error: 'Item with this barcode already exists' });
   }
 
+  // Validate unit_cost_cents if provided
+  let costCents = null;
+  if (unit_cost_cents !== undefined && unit_cost_cents !== null) {
+    costCents = Number(unit_cost_cents);
+    if (!Number.isFinite(costCents) || costCents < 0 || costCents > 99999999) {
+      return cors(400, { error: 'unit_cost_cents must be 0–99999999 or null' });
+    }
+    costCents = Math.round(costCents);
+  }
+
+  // Validate + sanitize category if provided
+  const ALLOWED_CATS = new Set([
+    'Coffee Beans', 'Milk & Dairy', 'Syrups & Flavors', 'Cups & Lids',
+    'Pastry & Food', 'Cleaning Supplies', 'Equipment Parts', 'Merchandise', 'Other', 'general',
+  ]);
+  const catStr = category ? sanitizeInput(String(category).trim()).slice(0, 100) : 'general';
+  const safeCat = ALLOWED_CATS.has(catStr) ? catStr : 'general';
+
   const { data, error } = await supabase
     .from('inventory')
     .insert({
@@ -75,7 +93,9 @@ exports.handler = async (event) => {
       item_name: nameStr,
       current_stock: 0,
       min_threshold: 10,
-      unit: 'units'
+      unit: 'units',
+      category: safeCat,
+      unit_cost_cents: costCents,
     })
     .select()
     .single();

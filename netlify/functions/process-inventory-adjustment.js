@@ -69,7 +69,9 @@ exports.handler = async (event) => {
 
     const { error: rpcError } = await supabase.rpc('adjust_inventory_quantity', { 
       p_id: itemId, 
-      p_delta: adjustment 
+      p_delta: adjustment,
+      p_source: 'scanner',
+      p_triggered_by: auth.user?.email || null,
     });
 
     if (rpcError) {
