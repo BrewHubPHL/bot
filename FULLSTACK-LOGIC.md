@@ -18,6 +18,20 @@ After the Unified CRM migration, the backend Postgres trigger `handle_new_user()
 
 ---
 
+### HIGH — IP Geolocation False-Blocking Guest Orders
+
+**Files:** `src/components/chat/EliseChat.tsx`, `netlify/functions/claude-chat.js`
+
+The `place_order` tool's guest geofence relied exclusively on a third-party IP geolocation API (`ipgeolocation.io`) to verify the customer was within 15 miles of the Point Breeze shop. Residential ISPs in the Philadelphia metro (Comcast/Xfinity, Verizon FiOS) frequently route traffic through NJ/DE/NY CGNAT gateways, causing the API to report coordinates 20–40+ miles from the user's actual location. This false-blocked legitimate local customers with a "Guest ordering is only available for neighbors within 15 miles" rejection.
+
+**Fix:** Added a two-tier geofence:
+1. **Tier 1 (GPS):** `EliseChat` now requests coarse HTML5 Geolocation (`navigator.geolocation.getCurrentPosition`) on mount and passes `clientLocation: { lat, lng }` in the chat payload. The backend validates coordinate sanity (|lat| ≤ 90, |lng| ≤ 180) and uses these coords for the Haversine distance check.
+2. **Tier 2 (IP fallback):** If the browser denies geolocation or the field is absent, the backend falls back to the existing IP geolocation API lookup. VPN/proxy/Tor blocking remains in this tier.
+
+The IP-based check is preserved as a fraud signal and fallback, but GPS coords are preferred when available. `enableHighAccuracy: false` ensures a fast network-based fix without a battery-draining GPS lock.
+
+---
+
 ### HIGH — Fixed Kiosk Badge Over-Count
 
 **Files:** `src/app/(ops)/manager/QueueMonitor.tsx`, `src/app/(ops)/manager/ParcelsMonitor.tsx`

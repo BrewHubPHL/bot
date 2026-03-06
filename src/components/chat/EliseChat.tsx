@@ -122,6 +122,7 @@ export default function EliseChat() {
   const isVoiceActiveRef = useRef(false);
   const voiceStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastedOrdersRef = useRef<Set<string>>(new Set());
+  const userCoordsRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   /* ─── Keep mutable refs in sync ─── */
   useEffect(() => {
@@ -166,6 +167,22 @@ export default function EliseChat() {
     }
   }, [messages, chatTyping]);
 
+  /* Request coarse GPS for geo-fence (avoids IP-based false blocks) */
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          userCoordsRef.current = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          };
+        },
+        () => { userCoordsRef.current = null; },
+        { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 }
+      );
+    }
+  }, []);
+
   /* Cleanup voice + timers on unmount */
   useEffect(() => {
     return () => {
@@ -202,6 +219,9 @@ export default function EliseChat() {
           history: messagesRef.current
             .slice(-10)
             .map((m) => ({ role: m.role, content: m.content })),
+          clientLocation: userCoordsRef.current
+            ? { lat: userCoordsRef.current.latitude, lng: userCoordsRef.current.longitude }
+            : null,
         }),
       });
       const data = await response.json();

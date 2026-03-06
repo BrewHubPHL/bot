@@ -122,6 +122,14 @@ export default function ScannerPage() {
   const [history, setHistory] = useState<ScanHistoryEntry[]>([]);
   const [clock, setClock] = useState(new Date());
 
+  // Add-new-item modal
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addBarcode, setAddBarcode] = useState("");
+  const [addName, setAddName] = useState("");
+  const [addCategory, setAddCategory] = useState("Other");
+  const [addSaving, setAddSaving] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -313,11 +321,14 @@ export default function ScannerPage() {
       const result = await resp.json();
 
       if (!resp.ok || !result.found) {
-        setStatusMsg(`Barcode "${v.sanitized}" not found — try name search`);
-        setInputError("Not found. Try searching by name instead.");
+        setAddBarcode(v.sanitized!);
+        setAddName("");
+        setAddCategory("Other");
+        setAddError(null);
+        setAddModalOpen(true);
         setViewState("idle");
         haptic("warning");
-        setTimeout(() => { scanLockRef.current = false; }, 2000);
+        setTimeout(() => { scanLockRef.current = false; }, 500);
         return;
       }
 
@@ -503,6 +514,7 @@ export default function ScannerPage() {
     setPendingStock(0);
     setViewState("idle");
     setInputError(null);
+    setAddModalOpen(false);
     setStatusMsg("Ready — scan or search");
     scanLockRef.current = false;
   };
@@ -525,7 +537,7 @@ export default function ScannerPage() {
 
   /* ─── Render ─────────────────────────────────────────────────── */
   return (
-    <main className="h-[100dvh] w-screen flex flex-col bg-stone-950 text-white select-none overflow-hidden" aria-label="Scanner">
+    <main className="h-[calc(100dvh-2.5rem)] w-screen flex flex-col bg-stone-950 text-white select-none overflow-hidden" aria-label="Scanner">
       {/* ═══════ Top Bar ═══════ */}
       <header className="bg-stone-900 border-b border-stone-800 flex items-center justify-between px-4 py-3 shrink-0 safe-area-top">
         <div className="flex items-center gap-2">
@@ -560,7 +572,7 @@ export default function ScannerPage() {
       <div className="relative bg-black flex items-center justify-center shrink-0" style={{ height: "35dvh" }}>
         <video
           ref={videoRef}
-          className={`absolute inset-0 w-full h-full object-cover ${cameraActive ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-0 w-full h-full object-cover ${cameraActive ? "opacity-100" : "opacity-0 pointer-events-none"}`}
           playsInline
           muted
           autoPlay
@@ -871,6 +883,110 @@ export default function ScannerPage() {
           </div>
         )}
       </div>
+
+      {/* ═══════ Add New Item Modal ═══════ */}
+      {addModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-stone-900 border border-stone-700 rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Plus size={18} className="text-amber-400" />
+                New Item
+              </h3>
+              <button onClick={() => setAddModalOpen(false)} className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-800">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-stone-400 text-xs mb-4">
+              Barcode <span className="font-mono text-amber-400">{addBarcode}</span> isn&apos;t in the system yet.
+            </p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const trimmed = addName.trim();
+                if (!trimmed) { setAddError("Item name is required"); return; }
+                if (trimmed.length > 100) { setAddError("Name must be 100 chars or fewer"); return; }
+                setAddSaving(true);
+                setAddError(null);
+                try {
+                  const res = await fetchOps("/staff-add-inventory-item", {
+                    method: "POST",
+                    body: JSON.stringify({ barcode: addBarcode, name: trimmed, category: addCategory }),
+                  }, opsToken);
+                  if (!res.ok) {
+                    const body = await res.json().catch(() => ({ error: "Request failed" }));
+                    setAddError(body.error || `Error (${res.status})`);
+                    return;
+                  }
+                  const { item } = await res.json();
+                  setAddModalOpen(false);
+                  setCurrentItem(item);
+                  setPendingStock(item.current_stock || 0);
+                  setViewState("result");
+                  setStatusMsg(`${item.item_name} added — set stock`);
+                  haptic("success");
+                } catch {
+                  setAddError("Connection error. Check your network.");
+                } finally {
+                  setAddSaving(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-xs font-medium text-stone-300 mb-1">Item Name</label>
+                <input
+                  type="text"
+                  value={addName}
+                  onChange={(e) => setAddName(e.target.value)}
+                  placeholder="e.g. Oat Milk (64oz)"
+                  maxLength={100}
+                  className="w-full px-3 py-2.5 bg-stone-800 border border-stone-700 rounded-xl text-white text-sm placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                  disabled={addSaving}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-stone-300 mb-1">Category</label>
+                <select
+                  value={addCategory}
+                  onChange={(e) => setAddCategory(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-stone-800 border border-stone-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                  disabled={addSaving}
+                >
+                  {["Coffee Beans","Milk & Dairy","Syrups & Flavors","Cups & Lids","Pastry & Food","Cleaning Supplies","Equipment Parts","Merchandise","Other"].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              {addError && (
+                <div className="flex items-start gap-2 text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                  <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                  <span>{addError}</span>
+                </div>
+              )}
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setAddModalOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-stone-800 text-stone-300 text-sm font-medium hover:bg-stone-700"
+                  disabled={addSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={addSaving || !addName.trim()}
+                  className="flex-1 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-bold hover:bg-amber-500 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {addSaving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Add Item
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ═══════ CSS ═══════ */}
       <style jsx>{`

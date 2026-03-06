@@ -119,7 +119,7 @@ const FALLBACK_MENU = {
  * Each tool's execute() function has access to supabase, authedUser, and clientIp
  * without needing them injected into the AI's tool input.
  */
-function createTools({ supabase, authedUser, clientIp }) {
+function createTools({ supabase, authedUser, clientIp, clientLocation }) {
     return {
         check_waitlist: tool({
             description: 'Check if an email address is on the BrewHub waitlist. Use this when someone asks if they are signed up, on the list, or wants to verify their waitlist status.',
@@ -297,36 +297,49 @@ function createTools({ supabase, authedUser, clientIp }) {
                         }
 
                         // ── Geo/IP Security Checks (guest orders only) ──
-                        // TODO(geofence-v2): IP geolocation is unreliable for local Philly users —
-                        // ISPs (Comcast, Verizon) route through NJ/DE gateways, placing real
-                        // Point Breeze customers 20-40+ miles away. Refactor to:
-                        //   1. Accept a zip code from the client and validate against an
-                        //      allowlist of Philly-area zips (19xxx, 080xx, etc.), OR
-                        //   2. Use HTML5 Geolocation (navigator.geolocation) on the frontend
-                        //      and pass lat/lon to this endpoint for server-side verification.
-                        // IP lookup should remain as a fallback/fraud signal, not the primary gate.
-                        const ipKey = process.env.IPGEOLOCATION_API_KEY;
-                        if (isGuest && clientIp && clientIp !== 'unknown' && ipKey) {
-                            try {
-                                const geoRes = await fetch(`https://api.ipgeolocation.io/ipgeo?apiKey=${ipKey}&ip=${clientIp}`);
-                                const geoData = await geoRes.json();
-                                if (geoData.security?.is_vpn || geoData.security?.is_proxy || geoData.security?.is_tor) {
-                                    console.warn(`[SECURITY] VPN/Proxy/Tor Blocked: ip_hash=${ipHash.slice(0,12)}`);
-                                    return { success: false, result: "For security, guest orders cannot be placed over a VPN or proxy. Please connect to a standard network." };
-                                }
-                                const shopLat = 39.9324;
-                                const shopLon = -75.1855;
-                                const guestLat = parseFloat(geoData.latitude);
-                                const guestLon = parseFloat(geoData.longitude);
-                                if (!isNaN(guestLat) && !isNaN(guestLon)) {
-                                    const milesFromShop = getDistanceInMiles(shopLat, shopLon, guestLat, guestLon);
-                                    if (milesFromShop > 15) {
-                                        console.warn(`[GEOFENCE] Rejected: ${milesFromShop.toFixed(1)} miles away`);
-                                        return { success: false, result: "Guest ordering is only available for neighbors within 15 miles of our Point Breeze shop. Hope to see you in person soon!" };
+                        // Tier 1: Client GPS from HTML5 Geolocation (preferred — immune to ISP routing)
+                        // Tier 2: IP geolocation API fallback (unreliable for Philly ISPs)
+                        const shopLat = 39.9324;
+                        const shopLon = -75.1855;
+                        const MAX_RADIUS_MILES = 15;
+
+                        if (isGuest) {
+                            let geoSource = null;
+                            let guestLat = NaN;
+                            let guestLon = NaN;
+
+                            // Tier 1 — Client GPS (validated for range sanity in handler)
+                            if (clientLocation) {
+                                guestLat = clientLocation.lat;
+                                guestLon = clientLocation.lng;
+                                geoSource = 'gps';
+                            }
+
+                            // Tier 2 — IP geolocation fallback
+                            const ipKey = process.env.IPGEOLOCATION_API_KEY;
+                            if (geoSource === null && clientIp && clientIp !== 'unknown' && ipKey) {
+                                try {
+                                    const geoRes = await fetch(`https://api.ipgeolocation.io/ipgeo?apiKey=${ipKey}&ip=${clientIp}`);
+                                    const geoData = await geoRes.json();
+                                    if (geoData.security?.is_vpn || geoData.security?.is_proxy || geoData.security?.is_tor) {
+                                        console.warn(`[SECURITY] VPN/Proxy/Tor Blocked: ip_hash=${ipHash.slice(0,12)}`);
+                                        return { success: false, result: "For security, guest orders cannot be placed over a VPN or proxy. Please connect to a standard network." };
                                     }
+                                    guestLat = parseFloat(geoData.latitude);
+                                    guestLon = parseFloat(geoData.longitude);
+                                    geoSource = 'ip';
+                                } catch (err) {
+                                    console.error('[GEOFENCE] API Error:', err?.message);
                                 }
-                            } catch (err) {
-                                console.error('[GEOFENCE] API Error:', err?.message);
+                            }
+
+                            if (!isNaN(guestLat) && !isNaN(guestLon)) {
+                                const milesFromShop = getDistanceInMiles(shopLat, shopLon, guestLat, guestLon);
+                                if (milesFromShop > MAX_RADIUS_MILES) {
+                                    console.warn(`[GEOFENCE] Rejected (${geoSource}): ${milesFromShop.toFixed(1)} miles away`);
+                                    return { success: false, result: "Guest ordering is only available for neighbors within 15 miles of our Point Breeze shop. Hope to see you in person soon!" };
+                                }
+                                console.log(`[GEOFENCE] Passed (${geoSource}): ${milesFromShop.toFixed(1)} miles`);
                             }
                         }
 
@@ -909,6 +922,7 @@ exports.handler = async (event) => {
 
         let userText = "Hello";
         let conversationHistory = [];
+        let clientLocation = null;
         if (event.body) {
             const body = JSON.parse(event.body);
             userText = body.text || "Hello";
@@ -918,6 +932,14 @@ exports.handler = async (event) => {
             // because she never saw her own "What name should I put on that?" turn.
             conversationHistory = (body.history || [])
               .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+
+            // Client-supplied GPS coords (HTML5 Geolocation API)
+            // Preferred over IP geolocation; validated for range sanity.
+            const rawLoc = body.clientLocation || null;
+            if (rawLoc && typeof rawLoc.lat === 'number' && typeof rawLoc.lng === 'number'
+                && Math.abs(rawLoc.lat) <= 90 && Math.abs(rawLoc.lng) <= 180) {
+                clientLocation = { lat: rawLoc.lat, lng: rawLoc.lng };
+            }
         }
 
         // Input length guard — prevent cost-amplification attacks
@@ -964,7 +986,7 @@ exports.handler = async (event) => {
                 const anthropic = createAnthropic({ apiKey: claudeKey });
 
                 // Create tools with request-scoped context (supabase, auth, IP)
-                const tools = createTools({ supabase, authedUser, clientIp: getClientIP(event) });
+                const tools = createTools({ supabase, authedUser, clientIp: getClientIP(event), clientLocation });
 
                 // AI SDK v6: stopWhen replaces maxSteps, maxOutputTokens replaces maxTokens.
                 // stepCountIs(8) gives the model room for multi-tool flows (e.g. search_catalog
