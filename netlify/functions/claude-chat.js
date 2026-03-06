@@ -242,7 +242,27 @@ function createTools({ supabase, authedUser, clientIp }) {
 
                     for (const item of items) {
                         const quantity = Math.min(MAX_ITEM_QUANTITY, Math.max(1, parseInt(item.quantity) || 1));
-                        const matchedName = menuItemNames.find(name => name.toLowerCase() === (item.name || '').toLowerCase());
+                        let matchedName = menuItemNames.find(name => name.toLowerCase() === (item.name || '').toLowerCase());
+
+                        // Fuzzy matching: strip size modifiers, try substring/alias matching
+                        if (!matchedName) {
+                            const cleaned = (item.name || '').toLowerCase()
+                                .replace(/\b(large|small|medium|regular|big|tall|grande|venti|one|a|an|the|please|cup|cups|of)\b/g, '')
+                                .trim().replace(/\s+/g, ' ');
+                            if (cleaned) {
+                                matchedName = menuItemNames.find(n => n.toLowerCase() === cleaned);
+                                if (!matchedName) {
+                                    const partials = menuItemNames.filter(n => n.toLowerCase().includes(cleaned) || cleaned.includes(n.toLowerCase()));
+                                    if (partials.length === 1) matchedName = partials[0];
+                                }
+                            }
+                            if (!matchedName) {
+                                const COFFEE_ALIASES = { 'black coffee': 'drip coffee', 'black': 'drip coffee', 'regular coffee': 'drip coffee', 'plain coffee': 'drip coffee', 'house coffee': 'drip coffee', 'just coffee': 'drip coffee', 'shot': 'espresso', 'espresso shot': 'espresso', 'cap': 'cappuccino' };
+                                const aliased = COFFEE_ALIASES[cleaned] || COFFEE_ALIASES[(item.name || '').toLowerCase().trim()];
+                                if (aliased) matchedName = menuItemNames.find(n => n.toLowerCase() === aliased);
+                            }
+                        }
+
                         if (!matchedName) {
                             return { success: false, result: `"${item.name}" is not on the menu. Available items: ${menuItemNames.join(', ')}` };
                         }
@@ -394,7 +414,7 @@ function createTools({ supabase, authedUser, clientIp }) {
                     if (order_id) {
                         query = query.eq('id', order_id);
                     } else {
-                        query = query.ilike('id', `${order_number.toLowerCase()}%`);
+                        query = query.ilike('id', `%${order_number.toLowerCase()}`);
                     }
                     const { data: orders, error: findErr } = await query.limit(1).single();
                     if (findErr || !orders) {
@@ -410,19 +430,22 @@ function createTools({ supabase, authedUser, clientIp }) {
                     }
 
                     if (orders.status === 'cancelled') {
-                        return { success: true, result: `Order #${orders.id.slice(0, 4).toUpperCase()} was already cancelled.` };
+                        return { success: true, result: `Order #${orders.id.slice(-4).toUpperCase()} was already cancelled.` };
                     }
 
-                    const { error: updateErr } = await supabase.from('orders').update({ status: 'cancelled' }).eq('id', orders.id);
+                    const { data: updated, error: updateErr } = await supabase.from('orders').update({ status: 'cancelled' }).eq('id', orders.id).in('status', ['pending', 'unpaid']).select('id').maybeSingle();
                     if (updateErr) {
                         console.error('Order cancel error:', updateErr?.message);
                         return { success: false, result: 'Failed to cancel the order. Please ask a staff member for help.' };
+                    }
+                    if (!updated) {
+                        return { success: false, result: 'This order can no longer be cancelled — it may already be in progress. Please ask a barista for help!' };
                     }
 
                     const { error: coffeeUpdateErr } = await supabase.from('coffee_orders').update({ status: 'cancelled' }).eq('order_id', orders.id);
                     if (coffeeUpdateErr) console.error('[CANCEL] coffee_orders cancel failed (non-fatal):', coffeeUpdateErr.message);
 
-                    const orderNum = orders.id.slice(0, 4).toUpperCase();
+                    const orderNum = orders.id.slice(-4).toUpperCase();
                     console.log(`[CANCEL] Order #${orderNum} (${orders.id}) cancelled via chat`);
                     return { success: true, order_number: orderNum, result: `Order #${orderNum} has been cancelled.` };
                 } catch (err) {
@@ -944,29 +967,32 @@ exports.handler = async (event) => {
                 const tools = createTools({ supabase, authedUser, clientIp: getClientIP(event) });
 
                 // AI SDK handles the full tool call loop automatically via maxSteps
-                // maxSteps: 5 gives the model room to call tools (search_catalog → get_menu)
-                // AND still produce a final text reply on recommendations/orders.
+                // maxSteps: 8 gives the model room for multi-tool flows (e.g. search_catalog
+                // → get_menu → place_order → retry) AND still produce a final text reply.
                 const result = await generateText({
                     model: anthropic('claude-sonnet-4-20250514'),
                     system: SYSTEM_PROMPT,
                     messages,
                     tools,
-                    maxSteps: 5,
-                    maxTokens: 300,
+                    maxSteps: 8,
+                    maxTokens: 600,
                 });
 
                 // When all steps are consumed by tool calls, result.text is empty.
-                // Pull the last tool result string so we never send a generic greeting.
+                // Scan all tool results (newest first) for a usable reply string.
                 let reply = result.text;
                 if (!reply) {
                     const steps = result.steps || [];
+                    outer:
                     for (let i = steps.length - 1; i >= 0; i--) {
                         const toolResults = steps[i].toolResults;
                         if (toolResults?.length) {
-                            const last = toolResults[toolResults.length - 1];
-                            if (last.result?.result && typeof last.result.result === 'string') {
-                                reply = last.result.result;
-                                break;
+                            for (let j = toolResults.length - 1; j >= 0; j--) {
+                                const tr = toolResults[j];
+                                if (tr.result?.result && typeof tr.result.result === 'string') {
+                                    reply = tr.result.result;
+                                    break outer;
+                                }
                             }
                         }
                     }
@@ -1002,7 +1028,7 @@ exports.handler = async (event) => {
                                     orderConfirmation = {
                                         order_id: toolResult.result.order_id,
                                         customer_name: toolResult.result.customer_name,
-                                        amount_cents: toolResult.result.amount_cents,
+                                        amount_cents: toolResult.result.total_amount_cents,
                                     };
                                 }
                             }
@@ -1068,3 +1094,17 @@ exports.handler = async (event) => {
         };
     }
 };
+
+// ── Test-only exports (not part of the public API) ──────────────
+if (process.env.NODE_ENV === 'test') {
+    exports._test = {
+        isAllergenOrMedicalQuery,
+        scrubDangerousReply,
+        getClientIP,
+        getDistanceInMiles,
+        extractUser,
+        createTools,
+        FALLBACK_MENU,
+        ALLERGEN_SAFE_RESPONSE,
+    };
+}

@@ -25,6 +25,7 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+tests/functions/claude-chat.test.js
 
 # ── AI JUNK & MEMORY FILES (The "Brain" Purge) ───────────────────────
 BRAIN_PART_*.md
