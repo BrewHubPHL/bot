@@ -38,6 +38,12 @@ export default function LiveStaffPulse() {
 
   /* ── Safe AlertManager access (may be null outside provider) ── */
   const alertCtx = useContext(AlertContext);
+  // Destructure stable function refs (useCallback with []) so that the
+  // exhaustion useEffect does not depend on the whole context object —
+  // which changes identity whenever `alerts` state updates, causing an
+  // infinite re-render loop (React Error #185).
+  const pushAlert = alertCtx?.pushAlert ?? null;
+  const dismissAlert = alertCtx?.dismissAlert ?? null;
 
   const fetchActiveStaff = useCallback(async () => {
     if (!token) return;
@@ -59,14 +65,14 @@ export default function LiveStaffPulse() {
 
   /* ── Push P1 alert for staff working > 16h ────────────────── */
   useEffect(() => {
-    if (!alertCtx) return; // Not inside AlertManagerProvider
+    if (!pushAlert || !dismissAlert) return; // Not inside AlertManagerProvider
     const exhausted = staff.filter((s) => {
       const hrs = (Date.now() - new Date(s.clock_in).getTime()) / 3_600_000;
       return hrs >= 16;
     });
     if (exhausted.length > 0) {
       const names = exhausted.map((s) => s.name).join(", ");
-      alertCtx.pushAlert({
+      pushAlert({
         id: "staff-exhaustion",
         priority: AlertPriority.P1,
         title: "Staff Exhaustion Alert",
@@ -76,9 +82,9 @@ export default function LiveStaffPulse() {
       });
     } else {
       // Clear the alert if no one is exhausted anymore
-      alertCtx.dismissAlert("staff-exhaustion");
+      dismissAlert("staff-exhaustion");
     }
-  }, [staff, alertCtx, tick]);
+  }, [staff, pushAlert, dismissAlert, tick]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);

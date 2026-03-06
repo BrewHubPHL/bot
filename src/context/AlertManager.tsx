@@ -74,8 +74,10 @@ function alertReducer(state: SystemAlert[], action: AlertAction): SystemAlert[] 
         return new Date(a.pushedAt).getTime() - new Date(b.pushedAt).getTime();
       });
     }
-    case "DISMISS":
-      return state.filter((a) => a.id !== action.id);
+    case "DISMISS": {
+      const exists = state.some((a) => a.id === action.id);
+      return exists ? state.filter((a) => a.id !== action.id) : state;
+    }
     case "DISMISS_ALL":
       return [];
     case "CLEAR_PRIORITY":

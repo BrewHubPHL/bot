@@ -54,6 +54,8 @@ AS $$
   FROM public.merch_products mp
   WHERE
     mp.embedding IS NOT NULL
+    AND mp.is_active = true
+    AND mp.archived_at IS NULL
     AND 1 - (mp.embedding <=> query_embedding) > match_threshold
   ORDER BY mp.embedding <=> query_embedding
   LIMIT match_count;

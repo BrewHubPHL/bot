@@ -69,10 +69,11 @@ const MODIFIER_PRICES: Record<string, number> = {
 
 function lineTotal(item: CartItem): number {
   const base = Number(item.base_price_cents) || 0;
+  const qty = Number(item.quantity) || 1;
   const mods = (item.customizations ?? []).reduce(
-    (s: number, m: CartModifier) => s + (Number(MODIFIER_PRICES[m.name]) || 0) * (m.qty || 1), 0
+    (s: number, m: CartModifier) => s + (Number(MODIFIER_PRICES[m.name]) || 0) * (Number(m.qty) || 1), 0
   );
-  return (base + mods) * item.quantity;
+  return (base + mods) * qty;
 }
 
 export default function CheckoutPage() {
@@ -118,12 +119,16 @@ export default function CheckoutPage() {
   // through before the re-render disables the button.
   const submittingRef = useRef(false);
 
+  // TODO: Remove debug log once $NaN cart bug is resolved
+  console.log("RAW CART DATA:", JSON.stringify(cart, null, 2));
+
   const totalCents = cart.reduce((sum, item) => {
     const base = Number(item.base_price_cents) || 0;
+    const qty = Number(item.quantity) || 1;
     const mods = (item.customizations ?? []).reduce(
-      (s, m) => s + (Number(MODIFIER_PRICES[m.name]) || 0) * (m.qty || 1), 0
+      (s, m) => s + (Number(MODIFIER_PRICES[m.name]) || 0) * (Number(m.qty) || 1), 0
     );
-    return sum + (base + mods) * item.quantity;
+    return sum + (base + mods) * qty;
   }, 0);
   // Tax-inclusive pricing: menu prices include 8% Philadelphia sales tax
   const subtotalCents = Math.round(totalCents / 1.08);

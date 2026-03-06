@@ -7,10 +7,9 @@ const { hashIP } = require('./_ip-hash');
 const { sanitizeInput } = require('./_sanitize');
 const { logSystemError } = require('./_system-errors');
 const { calculateTaxInclusive } = require('./_pricing');
-const { generateText, tool, embed } = require('ai');
+const { generateText, tool, embed, jsonSchema } = require('ai');
 const { createAnthropic } = require('@ai-sdk/anthropic');
 const { createCohere } = require('@ai-sdk/cohere');
-const { z } = require('zod');
 
 // ═══════════════════════════════════════════════════════════════════
 // ALLERGEN / DIETARY / MEDICAL SAFETY LAYER
@@ -124,8 +123,12 @@ function createTools({ supabase, authedUser, clientIp }) {
     return {
         check_waitlist: tool({
             description: 'Check if an email address is on the BrewHub waitlist. Use this when someone asks if they are signed up, on the list, or wants to verify their waitlist status.',
-            parameters: z.object({
-                email: z.string().describe('The email address to check'),
+            parameters: jsonSchema({
+                type: 'object',
+                properties: {
+                    email: { type: 'string', description: 'The email address to check' },
+                },
+                required: ['email'],
             }),
             execute: async ({ email }) => {
                 if (!authedUser) {
@@ -147,8 +150,11 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         get_menu: tool({
             description: 'Look up cafe menu items and prices. Use this when someone asks about a specific item price or what we serve. For individual price checks, return only the requested item. If someone asks for the FULL menu, do NOT read it — just direct them to brewhubphl.com/cafe.',
-            parameters: z.object({
-                item_name: z.string().optional().describe('Optional: specific item to look up. If omitted, returns full menu (but you should NOT read the full list aloud — link to /cafe instead).'),
+            parameters: jsonSchema({
+                type: 'object',
+                properties: {
+                    item_name: { type: 'string', description: 'Optional: specific item to look up. If omitted, returns full menu (but you should NOT read the full list aloud — link to /cafe instead).' },
+                },
             }),
             execute: async () => {
                 try {
@@ -168,13 +174,25 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         place_order: tool({
             description: 'Place a cafe order ONCE. Before calling this, you MUST have: (1) the specific item(s) confirmed, (2) the customer\'s name for callout. Ask for anything missing BEFORE calling this tool. NEVER call place_order more than once for the same request.',
-            parameters: z.object({
-                items: z.array(z.object({
-                    name: z.string().describe('Menu item name'),
-                    quantity: z.number().optional().describe('Quantity (default 1)'),
-                })).describe('Array of items to order'),
-                customer_name: z.string().describe('Customer name for calling out the order — REQUIRED, ask if not provided'),
-                notes: z.string().optional().describe('Special requests like oat milk, extra hot, no foam'),
+            parameters: jsonSchema({
+                type: 'object',
+                properties: {
+                    items: {
+                        type: 'array',
+                        description: 'Array of items to order',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                name: { type: 'string', description: 'Menu item name' },
+                                quantity: { type: 'number', description: 'Quantity (default 1)' },
+                            },
+                            required: ['name'],
+                        },
+                    },
+                    customer_name: { type: 'string', description: 'Customer name for calling out the order — REQUIRED, ask if not provided' },
+                    notes: { type: 'string', description: 'Special requests like oat milk, extra hot, no foam' },
+                },
+                required: ['items', 'customer_name'],
             }),
             execute: async ({ items, customer_name, notes }) => {
                 // ── ALLERGEN / MEDICAL INJECTION DEFENSE ──
@@ -259,6 +277,14 @@ function createTools({ supabase, authedUser, clientIp }) {
                         }
 
                         // ── Geo/IP Security Checks (guest orders only) ──
+                        // TODO(geofence-v2): IP geolocation is unreliable for local Philly users —
+                        // ISPs (Comcast, Verizon) route through NJ/DE gateways, placing real
+                        // Point Breeze customers 20-40+ miles away. Refactor to:
+                        //   1. Accept a zip code from the client and validate against an
+                        //      allowlist of Philly-area zips (19xxx, 080xx, etc.), OR
+                        //   2. Use HTML5 Geolocation (navigator.geolocation) on the frontend
+                        //      and pass lat/lon to this endpoint for server-side verification.
+                        // IP lookup should remain as a fallback/fraud signal, not the primary gate.
                         const ipKey = process.env.IPGEOLOCATION_API_KEY;
                         if (isGuest && clientIp && clientIp !== 'unknown' && ipKey) {
                             try {
@@ -350,9 +376,12 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         cancel_order: tool({
             description: 'Cancel a cafe order by order ID. Use this when a customer asks to cancel an order, or to clean up duplicate orders you mistakenly created.',
-            parameters: z.object({
-                order_id: z.string().optional().describe('The full UUID of the order to cancel (from a previous place_order result)'),
-                order_number: z.string().optional().describe('The short 4-character order number (e.g. D31D). Use this if you do not have the full UUID.'),
+            parameters: jsonSchema({
+                type: 'object',
+                properties: {
+                    order_id: { type: 'string', description: 'The full UUID of the order to cancel (from a previous place_order result)' },
+                    order_number: { type: 'string', description: 'The short 4-character order number (e.g. D31D). Use this if you do not have the full UUID.' },
+                },
             }),
             execute: async ({ order_id, order_number }) => {
                 if (!order_id && !order_number) {
@@ -405,10 +434,13 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         get_loyalty_info: tool({
             description: 'Look up a customer\'s loyalty points and QR code. Use this when someone asks about their points, rewards, loyalty status, or wants to see their QR code. Requires their email or phone number.',
-            parameters: z.object({
-                email: z.string().optional().describe('Customer email address'),
-                phone: z.string().optional().describe('Customer phone number (alternative to email)'),
-                send_sms: z.boolean().optional().describe('If true and phone provided, send QR code link via SMS'),
+            parameters: jsonSchema({
+                type: 'object',
+                properties: {
+                    email: { type: 'string', description: 'Customer email address' },
+                    phone: { type: 'string', description: 'Customer phone number (alternative to email)' },
+                    send_sms: { type: 'boolean', description: 'If true and phone provided, send QR code link via SMS' },
+                },
             }),
             execute: async ({ phone, send_sms }) => {
                 if (!authedUser) {
@@ -480,8 +512,11 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         check_loyalty_points: tool({
             description: 'Check a customer\'s loyalty points balance. Use this when someone asks about their account, points, rewards balance, or how many points they have. Returns structured loyalty data for rich display.',
-            parameters: z.object({
-                email: z.string().optional().describe('Customer email (ignored — uses authenticated identity)'),
+            parameters: jsonSchema({
+                type: 'object',
+                properties: {
+                    email: { type: 'string', description: 'Customer email (ignored — uses authenticated identity)' },
+                },
             }),
             execute: async () => {
                 if (!authedUser) {
@@ -525,8 +560,12 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         navigate_site: tool({
             description: 'Help customers navigate to different pages on the BrewHub website. Use when someone asks where to find something, wants to go to a page, or needs directions on the site.',
-            parameters: z.object({
-                destination: z.string().describe('Where the customer wants to go: menu, order, shop, checkout, loyalty, portal, login, parcels, waitlist, contact, home'),
+            parameters: jsonSchema({
+                type: 'object',
+                properties: {
+                    destination: { type: 'string', description: 'Where the customer wants to go: menu, order, shop, checkout, loyalty, portal, login, parcels, waitlist, contact, home' },
+                },
+                required: ['destination'],
             }),
             execute: async ({ destination }) => {
                 const SITE_PAGES = {
@@ -563,8 +602,12 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         search_catalog: tool({
             description: 'Search the menu catalog using natural language. Use this when a customer asks for recommendations, flavor profiles, drink styles, or wants to find specific types of items (e.g. "sweet iced drinks", "strong espresso", "something fruity"). Returns the top matching items with names, descriptions, and prices.',
-            parameters: z.object({
-                search_query: z.string().describe('A natural language search query describing what the customer is looking for, e.g. "sweet iced drinks" or "strong black coffee"'),
+            parameters: jsonSchema({
+                type: 'object',
+                properties: {
+                    search_query: { type: 'string', description: 'A natural language search query describing what the customer is looking for, e.g. "sweet iced drinks" or "strong black coffee"' },
+                },
+                required: ['search_query'],
             }),
             execute: async ({ search_query }) => {
                 try {
@@ -615,9 +658,12 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         check_parcels: tool({
             description: 'Checks the database to see if a resident has any pending packages waiting for pickup. Use when someone asks about packages, mail, or deliveries.',
-            parameters: z.object({
-                resident_name: z.string().optional().describe('The resident or recipient name to search for (fuzzy match)'),
-                unit_number: z.string().optional().describe('The mailbox / unit number to search for'),
+            parameters: jsonSchema({
+                type: 'object',
+                properties: {
+                    resident_name: { type: 'string', description: 'The resident or recipient name to search for (fuzzy match)' },
+                    unit_number: { type: 'string', description: 'The mailbox / unit number to search for' },
+                },
             }),
             execute: async ({ resident_name, unit_number }) => {
                 if (!resident_name && !unit_number) return { result: 'I need at least a name or unit number to look up packages.' };
@@ -758,6 +804,7 @@ You have access to real APIs - ALWAYS use them instead of making up information:
 - Cozy lounge area with comfortable seating, free Wi-Fi, coffee and tea for mailbox renters and community
 
 ## Menu Items
+YOU MUST NEVER INVENT OR GUESS MENU ITEMS. If a user asks for a recommendation or orders food/drink, YOU MUST ALWAYS call the search_catalog tool first. ONLY recommend items explicitly returned by the tool.
 Do NOT rely on a memorized menu. ALWAYS call the get_menu tool to look up prices for specific items — the database is the single source of truth.
 NEVER read the entire menu aloud or list every item. If someone asks "what's on the menu" or "what do you have", just say something like "We've got coffee, espresso drinks, cold brew, pastries, and more — check out the full menu at brewhubphl.com/cafe!" and only look up specific item prices when asked.
 
@@ -954,25 +1001,36 @@ exports.handler = async (event) => {
                 };
             } catch (e) {
                 console.error('AI SDK error:', e.message);
+                logSystemError({ source: 'claude-chat/ai-sdk', message: e?.message, stack: e?.stack });
+                // Return a clear degraded-mode message instead of silently falling through
+                return {
+                    statusCode: 200,
+                    headers,
+                    body: JSON.stringify({ reply: "Hey, sorry about that — I'm having a little trouble on my end right now. Try again in a sec, or reach out to info@brewhubphl.com if you need help!" })
+                };
             }
         } else {
             console.error('No CLAUDE_API_KEY found');
+            logSystemError({ source: 'claude-chat/config', message: 'CLAUDE_API_KEY is not set — all chat requests will use fallback mode' });
         }
 
-        // Fallback: Simple keyword responses
+        // Fallback: only reached when CLAUDE_API_KEY is not configured at all.
+        // Provides minimal helpful responses without pretending to be the full AI.
         const lowerText = userText.toLowerCase().trim();
-        let reply = "For any questions, feel free to email info@brewhubphl.com or DM us on Instagram @brewhubphl!";
+        let reply = "Hey! I'm not fully online right now, but I'd love to help. Email info@brewhubphl.com or DM us on Instagram @brewhubphl and a human will get back to you!";
 
         if (lowerText.includes('hi') || lowerText.includes('hello') || lowerText.includes('hey')) {
-            reply = "Hey there! Welcome to BrewHub! How can I help?";
+            reply = "Hey there! Welcome to BrewHub! I'm running in limited mode right now — for ordering and questions, come see us at the cafe or email info@brewhubphl.com!";
         } else if (lowerText.includes('email') || lowerText.includes('contact') || lowerText.includes('marketing')) {
-            reply = "For business or marketing inquiries, email info@brewhubphl.com! 📧";
-        } else if (lowerText.includes('menu') || lowerText.includes('drinks') || lowerText.includes('coffee') || lowerText.includes('black') || lowerText.includes('latte')) {
-            reply = "We'll have all the classics - drip coffee, lattes, cappuccinos, cold brew and more! Can't wait to serve you.";
-        } else if (lowerText.includes('when') || lowerText.includes('open') || lowerText.includes('account')) {
-            reply = "We're gearing up for our grand opening! Create an account or log in above to start earning loyalty points and be the first to know!";
-        } else if (lowerText.includes('where') || lowerText.includes('location')) {
-            reply = "We're setting up in Point Breeze, Philadelphia! Follow @brewhubphl for updates 📍";
+            reply = "For business or marketing inquiries, email info@brewhubphl.com!";
+        } else if (lowerText.includes('menu') || lowerText.includes('drinks') || lowerText.includes('coffee') || lowerText.includes('latte') || lowerText.includes('order')) {
+            reply = "I can't pull up the live menu right now, but check out brewhubphl.com/cafe for our full menu and prices! You can also order in person at the cafe.";
+        } else if (lowerText.includes('where') || lowerText.includes('location') || lowerText.includes('address')) {
+            reply = "We're in Point Breeze, Philadelphia, PA 19146! Come say hi.";
+        } else if (lowerText.includes('points') || lowerText.includes('loyalty') || lowerText.includes('reward')) {
+            reply = "I can't check your points right now, but you can view your loyalty balance at brewhubphl.com/portal!";
+        } else if (lowerText.includes('parcel') || lowerText.includes('package') || lowerText.includes('mail')) {
+            reply = "I can't check parcels right now — please ask at the front desk or visit brewhubphl.com/parcels!";
         }
 
         return {

@@ -115,23 +115,17 @@ export async function middleware(request: NextRequest) {
   const sessionCookie = request.cookies.get("hub_staff_session")?.value;
 
   if (!sessionCookie) {
-    // No session cookie — block access.
-    // Return the page shell so OpsGate renders the PIN entry UI,
-    // but set a header the client can detect if needed.
-    // We allow through because OpsGate.tsx on the client handles the PIN screen.
-    // However, for API-level protection, we set a flag.
-    // The actual gate is OpsGate.tsx + the _auth.js backend, but we add
-    // defense-in-depth: if someone bypasses OpsGate, middleware blocks them.
-
-    // Allow initial page loads (OpsGate will render PIN screen)
-    // Block only fetch/API requests without the cookie
+    // No session cookie — let page loads AND RSC navigations through
+    // so OpsGate.tsx can render the PIN entry screen.
+    // Only hard-block raw API fetches that lack a session.
     const accept = request.headers.get("accept") || "";
-    if (accept.includes("text/html")) {
-      // HTML page request — let OpsGate render the PIN screen
+    const isRsc = request.headers.get("rsc") === "1";
+    if (accept.includes("text/html") || isRsc) {
+      // HTML page request or RSC navigation — let OpsGate render the PIN screen
       return NextResponse.next();
     }
 
-    // Non-HTML request (RSC, fetch, etc.) without session → deny
+    // Non-HTML, non-RSC request (raw fetch, etc.) without session → deny
     return new NextResponse(JSON.stringify({ error: "Unauthorized — session required" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
@@ -159,12 +153,15 @@ export async function middleware(request: NextRequest) {
   function failSession(reason: string) {
     console.warn(`[MIDDLEWARE] ${reason} on ${pathname}`);
     const accept = request.headers.get("accept") || "";
-    if (accept.includes("text/html")) {
+    const isRsc = request.headers.get("rsc") === "1";
+    if (accept.includes("text/html") || isRsc) {
+      // Page load or RSC navigation — clear cookie and let OpsGate
+      // render the PIN screen on next render cycle.
       const response = NextResponse.next();
       response.cookies.delete("hub_staff_session");
       return response;
     }
-    // Non-HTML: return 401 but still clear the cookie so the next
+    // Non-HTML, non-RSC: return 401 and clear the cookie so the next
     // page load shows the PIN screen instead of looping.
     const response = new NextResponse(JSON.stringify({ error: reason }), {
       status: 401,

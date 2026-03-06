@@ -433,12 +433,12 @@ export default function CatalogManager() {
     setLoading(false);
   }, [token]);
 
+  // Synchronous lock to prevent double-tap on catalog mutations
+  const catalogMutationLockRef = useRef(false);
+
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
-
-  // Synchronous lock to prevent double-tap on catalog mutations
-  const catalogMutationLockRef = useRef(false);
 
   /* --- Delete (archive) product ---------------------------------- */
   const handleDelete = async (productId: string) => {

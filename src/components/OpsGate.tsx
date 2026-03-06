@@ -81,6 +81,13 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
+/* ─── Module-level session cache ─────────────────────── */
+// Survives React remounts (Strict Mode, same-layout navigations) so that
+// a successful pin-login isn't lost if OpsGate re-mounts before the
+// HttpOnly cookie is available to pin-verify.  Cleared on logout and
+// on full page reload (module re-evaluation).
+let _cachedSession: OpsSessionState | null = null;
+
 /* ─── OpsGate Component ──────────────────────────────── */
 
 /**
@@ -257,6 +264,7 @@ export default function OpsGate({ children, requireManager = false }: { children
         const data = await res.json();
         if (data.code === "TOKEN_VERSION_MISMATCH") {
           console.warn("[OpsGate] Session invalidated by backend");
+          _cachedSession = null;
         }
         setSession(null);
         return;
@@ -270,10 +278,9 @@ export default function OpsGate({ children, requireManager = false }: { children
         setSession(null);
         return;
       }
-      setSession({
-        staff: data.staff,
-        token: data.token,
-      });
+      const restored = { staff: data.staff, token: data.token };
+      _cachedSession = restored;
+      setSession(restored);
     } catch (err) {
       console.error("[OpsGate] Session verification failed:", (err as Error)?.message);
       setSession(null);
@@ -282,8 +289,13 @@ export default function OpsGate({ children, requireManager = false }: { children
     }
   }, []);
 
-  // On mount, verify session with backend via HttpOnly cookie — no sessionStorage
+  // On mount, restore session — prefer module-level cache (survives React
+  // remounts / Strict Mode) before hitting the network via pin-verify.
   useEffect(() => {
+    if (_cachedSession) {
+      setSession(_cachedSession);
+      return;
+    }
     verifySession();
   }, [verifySession]);
 
@@ -376,6 +388,9 @@ export default function OpsGate({ children, requireManager = false }: { children
         token: data.token,
         needsPinRotation: data.needsPinRotation || false,
       };
+      // Cache at module level so remounts (Strict Mode / navigation) don't
+      // lose the session before the HttpOnly cookie is available to pin-verify.
+      _cachedSession = newSession;
       setSession(newSession);
       setPin("");
       setTotpCode("");
@@ -458,6 +473,7 @@ export default function OpsGate({ children, requireManager = false }: { children
   }, [session]);
 
   const handleLogout = useCallback(async () => {
+    _cachedSession = null;
     setSession(null);
     setPin("");
     setError("");
@@ -521,6 +537,7 @@ export default function OpsGate({ children, requireManager = false }: { children
         token: data.token,
         needsPinRotation: false,
       };
+      _cachedSession = newSession;
       setSession(newSession);
       setPin("");
 

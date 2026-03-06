@@ -51,10 +51,13 @@ exports.handler = async (event) => {
   }
 
   // Authenticate (requires PIN token, not JWT)
+  // Fast-path: if there's no session material at all, return 401 immediately
+  // without calling authorize() — this is the normal case when OpsGate mounts
+  // before the user has logged in, not an error worth logging.
   const hasCookie = /hub_staff_session=/.test(event.headers?.cookie || '');
   const hasAuth = !!(event.headers?.authorization || event.headers?.Authorization);
   if (!hasCookie && !hasAuth) {
-    console.warn('[PIN-VERIFY] No session cookie or auth header present — expected 401');
+    return { statusCode: 401, headers: corsHeaders, body: JSON.stringify({ error: 'No session' }) };
   }
   const auth = await authorize(event, { requirePin: true, allowManagerIPBypass: true });
   if (!auth.ok) {

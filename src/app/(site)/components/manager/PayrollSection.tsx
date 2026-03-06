@@ -311,6 +311,97 @@ export default function PayrollSection() {
     };
   }, [token, fetchSummary]);
 
+  // ---- All useCallback hooks grouped together --------------------
+  // (React requires hooks to be called in the same order every render;
+  //  grouping them above regular functions prevents future early-return
+  //  insertions from splitting them apart.)
+
+  // ---- Replay fix-clock after successful manager challenge ------
+  const handleChallengeSuccess = useCallback(async (nonce: string) => {
+    setShowChallengeModal(false);
+    if (!pendingAction || !token) return;
+    if (fixClockLockRef.current) return;
+    fixClockLockRef.current = true;
+
+    setFixBusy(true);
+    setFixError("");
+    try {
+      const res = await fetchOps("/fix-clock", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-brewhub-challenge": nonce,
+        },
+        body: JSON.stringify({
+          employee_email: pendingAction.email,
+          clock_out_time: pendingAction.clockOutTimeISO,
+          reason: pendingAction.reason,
+          _challenge_nonce: nonce,
+        }),
+      }, token);
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Fix failed after challenge");
+
+      setFixSuccess(`Clock-out fixed for ${pendingAction.email}`);
+      closeSheet();
+      setPendingAction(null);
+      setTimeout(() => setFixSuccess(""), 4000);
+
+      fetchSummary();
+    } catch (err: unknown) {
+      setFixError(toUserSafeMessageFromUnknown(err, "Unable to fix clock-out right now."));
+    } finally {
+      fixClockLockRef.current = false;
+      setFixBusy(false);
+    }
+  }, [pendingAction, token, fetchSummary, closeSheet]);
+
+  // ---- Replay adjust-hours after successful TOTP challenge ------
+  const handleAdjustChallengeSuccess = useCallback(async (nonce: string) => {
+    setShowAdjustChallenge(false);
+    if (!pendingAdjust || !token) return;
+    if (adjustHoursLockRef.current) return;
+    adjustHoursLockRef.current = true;
+
+    setAdjustBusy(true);
+    setAdjustError("");
+    try {
+      const res = await fetchOps("/update-hours", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-brewhub-challenge": nonce,
+        },
+        body: JSON.stringify({
+          employee_email: pendingAdjust.employee_email,
+          delta_minutes: pendingAdjust.delta_minutes,
+          reason: pendingAdjust.reason,
+          _challenge_nonce: nonce,
+        }),
+      }, token);
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Adjustment failed after challenge");
+
+      setAdjustSuccess(`Hours adjusted for ${pendingAdjust.employee_email}`);
+      setAdjustTarget(null);
+      setPendingAdjust(null);
+      setTimeout(() => setAdjustSuccess(""), 4000);
+      fetchSummary();
+    } catch (err: unknown) {
+      setAdjustError(toUserSafeMessageFromUnknown(err, "Unable to adjust hours right now."));
+    } finally {
+      adjustHoursLockRef.current = false;
+      setAdjustBusy(false);
+    }
+  }, [pendingAdjust, token, fetchSummary]);
+
+  // ---- Helper: get overrides for a specific employee ------------
+  const getEmployeeOverrides = useCallback((email: string) => {
+    return overrides.filter((o) => o.target_employee === email);
+  }, [overrides]);
+
   // ---- Derived totals from DB summary ---------------------------
   const totalHours = summaryRows.reduce((s, r) => s + r.total_hours, 0);
   const totalGross = summaryRows.reduce((s, r) => s + r.gross_pay, 0);
@@ -371,47 +462,6 @@ export default function PayrollSection() {
     }
   };
 
-  // ---- Replay fix-clock after successful manager challenge ------
-  const handleChallengeSuccess = useCallback(async (nonce: string) => {
-    setShowChallengeModal(false);
-    if (!pendingAction || !token) return;
-    if (fixClockLockRef.current) return;
-    fixClockLockRef.current = true;
-
-    setFixBusy(true);
-    setFixError("");
-    try {
-      const res = await fetchOps("/fix-clock", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-brewhub-challenge": nonce,
-        },
-        body: JSON.stringify({
-          employee_email: pendingAction.email,
-          clock_out_time: pendingAction.clockOutTimeISO,
-          reason: pendingAction.reason,
-          _challenge_nonce: nonce,
-        }),
-      }, token);
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Fix failed after challenge");
-
-      setFixSuccess(`Clock-out fixed for ${pendingAction.email}`);
-      closeSheet();
-      setPendingAction(null);
-      setTimeout(() => setFixSuccess(""), 4000);
-
-      fetchSummary();
-    } catch (err: unknown) {
-      setFixError(toUserSafeMessageFromUnknown(err, "Unable to fix clock-out right now."));
-    } finally {
-      fixClockLockRef.current = false;
-      setFixBusy(false);
-    }
-  }, [pendingAction, token, fetchSummary, closeSheet]);
-
   // ---- Adjust Hours handler -------------------------------------
   const handleAdjustHours = async (challengeNonce?: string) => {
     if (!token || !adjustTarget) return;
@@ -469,51 +519,6 @@ export default function PayrollSection() {
       setAdjustBusy(false);
     }
   };
-
-  // ---- Replay adjust-hours after successful TOTP challenge ------
-  const handleAdjustChallengeSuccess = useCallback(async (nonce: string) => {
-    setShowAdjustChallenge(false);
-    if (!pendingAdjust || !token) return;
-    if (adjustHoursLockRef.current) return;
-    adjustHoursLockRef.current = true;
-
-    setAdjustBusy(true);
-    setAdjustError("");
-    try {
-      const res = await fetchOps("/update-hours", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-brewhub-challenge": nonce,
-        },
-        body: JSON.stringify({
-          employee_email: pendingAdjust.employee_email,
-          delta_minutes: pendingAdjust.delta_minutes,
-          reason: pendingAdjust.reason,
-          _challenge_nonce: nonce,
-        }),
-      }, token);
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Adjustment failed after challenge");
-
-      setAdjustSuccess(`Hours adjusted for ${pendingAdjust.employee_email}`);
-      setAdjustTarget(null);
-      setPendingAdjust(null);
-      setTimeout(() => setAdjustSuccess(""), 4000);
-      fetchSummary();
-    } catch (err: unknown) {
-      setAdjustError(toUserSafeMessageFromUnknown(err, "Unable to adjust hours right now."));
-    } finally {
-      adjustHoursLockRef.current = false;
-      setAdjustBusy(false);
-    }
-  }, [pendingAdjust, token, fetchSummary]);
-
-  // ---- Helper: get overrides for a specific employee ------------
-  const getEmployeeOverrides = useCallback((email: string) => {
-    return overrides.filter((o) => o.target_employee === email);
-  }, [overrides]);
 
   // ---- Render ---------------------------------------------------
   return (
