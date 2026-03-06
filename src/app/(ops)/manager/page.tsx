@@ -181,7 +181,7 @@ function ManagerDashboardInner() {
 
   /* ── Check schema health on mount → push P0 alert ──── */
   useEffect(() => {
-    if (schemaChecked.current || !session?.token) return;
+    if (schemaChecked.current || !session?.token || !session?.verified) return;
     schemaChecked.current = true;
 
     (async () => {
@@ -212,11 +212,11 @@ function ManagerDashboardInner() {
         /* non-critical — schema check is advisory */
       }
     })();
-  }, [session?.token, pushAlert]);
+  }, [session?.token, session?.verified, pushAlert]);
 
   /* ── Check asset health on mount → push P1 alert ───── */
   useEffect(() => {
-    if (overdueFetched.current || !session?.token) return;
+    if (overdueFetched.current || !session?.token || !session?.verified) return;
     overdueFetched.current = true;
 
     (async () => {
@@ -241,7 +241,7 @@ function ManagerDashboardInner() {
         /* non-critical — swallow silently */
       }
     })();
-  }, [session?.token, pushAlert]);
+  }, [session?.token, session?.verified, pushAlert]);
 
   return (
     <div className="min-h-screen bg-stone-950 text-white">

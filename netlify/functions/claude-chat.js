@@ -123,7 +123,7 @@ function createTools({ supabase, authedUser, clientIp }) {
     return {
         check_waitlist: tool({
             description: 'Check if an email address is on the BrewHub waitlist. Use this when someone asks if they are signed up, on the list, or wants to verify their waitlist status.',
-            parameters: jsonSchema({
+            inputSchema: jsonSchema({
                 type: 'object',
                 properties: {
                     email: { type: 'string', description: 'The email address to check' },
@@ -150,7 +150,7 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         get_menu: tool({
             description: 'Look up cafe menu items and prices. Use this when someone asks about a specific item price or what we serve. For individual price checks, return only the requested item. If someone asks for the FULL menu, do NOT read it — just direct them to brewhubphl.com/cafe.',
-            parameters: jsonSchema({
+            inputSchema: jsonSchema({
                 type: 'object',
                 properties: {
                     item_name: { type: 'string', description: 'Optional: specific item to look up. If omitted, returns full menu (but you should NOT read the full list aloud — link to /cafe instead).' },
@@ -174,7 +174,7 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         place_order: tool({
             description: 'Place a cafe order ONCE. Before calling this, you MUST have: (1) the specific item(s) confirmed, (2) the customer\'s name for callout. Ask for anything missing BEFORE calling this tool. NEVER call place_order more than once for the same request.',
-            parameters: jsonSchema({
+            inputSchema: jsonSchema({
                 type: 'object',
                 properties: {
                     items: {
@@ -376,7 +376,7 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         cancel_order: tool({
             description: 'Cancel a cafe order by order ID. Use this when a customer asks to cancel an order, or to clean up duplicate orders you mistakenly created.',
-            parameters: jsonSchema({
+            inputSchema: jsonSchema({
                 type: 'object',
                 properties: {
                     order_id: { type: 'string', description: 'The full UUID of the order to cancel (from a previous place_order result)' },
@@ -434,7 +434,7 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         get_loyalty_info: tool({
             description: 'Look up a customer\'s loyalty points and QR code. Use this when someone asks about their points, rewards, loyalty status, or wants to see their QR code. Requires their email or phone number.',
-            parameters: jsonSchema({
+            inputSchema: jsonSchema({
                 type: 'object',
                 properties: {
                     email: { type: 'string', description: 'Customer email address' },
@@ -512,7 +512,7 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         check_loyalty_points: tool({
             description: 'Check a customer\'s loyalty points balance. Use this when someone asks about their account, points, rewards balance, or how many points they have. Returns structured loyalty data for rich display.',
-            parameters: jsonSchema({
+            inputSchema: jsonSchema({
                 type: 'object',
                 properties: {
                     email: { type: 'string', description: 'Customer email (ignored — uses authenticated identity)' },
@@ -560,7 +560,7 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         navigate_site: tool({
             description: 'Help customers navigate to different pages on the BrewHub website. Use when someone asks where to find something, wants to go to a page, or needs directions on the site.',
-            parameters: jsonSchema({
+            inputSchema: jsonSchema({
                 type: 'object',
                 properties: {
                     destination: { type: 'string', description: 'Where the customer wants to go: menu, order, shop, checkout, loyalty, portal, login, parcels, waitlist, contact, home' },
@@ -602,7 +602,7 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         search_catalog: tool({
             description: 'Search the menu catalog using natural language. Use this when a customer asks for recommendations, flavor profiles, drink styles, or wants to find specific types of items (e.g. "sweet iced drinks", "strong espresso", "something fruity"). Returns the top matching items with names, descriptions, and prices.',
-            parameters: jsonSchema({
+            inputSchema: jsonSchema({
                 type: 'object',
                 properties: {
                     search_query: { type: 'string', description: 'A natural language search query describing what the customer is looking for, e.g. "sweet iced drinks" or "strong black coffee"' },
@@ -658,7 +658,7 @@ function createTools({ supabase, authedUser, clientIp }) {
 
         check_parcels: tool({
             description: 'Checks the database to see if a resident has any pending packages waiting for pickup. Use when someone asks about packages, mail, or deliveries.',
-            parameters: jsonSchema({
+            inputSchema: jsonSchema({
                 type: 'object',
                 properties: {
                     resident_name: { type: 'string', description: 'The resident or recipient name to search for (fuzzy match)' },

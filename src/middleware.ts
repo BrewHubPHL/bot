@@ -119,7 +119,11 @@ export async function middleware(request: NextRequest) {
     // so OpsGate.tsx can render the PIN entry screen.
     // Only hard-block raw API fetches that lack a session.
     const accept = request.headers.get("accept") || "";
-    const isRsc = request.headers.get("rsc") === "1";
+    const isRsc =
+      request.headers.get("rsc") === "1" ||
+      request.headers.has("next-router-state-tree") ||
+      request.headers.has("next-router-prefetch") ||
+      request.nextUrl.searchParams.has("_rsc");
     if (accept.includes("text/html") || isRsc) {
       // HTML page request or RSC navigation — let OpsGate render the PIN screen
       return NextResponse.next();
@@ -153,7 +157,11 @@ export async function middleware(request: NextRequest) {
   function failSession(reason: string) {
     console.warn(`[MIDDLEWARE] ${reason} on ${pathname}`);
     const accept = request.headers.get("accept") || "";
-    const isRsc = request.headers.get("rsc") === "1";
+    const isRsc =
+      request.headers.get("rsc") === "1" ||
+      request.headers.has("next-router-state-tree") ||
+      request.headers.has("next-router-prefetch") ||
+      request.nextUrl.searchParams.has("_rsc");
     if (accept.includes("text/html") || isRsc) {
       // Page load or RSC navigation — clear cookie and let OpsGate
       // render the PIN screen on next render cycle.

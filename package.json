@@ -29,7 +29,7 @@
   },
   "homepage": "https://github.com/BrewHubPHL/bot#readme",
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.58",
+    "@ai-sdk/anthropic": "^3.0.59",
     "@ai-sdk/cohere": "^3.0.25",
     "@braintree/sanitize-url": "^7.1.2",
     "@elevenlabs/client": "^0.14.0",

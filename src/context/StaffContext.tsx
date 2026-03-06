@@ -74,6 +74,9 @@ interface StaffShiftProviderProps {
   /** Initial is_working flag from PIN-login response */
   initialIsWorking: boolean;
   children: ReactNode;
+  /** When false, defers all network requests until the session is confirmed.
+   *  Prevents the post-login fetch storm of aborted/401 requests. */
+  ready?: boolean;
 }
 
 /** Interval between automatic background refreshes (ms) */
@@ -84,6 +87,7 @@ export function StaffShiftProvider({
   token,
   initialIsWorking,
   children,
+  ready = true,
 }: StaffShiftProviderProps) {
   const [isClockedIn, setIsClockedIn] = useState(initialIsWorking);
   const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
@@ -134,15 +138,18 @@ export function StaffShiftProvider({
 
   // ──────────────────────────────────────────────────────
   //  Lifecycle: initial fetch + polling
+  //  Gated behind `ready` to prevent the post-login fetch
+  //  storm before the session cookie is fully committed.
   // ──────────────────────────────────────────────────────
   useEffect(() => {
+    if (!ready) return;
     refreshShiftStatus();
 
     pollTimerRef.current = setInterval(refreshShiftStatus, POLL_INTERVAL_MS);
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
-  }, [refreshShiftStatus]);
+  }, [refreshShiftStatus, ready]);
 
   // ──────────────────────────────────────────────────────
   //  Cross-tab synchronization via BroadcastChannel

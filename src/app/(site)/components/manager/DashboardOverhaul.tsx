@@ -63,6 +63,7 @@ interface NoShow {
 export default function DashboardOverhaul() {
   const session = useOpsSessionOptional();
   const token = session?.token;
+  const verified = session?.verified ?? false;
 
   /* ── Global shift context (schema-69 sync) ───────────── */
   const staffCtx = useStaffOptional();
@@ -116,7 +117,7 @@ export default function DashboardOverhaul() {
   //  DATA: Fetch stats
   // ──────────────────────────────────────────────────────
   const fetchStats = useCallback(async () => {
-    if (!token) return;
+    if (!token || !verified) return;
     try {
       const res = await fetchOps("/get-manager-stats", {}, token);
       if (res.status === 401) return; // fetchOps already triggers forceOpsLogout
@@ -160,7 +161,7 @@ export default function DashboardOverhaul() {
       }));
       setStatsLoading(false);
     }
-  }, [token]);
+  }, [token, verified]);
 
   const handleAuthzAction = useCallback(() => {
     if (!authzState) return;
@@ -175,7 +176,7 @@ export default function DashboardOverhaul() {
   //  AUTO-REFRESH — adaptive setTimeout (backs off on 429)
   // ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!token) return;
+    if (!token || !verified) return;
     let cancelled = false;
     const schedule = () => {
       if (cancelled) return;
@@ -192,7 +193,7 @@ export default function DashboardOverhaul() {
       cancelled = true;
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
-  }, [token, fetchStats]);
+  }, [token, verified, fetchStats]);
 
   // ──────────────────────────────────────────────────────
   //  RENDER

@@ -32,6 +32,10 @@ interface OpsSessionState {
 interface OpsSession extends OpsSessionState {
   /** Re-verify session with the backend (calls pin-verify). Updates staff flags like onboarding_complete. */
   refreshSession: () => Promise<void>;
+  /** True once the session is confirmed (login complete or pin-verify succeeded).
+   *  Dashboard components should gate data fetches on this to prevent the
+   *  post-login "fetch storm" of aborted / 401 requests. */
+  verified: boolean;
 }
 
 /**
@@ -177,6 +181,7 @@ export default function OpsGate({ children, requireManager = false }: { children
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [session, setSession] = useState<OpsSessionState | null>(null);
+  const [sessionVerified, setSessionVerified] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [clockLoading, setClockLoading] = useState(false);
   const [clockMsg, setClockMsg] = useState("");
@@ -281,9 +286,11 @@ export default function OpsGate({ children, requireManager = false }: { children
       const restored = { staff: data.staff, token: data.token };
       _cachedSession = restored;
       setSession(restored);
+      setSessionVerified(true);
     } catch (err) {
       console.error("[OpsGate] Session verification failed:", (err as Error)?.message);
       setSession(null);
+      setSessionVerified(false);
     } finally {
       setVerifying(false);
     }
@@ -294,6 +301,7 @@ export default function OpsGate({ children, requireManager = false }: { children
   useEffect(() => {
     if (_cachedSession) {
       setSession(_cachedSession);
+      setSessionVerified(true);
       return;
     }
     verifySession();
@@ -392,6 +400,9 @@ export default function OpsGate({ children, requireManager = false }: { children
       // lose the session before the HttpOnly cookie is available to pin-verify.
       _cachedSession = newSession;
       setSession(newSession);
+      // Hold verified=false so dashboard children don't fire fetches
+      // until the cookie is committed and the RSC tree is refreshed.
+      setSessionVerified(false);
       setPin("");
       setTotpCode("");
       setIsTotpMode(false);
@@ -400,6 +411,14 @@ export default function OpsGate({ children, requireManager = false }: { children
       if (data.needsPinRotation) {
         setShowPinRotation(true);
       }
+
+      // Force Next.js to re-evaluate server components with the newly
+      // set HttpOnly cookie before navigating to the protected route.
+      // Without this, the RSC fetch can race ahead of the cookie commit
+      // and return a 401, triggering a cascade of aborted requests.
+      opsRouter.refresh();
+      await new Promise<void>(r => setTimeout(r, 100));
+      setSessionVerified(true);
 
       // Role-based landing page: managers/admins → dashboard, staff → clock-in hub
       const role = (data.staff?.role || "").toLowerCase();
@@ -475,6 +494,7 @@ export default function OpsGate({ children, requireManager = false }: { children
   const handleLogout = useCallback(async () => {
     _cachedSession = null;
     setSession(null);
+    setSessionVerified(false);
     setPin("");
     setError("");
     setClockMsg("");
@@ -539,7 +559,13 @@ export default function OpsGate({ children, requireManager = false }: { children
       };
       _cachedSession = newSession;
       setSession(newSession);
+      setSessionVerified(false);
       setPin("");
+
+      // Force Next.js to re-evaluate server components with the new cookie
+      opsRouter.refresh();
+      await new Promise<void>(r => setTimeout(r, 100));
+      setSessionVerified(true);
 
       // Role-based landing page: managers/admins → dashboard, staff → clock-in hub
       const role = (data.staff?.role || "").toLowerCase();
@@ -631,7 +657,7 @@ export default function OpsGate({ children, requireManager = false }: { children
 
   // Memoized session context value — includes refreshSession callback
   const sessionContextValue: OpsSession | null = session
-    ? { ...session, refreshSession: verifySession }
+    ? { ...session, refreshSession: verifySession, verified: sessionVerified }
     : null;
 
   /* ─── SSR / pre-mount: show blank black screen to avoid hydration mismatch ─── */
@@ -692,6 +718,7 @@ export default function OpsGate({ children, requireManager = false }: { children
                 staffEmail={session.staff.email}
                 token={session.token}
                 initialIsWorking={session.staff.is_working}
+                ready={sessionVerified}
               >
                 <OnboardingRedirect />
               </StaffShiftProvider>
@@ -708,6 +735,7 @@ export default function OpsGate({ children, requireManager = false }: { children
             staffEmail={session.staff.email}
             token={session.token}
             initialIsWorking={session.staff.is_working}
+            ready={sessionVerified}
           >
           {/* Schema 47: PIN Rotation Modal */}
           {showPinRotation && !pinRotationDeferred && (

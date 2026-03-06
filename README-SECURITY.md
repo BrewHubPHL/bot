@@ -133,3 +133,12 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
 * **SQL Migration Secret:** The Schema 87 migration no longer stores the sync secret in plaintext. It requires a `psql -v sync_secret` variable at migration time.
 * **Debug Leak Removed:** A `console.log` in `notion-sync.js` that emitted the first/last 4 characters of the secret has been deleted.
 * **Rotation:** Both keys are now rotated independently by `rotate-secrets.mjs` and `rotate-secrets.sh`.
+
+### O. Post-Login Auth Race Condition & Fetch Storm Fix
+* **Vulnerability:** After a successful PIN or Passkey login (`pin-login.js` returns 200), the Next.js middleware could return 401 on the subsequent RSC navigation to the protected route (e.g. `/manager?_rsc=...`). This triggered `forceOpsLogout()` → `window.location.reload()`, aborting ~10 parallel data fetches (HTTP 499) and creating a denial-of-service loop where the staff member appeared permanently locked out despite valid credentials.
+* **Root Cause:** The middleware's RSC detection only checked the `RSC: 1` header. Certain Next.js navigation requests include `_rsc` as a query parameter or use `next-router-state-tree` / `next-router-prefetch` headers instead — these were misclassified as raw API fetches and denied with 401.
+* **Fixes:**
+  - **Middleware RSC Detection (root cause):** `middleware.ts` now checks `rsc: "1"` header, `next-router-state-tree` header, `next-router-prefetch` header, AND `_rsc` query parameter — covering all Next.js navigation variants.
+  - **Login Handler Cookie Settling:** `OpsGate.tsx` now calls `router.refresh()` after a successful login to force Next.js to re-evaluate server components with the newly committed `Set-Cookie` header, then waits 100ms before calling `router.replace()` to navigate.
+  - **Session `verified` Flag:** A `verified: boolean` field was added to the `OpsSession` context. It is `false` during the cookie-settling window after login and `true` once the session is confirmed. All dashboard data-fetching hooks (`DashboardOverhaul`, `StaffShiftProvider`, `ManagerDashboardInner`) gate their initial fetch and polling behind `verified`, eliminating the burst of premature requests.
+  - **`credentials: 'include'` Audit:** Confirmed that `fetchOps()` (the centralized ops API wrapper) already enforces `credentials: "include"` on all requests, and all direct `fetch()` calls in `OpsGate.tsx` (pin-verify, pin-clock, pin-logout, webauthn-login) also include credentials.
