@@ -134,6 +134,7 @@
 | `get-signed-certificate.js` | GET | Staff PIN | Certificate of Agreement endpoint. Re-hydrates agreement template, canonically normalizes, re-derives SHA-256 hash, compares against stored hash. Returns `{ staff_name, version_tag, signed_at, signature_id, stored_hash, derived_hash, integrity_ok }`. Staff see own cert only; managers may view any. |
 | `get-schema-health.js` | GET | Manager PIN | Database schema auditor. Queries `information_schema` to verify `agreement_signatures` and `maintenance_logs` tables with full column + type verification (including `cost` as `integer`). Returns structured health report (`healthy`, `missingColumns`, `typeMismatches`) so managers know if a migration is required. |
 | `get-override-log.js` | GET | Manager PIN | Returns paginated `manager_override_log` entries (limit/offset). Redacts IP addresses. Used by the `ManagerOverrideLog` Shadcn Data Table component. |
+| `promote-to-production.js` | POST | Manager PIN + CSRF | Batch-promotes rows from `simulation` → `production` in `inventory`, `orders`, `equipment`, or `maintenance_logs`. Validates UUIDs, calls `promote_to_production` RPC (max 500/batch). Rate-limited. |
 
 ---
 
@@ -178,6 +179,7 @@
 | `20260304_schema85_onboarding_gate` | Ensures `contract_signed` + `onboarding_complete` columns on `staff_directory`. Updates `verify_staff_pin()` to return them in login/verify flow for OpsGate onboarding gate. |
 | `20260305_add_vector_menu` | Enables pgvector (`CREATE EXTENSION vector`). Adds `embedding` column to `merch_products` with IVFFlat index. Creates `match_menu_items(query_embedding, match_threshold, match_count)` RPC for cosine similarity search. SECURITY INVOKER — respects existing RLS. |
 | `20260305_switch_to_cohere_vectors` | Drops old 1536-d embedding column/index and recreates as `embedding vector(1024)` for Cohere `embed-english-v3.0`. Updates `match_menu_items` RPC to accept `vector(1024)`. Re-grants EXECUTE to `authenticated`/`anon`. |
+| `20260305_schema94_data_integrity_level` | Adds `data_integrity_level` ENUM (`simulation`/`production`) to `inventory`, `orders`, `equipment`, `maintenance_logs`. Creates `v_accounting_ledger_live` view (production-only profitability). Updates `get_low_stock_items()` with `p_include_simulation` flag. Adds `promote_to_production()` RPC for atomic batch promotion. |
 
 ---
 

@@ -8,13 +8,19 @@ exports.handler = async (event) => {
   const auth = await authorize(event);
   if (!auth.ok) return auth.response;
   try {
-    // 1. Find items below threshold using RPC function
-    const { data: lowStockItems, error } = await supabase.rpc('get_low_stock_items');
+    // Parse optional query param: ?dev_mode=true includes simulation items
+    const params = event.queryStringParameters || {};
+    const includeSimulation = params.dev_mode === 'true';
+
+    // get_low_stock_items(p_include_simulation) — defaults to production-only
+    const { data: lowStockItems, error } = await supabase.rpc('get_low_stock_items', {
+      p_include_simulation: includeSimulation,
+    });
 
     if (error) throw error;
 
     if (lowStockItems.length > 0) {
-      const alertList = lowStockItems.map(i => `${i.item_name}: ${i.current_stock} ${i.unit}`).join('\n');
+      const alertList = lowStockItems.map(i => `${i.item_name}: ${i.current_stock} ${i.unit} [${i.data_integrity_level}]`).join('\n');
       
       console.log("🚨 LOW STOCK ALERT:\n" + alertList);
       

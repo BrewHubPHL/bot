@@ -346,6 +346,9 @@
 - **Backend Auth Gate (`requireOnboarded`):** The `authorize()` function in `_auth.js` accepts a `requireOnboarded: true` option. When enabled, it fetches `onboarding_complete` from `staff_directory` and returns `403 { error: 'ONBOARDING_REQUIRED' }` if false. Applied to `collect-payment.js`, `process-inventory-adjustment.js`, and `cafe-checkout.js` (staff PIN path) — ensuring unsigned staff cannot perform financial or inventory operations even with a valid session token.
 - **Agreement Version Constant (`src/lib/agreement-constants.ts`):** The `CURRENT_AGREEMENT_VERSION` (e.g. `"2027-Q1"`) is the single source of truth for the version tag. Imported by `AgreementViewer.tsx` and `onboarding/page.tsx`. The frontend sends this tag to the backend RPC, maintaining integrity of the SHA-256 hash. To release a new agreement version, bump this constant — all staff will be required to re-sign.
 
+### pgcrypto Extension Fix (Schema 93)
+- **Migration:** `20260305_schema93_fix_pgcrypto_searchpath.sql` — Fixes PIN-LOGIN failure caused by `crypt(text, text) does not exist`. The `pgcrypto` extension lived in the `extensions` schema (Supabase convention) but `verify_staff_pin()` had `search_path = public` only (set by Schema 81's blanket pinning, preserved by Schema 85). Migration ensures `pgcrypto` is in the `extensions` schema and widens `verify_staff_pin()` to `SET search_path = public, extensions`. No table structure changes.
+
 ### Tax-Inclusive Pricing (Philadelphia 8% — `_pricing.js`, `cafe-checkout.js`, `ai-order.js`)
 - **Model:** Menu/catalog prices are **tax-inclusive** — the listed price IS the final price the customer pays. Philadelphia 8% sales tax is included.
 - **Utility:** `_pricing.js` provides `calculateTaxInclusive(totalCents)` which back-calculates `subtotalCents = Math.round(totalCents / 1.08)` and `taxCents = totalCents - subtotalCents`, guaranteeing `subtotal + tax === total` (no rounding drift).
@@ -354,3 +357,61 @@
 - **Frontend:** Checkout page displays Subtotal, "Includes 8% PA/Philly Sales Tax", and Total. Math always adds up exactly to the menu price.
 - **Thermal receipt (`_receipt.js`):** Shows "Tax (8% incl.)" label to indicate tax is included in the total.
 - **API response (`ai-order.js`):** Returns `subtotal_cents`, `subtotal_dollars`, `tax_amount_cents`, `tax_dollars`, `total_cents`, `total_dollars`, and `total_display` (menu price).
+
+---
+
+## Part 8: Data Integrity Level — Simulation vs. Production (Schema 94)
+
+### Problem Statement
+BrewHub PHL is in a "Testing vs. Real Procurement" phase for Q1 2027. Real-world asset purchases (Vandola Brewer, Kilobags of Specialty Roast) must not be skewed by simulation/test entries created during development. The `data_integrity_level` column cleanly separates the two data tiers across the entire platform.
+
+### ENUM Type: `data_integrity_level`
+- **`simulation`** (default): All new rows default to simulation. Dev/test data stays isolated from accounting.
+- **`production`**: Verified real-world procurement and orders. Only production data factors into profitability calculations and stock alerts.
+
+### Tables Modified
+| Table | Purpose |
+|-------|---------|
+| `inventory` | General supplies and raw materials |
+| `orders` | Customer orders (linked to `customers` via Unified CRM) |
+| `equipment` | Capital assets (TCO tracking) |
+| `maintenance_logs` | Equipment maintenance events |
+
+### `v_accounting_ledger_live` View
+- **Production-only profitability** view with monthly bucketing.
+- Revenue: `SUM(orders.total_amount_cents)` WHERE `status='completed'` AND `data_integrity_level='production'`.
+- Maintenance: `SUM(maintenance_logs.cost)` WHERE `data_integrity_level='production'`.
+- OpEx: All `property_expenses` included (assumed production by nature — rent, payroll, COGS).
+- Net Profit: Revenue − Maintenance − OpEx.
+- Generates a month series from earliest production order through current month.
+- Granted to `service_role` only.
+
+### Alert Filtering
+- **`get_low_stock_items(p_include_simulation)`**: Updated RPC with optional boolean parameter (default `false`).
+  - Default behavior: Only production-level items trigger P1/P2 stock alerts.
+  - Dev Mode: Pass `p_include_simulation=true` to see all items (frontend sends `?dev_mode=true`).
+- **`inventory-check.js`**: Passes `dev_mode` query param through to the RPC.
+- **`get-inventory.js`**: Returns `data_integrity_level` column; supports optional `?level=production|simulation` filter.
+
+### Profit Report Integration
+- **`_profit-report.js`**: `computeProfitReport(supabase, monthStr, { productionOnly })` now accepts an options object.
+  - Default: `productionOnly = true` — only production orders contribute to revenue.
+  - Legacy/dev callers can pass `{ productionOnly: false }` to include all data.
+
+### Batch Promotion RPC: `promote_to_production(p_table_name, p_ids)`
+- Atomically promotes a batch of rows from `simulation` → `production`.
+- **SQL injection prevention**: Table name validated against a strict allowlist (`inventory`, `orders`, `equipment`, `maintenance_logs`).
+- Batch limit: 500 rows per call.
+- Idempotent: already-production rows are no-ops.
+- Returns `{ promoted_count, table, requested_count, promoted_at }`.
+
+### Netlify Function: `promote-to-production.js`
+- **Manager-only** POST endpoint.
+- Requires: CSRF header + Manager PIN auth + rate limiting.
+- Body: `{ "table": "inventory", "ids": ["uuid-1", ...] }`.
+- Validates all UUIDs, calls `promote_to_production` RPC, logs errors via `logSystemError()`.
+
+### Unified CRM Constraint
+- `orders.user_id` FK to `customers.id` is unchanged.
+- Simulation orders retain their customer links but are excluded from live accounting.
+- Production promotion does not alter customer references.

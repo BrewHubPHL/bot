@@ -103,11 +103,22 @@ exports.handler = async (event) => {
       case 'loyalty':
         query = query.gt('loyalty_points', 0);
         break;
-      case 'active_30d':
-        query = query
-          .gt('total_orders', 0)
-          .gte('updated_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+      case 'active_30d': {
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const { data: orderRows, error: orderErr } = await supabase
+          .from('orders')
+          .select('user_id')
+          .gte('created_at', thirtyDaysAgo)
+          .in('status', ['completed', 'ready', 'preparing'])
+          .eq('data_integrity_level', 'production');
+        if (orderErr) throw orderErr;
+        const activeIds = [...new Set(orderRows.map(r => r.user_id).filter(Boolean))];
+        if (activeIds.length === 0) {
+          return { statusCode: 200, headers, body: JSON.stringify({ customers: [], filter }) };
+        }
+        query = query.in('id', activeIds);
         break;
+      }
       case 'new_7d':
         query = query
           .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());

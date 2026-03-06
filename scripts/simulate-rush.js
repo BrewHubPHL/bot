@@ -1,271 +1,258 @@
 #!/usr/bin/env node
-/**
- * simulate-rush.js — BrewHub Cafe Stress Test
+/*
+ * Simulate a high-volume "Morning Rush" against ai-order.
+ * Sends randomized orders concurrently and reports success, rate limits, and timing.
  *
- * Simulates a busy rush by placing 5 orders via the ai-order endpoint,
- * then firing Square payment.updated webhooks for 3 of them with valid
- * HMAC-SHA256 signatures.  Random delays between order and payment
- * mimic real-world latency.
- *
- * Required env vars (via .env or shell):
- *   BREWHUB_API_KEY            – API key accepted by ai-order
- *   SQUARE_WEBHOOK_SIGNATURE   – HMAC signing secret for square-webhook
- *   SQUARE_WEBHOOK_URL         – Base URL (e.g. http://localhost:3000 or https://brewhubphl.com)
- *
- * Usage:
- *   node scripts/simulate-rush.js
+ * CLI flags:
+ *   --orders <n>              Total orders to send (default: random 15-20)
+ *   --burst <n>               Orders per burst wave with 1 s gap between waves (default: all-at-once)
+ *   --include-only-valid-menu Only use items fetched from the live menu (skip fallback & core injection)
  */
 
 require('dotenv').config();
-const crypto = require('crypto');
-// Node 18+ has native fetch — no need for node-fetch
-// const fetch = require('node-fetch');
 
-// ---------------------------------------------------------------------------
-// CONFIG
-// ---------------------------------------------------------------------------
-const BASE_URL = process.env.SQUARE_WEBHOOK_URL || 'http://localhost:3000';
+/* ── CLI argument parsing ─────────────────────────────────────── */
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const opts = { orders: 0, burst: 0, validMenuOnly: false };
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--orders' && args[i + 1]) {
+      opts.orders = Math.max(1, parseInt(args[i + 1], 10) || 0);
+      i += 1;
+    } else if (args[i] === '--burst' && args[i + 1]) {
+      opts.burst = Math.max(1, parseInt(args[i + 1], 10) || 0);
+      i += 1;
+    } else if (args[i] === '--include-only-valid-menu') {
+      opts.validMenuOnly = true;
+    }
+  }
+  return opts;
+}
+
+const CLI = parseArgs();
+
+const API_BASE_URL =
+  process.env.API_URL || process.env.BREWHUB_API_URL || 'http://localhost:8888';
 const API_KEY = process.env.BREWHUB_API_KEY;
-const WEBHOOK_SECRET = process.env.SQUARE_WEBHOOK_SIGNATURE;
+const ORDER_COUNT = CLI.orders || randomInt(15, 20);
 
-if (!API_KEY) {
-  console.error('❌  Missing BREWHUB_API_KEY in environment.');
-  process.exit(1);
-}
-if (!WEBHOOK_SECRET) {
-  console.error('❌  Missing SQUARE_WEBHOOK_SIGNATURE in environment.');
-  process.exit(1);
-}
+const ORDER_ENDPOINT = `${API_BASE_URL.replace(/\/$/, '')}/.netlify/functions/ai-order`;
 
-// ---------------------------------------------------------------------------
-// MOCK ORDER LIBRARY
-// ---------------------------------------------------------------------------
-const MOCK_ORDERS = [
-  {
-    label: 'The Regular',
-    body: {
-      customer_name: 'Mike R.',
-      items: [{ name: 'Latte', quantity: 1 }],
-      notes: 'Oat milk please',
-    },
-    shouldPay: true,
-  },
-  {
-    label: 'The Latte Lover',
-    body: {
-      customer_name: 'Jess T.',
-      items: [
-        { name: 'Iced Latte', quantity: 2 },
-        { name: 'Cookie', quantity: 1 },
-      ],
-      notes: 'Extra shot on both lattes',
-    },
-    shouldPay: true,
-  },
-  {
-    label: 'The Group Order',
-    body: {
-      customer_name: 'Office 4B',
-      items: [
-        { name: 'Americano', quantity: 3 },
-        { name: 'Cappuccino', quantity: 2 },
-        { name: 'Bagel', quantity: 4 },
-      ],
-      notes: '',
-    },
-    shouldPay: true,
-  },
-  {
-    label: 'The Undecided (no pay)',
-    body: {
-      customer_name: 'Carlos D.',
-      items: [{ name: 'Cold Brew', quantity: 1 }],
-      notes: 'Might cancel',
-    },
-    shouldPay: false,
-  },
-  {
-    label: 'The Snacker (no pay)',
-    body: {
-      customer_name: 'Amy W.',
-      items: [
-        { name: 'Scone', quantity: 1 },
-        { name: 'Lemonade', quantity: 1 },
-      ],
-      notes: '',
-    },
-    shouldPay: false,
-  },
-];
+async function getFetch() {
+  if (typeof fetch === 'function') {
+    return fetch;
+  }
 
-// ---------------------------------------------------------------------------
-// HELPERS
-// ---------------------------------------------------------------------------
-
-/** Random delay between min and max ms (inclusive) */
-function randomDelay(minMs, maxMs) {
-  const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  const nodeFetch = await import('node-fetch');
+  return nodeFetch.default;
 }
 
-/** Generate a fake Square-style payment ID */
-function fakePaymentId() {
-  return 'sim_' + crypto.randomBytes(12).toString('hex');
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-/**
- * Build a signed Square webhook payload for payment.updated.
- *
- * Signature algorithm (must match square-webhook.js):
- *   HMAC-SHA256(key, notificationUrl + rawBody)  →  base64
- *
- * @param {string} orderId   – Supabase order UUID
- * @param {number} amountCents – Total amount paid
- * @returns {{ body: string, signature: string, timestamp: string }}
- */
-function buildWebhookPayload(orderId, amountCents) {
-  const paymentId = fakePaymentId();
-  const payload = {
-    type: 'payment.updated',
-    data: {
-      object: {
-        payment: {
-          id: paymentId,
-          status: 'COMPLETED',
-          reference_id: orderId,
-          amount_money: {
-            amount: amountCents,
-            currency: 'USD',
-          },
-        },
-      },
-    },
+function uniqueItems(count, pool) {
+  const copy = [...pool];
+  const picked = [];
+  const maxCount = Math.min(count, copy.length);
+  for (let i = 0; i < maxCount; i += 1) {
+    const idx = randomInt(0, copy.length - 1);
+    picked.push(copy[idx]);
+    copy.splice(idx, 1);
+  }
+  return picked;
+}
+
+function buildOrder(index, menuPool) {
+  const lineCount = randomInt(1, 3);
+  const itemNames = uniqueItems(lineCount, menuPool);
+
+  return {
+    customer_name: `RushSim-${Date.now()}-${index + 1}`,
+    notes: 'Morning Rush load test (data_integrity_level isolated)',
+    items: itemNames.map((name) => ({
+      name,
+      quantity: randomInt(1, 4),
+    })),
   };
-
-  const rawBody = JSON.stringify(payload);
-  const notificationUrl = `${BASE_URL}/.netlify/functions/square-webhook`;
-  const hmacInput = notificationUrl + rawBody;
-  const signature = crypto
-    .createHmac('sha256', WEBHOOK_SECRET)
-    .update(hmacInput, 'utf8')
-    .digest('base64');
-
-  // Timestamp: current Unix seconds (within the 5-minute replay window)
-  const timestamp = String(Math.floor(Date.now() / 1000));
-
-  return { body: rawBody, signature, timestamp };
 }
 
-// ---------------------------------------------------------------------------
-// STEP A: Place an order via ai-order
-// ---------------------------------------------------------------------------
-async function placeOrder(mockOrder) {
-  const url = `${BASE_URL}/.netlify/functions/ai-order`;
-  const res = await fetch(url, {
+/** Inject up to 3 verified menu items into early orders for coverage. */
+function ensureCoverage(orders, menuPool) {
+  // Pick up to 3 items directly from the live menu pool
+  const coverage = menuPool.slice(0, Math.min(3, menuPool.length));
+  for (let i = 0; i < coverage.length && i < orders.length; i += 1) {
+    orders[i].items.push({ name: coverage[i], quantity: randomInt(1, 3) });
+  }
+}
+
+async function getLiveMenuNames(fetchFn) {
+  const menuEndpoint = `${API_BASE_URL.replace(/\/$/, '')}/.netlify/functions/get-menu`;
+  const response = await fetchFn(menuEndpoint, { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(`menu fetch failed (${response.status})`);
+  }
+
+  const payload = await response.json();
+  const menuItems = Array.isArray(payload.menu_items) ? payload.menu_items : [];
+  const names = menuItems
+    .map((item) => item?.name)
+    .filter((name) => typeof name === 'string' && name.trim().length > 0);
+
+  if (names.length === 0) {
+    throw new Error('menu payload has no names');
+  }
+
+  return names;
+}
+
+async function placeOrder(fetchFn, order, idx) {
+  const response = await fetchFn(ORDER_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-API-Key': API_KEY,
     },
-    body: JSON.stringify(mockOrder.body),
+    body: JSON.stringify(order),
   });
 
-  const data = await res.json();
-  if (!res.ok || !data.success) {
-    throw new Error(`Order failed (${res.status}): ${data.error || 'unknown'}`);
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    payload = { error: 'non-json response' };
   }
-  return data;
+
+  return {
+    idx: idx + 1,
+    status: response.status,
+    ok: response.ok && payload && payload.success === true,
+    payload,
+  };
 }
 
-// ---------------------------------------------------------------------------
-// STEP B: Fire a fake Square webhook
-// ---------------------------------------------------------------------------
-async function fireWebhook(orderId, amountCents) {
-  const { body, signature, timestamp } = buildWebhookPayload(orderId, amountCents);
-  const url = `${BASE_URL}/.netlify/functions/square-webhook`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-square-signature': signature,
-      'x-square-hmacsha256-signature-timestamp': timestamp,
-    },
-    body,
-  });
-
-  const text = await res.text();
-  return { status: res.status, body: text };
-}
-
-// ---------------------------------------------------------------------------
-// MAIN
-// ---------------------------------------------------------------------------
-(async () => {
-  console.log('');
-  console.log('═══════════════════════════════════════');
-  console.log('  ☕  BrewHub Rush Simulator  ☕');
-  console.log('═══════════════════════════════════════');
-  console.log(`  Target:  ${BASE_URL}`);
-  console.log(`  Orders:  ${MOCK_ORDERS.length}`);
-  console.log(`  Payments: ${MOCK_ORDERS.filter((o) => o.shouldPay).length}`);
-  console.log('═══════════════════════════════════════');
-  console.log('');
-
+/** Fire orders in waves of `burstSize` with a 1 s gap between waves. */
+async function fireInBursts(fetchFn, orders, burstSize) {
   const results = [];
-
-  // Phase 1 — Place all orders
-  for (const mock of MOCK_ORDERS) {
-    try {
-      const data = await placeOrder(mock);
-      console.log(
-        `✅  [${mock.label}] Order placed → ${data.order_id.slice(0, 8)}…  (${data.total_display})`
-      );
-      results.push({
-        label: mock.label,
-        orderId: data.order_id,
-        totalCents: data.total_cents,
-        shouldPay: mock.shouldPay,
-      });
-    } catch (err) {
-      console.error(`❌  [${mock.label}] ${err.message}`);
+  for (let i = 0; i < orders.length; i += burstSize) {
+    const wave = orders.slice(i, i + burstSize);
+    const waveResults = await Promise.allSettled(
+      wave.map((order, j) => placeOrder(fetchFn, order, i + j))
+    );
+    results.push(...waveResults);
+    if (i + burstSize < orders.length) {
+      await new Promise((r) => setTimeout(r, 1000));
     }
   }
+  return results;
+}
 
-  console.log('');
-  console.log('--- Phase 2: Payment Webhooks (with chaos delays) ---');
-  console.log('');
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
-  // Phase 2 — Fire webhooks for orders that should pay
-  const payable = results.filter((r) => r.shouldPay);
-
-  for (const order of payable) {
-    // Chaos: random 500ms–2000ms delay
-    const delay = Math.floor(Math.random() * 1501) + 500;
-    console.log(`⏳  [${order.label}] Waiting ${delay}ms before payment webhook…`);
-    await randomDelay(delay, delay);
-
-    try {
-      const webhookRes = await fireWebhook(order.orderId, order.totalCents);
-      const ok = webhookRes.status === 200;
-      console.log(
-        `${ok ? '💰' : '⚠️'}  [${order.label}] Webhook → ${webhookRes.status}  ${webhookRes.body.slice(0, 80)}`
-      );
-    } catch (err) {
-      console.error(`❌  [${order.label}] Webhook error: ${err.message}`);
-    }
+async function main() {
+  if (!API_KEY) {
+    console.error('Missing BREWHUB_API_KEY in .env');
+    process.exit(1);
   }
 
-  // Summary
+  const fetchFn = await getFetch();
+  let menuPool;
+  try {
+    menuPool = await getLiveMenuNames(fetchFn);
+  } catch (error) {
+    if (CLI.validMenuOnly) {
+      console.error(`Cannot use --include-only-valid-menu: ${error.message}`);
+      process.exit(1);
+    }
+    console.warn(`Live menu unavailable (${error.message}) — using DB fallback names`);
+    menuPool = null;
+  }
+
+  if (!menuPool) {
+    // Static fallback — intentionally generic; will cause 400s if names drift
+    menuPool = ['Drip Coffee', 'Latte', 'Espresso', 'Mocha', 'Cold Brew', 'Bagel', 'Cookie'];
+  }
+
+  const orders = Array.from({ length: ORDER_COUNT }, (_, idx) => buildOrder(idx, menuPool));
+  if (!CLI.validMenuOnly) {
+    ensureCoverage(orders, menuPool);
+  }
+
+  const burstLabel = CLI.burst ? `${CLI.burst}/wave` : 'all-at-once';
+  console.log('Morning Rush simulator starting...');
+  console.log(`Target: ${ORDER_ENDPOINT}`);
+  console.log(`Concurrent orders: ${orders.length} (burst: ${burstLabel})`);
+  console.log(`Menu pool (${menuPool.length}): ${menuPool.join(', ')}`);
+
+  const startedAt = Date.now();
+  let settled;
+  if (CLI.burst) {
+    settled = await fireInBursts(fetchFn, orders, CLI.burst);
+  } else {
+    settled = await Promise.allSettled(
+      orders.map((order, idx) => placeOrder(fetchFn, order, idx))
+    );
+  }
+  const elapsedMs = Date.now() - startedAt;
+
+  /* ── Granular failure buckets ───────────────────────────────── */
+  let succeeded = 0;
+  let rateLimited = 0;
+  let badRequest = 0;
+  let serverError = 0;
+  let networkReject = 0;
+
+  for (const result of settled) {
+    if (result.status === 'rejected') {
+      networkReject += 1;
+      continue;
+    }
+    if (result.value.ok) {
+      succeeded += 1;
+      continue;
+    }
+    const s = result.value.status;
+    if (s === 429) rateLimited += 1;
+    else if (s >= 400 && s < 500) badRequest += 1;
+    else if (s >= 500) serverError += 1;
+  }
+
+  const totalFailed = rateLimited + badRequest + serverError + networkReject;
+
   console.log('');
-  console.log('═══════════════════════════════════════');
-  console.log('  📊  Rush Complete — Summary');
-  console.log('═══════════════════════════════════════');
-  console.log(`  Placed: ${results.length} orders`);
-  console.log(`  Paid:   ${payable.length} via webhook`);
-  console.log(`  Unpaid: ${results.length - payable.length} (idle / will be cleaned by stale-order cron)`);
-  console.log('');
-  console.log('👀  Check the Manager Dashboard → 🖨️ Live Receipt Roll');
-  console.log('    You should see 3 new thermal receipts slide in.');
-  console.log('');
-})();
+  console.log('Rush batch results');
+  console.log(`  Succeeded:        ${succeeded}`);
+  console.log(`  Rate limited 429: ${rateLimited}`);
+  console.log(`  Bad request 4xx:  ${badRequest}`);
+  console.log(`  Server error 5xx: ${serverError}`);
+  console.log(`  Network rejects:  ${networkReject}`);
+  console.log(`  Failed total:     ${totalFailed}`);
+  console.log(`  Batch time:       ${elapsedMs}ms`);
+
+  const failures = settled
+    .map((result, i) => {
+      if (result.status === 'rejected') {
+        return `Order #${i + 1}: NETWORK (${result.reason?.message || 'unknown error'})`;
+      }
+      if (result.value.ok) {
+        return null;
+      }
+      return `Order #${result.value.idx}: HTTP ${result.value.status} (${result.value.payload?.error || 'no error payload'})`;
+    })
+    .filter(Boolean);
+
+  if (failures.length > 0) {
+    console.log('');
+    console.log('Failure details');
+    for (const line of failures) {
+      console.log(`- ${line}`);
+    }
+  }
+}
+
+main().catch((error) => {
+  console.error('Rush simulator crashed:', error);
+  process.exit(1);
+});

@@ -49,11 +49,19 @@ exports.handler = async (event) => {
   try {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-    const { data, error } = await supabase
+    // Optional filter: ?level=production|simulation (default: all)
+    const levelFilter = (event.queryStringParameters || {}).level;
+    let query = supabase
       .from('inventory')
-      .select('id, item_name, category, current_stock, min_threshold, unit')
+      .select('id, item_name, category, current_stock, min_threshold, unit, data_integrity_level')
       .order('item_name', { ascending: true })
       .limit(INVENTORY_LIMIT);
+
+    if (levelFilter === 'production' || levelFilter === 'simulation') {
+      query = query.eq('data_integrity_level', levelFilter);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -64,6 +72,7 @@ exports.handler = async (event) => {
       current_stock: Number.isFinite(Number(i.current_stock)) ? Number(i.current_stock) : null,
       min_threshold: Number.isFinite(Number(i.min_threshold)) ? Number(i.min_threshold) : null,
       unit: sanitizeInput(String(i.unit || '')).slice(0, 20),
+      data_integrity_level: i.data_integrity_level || 'simulation',
     }));
 
     return { statusCode: 200, headers, body: JSON.stringify({ inventory }) };

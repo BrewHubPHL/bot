@@ -1,5 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
-const { json } = require('./_auth');
+const { authorize, json } = require('./_auth');
 const { requireCsrfHeader } = require('./_csrf');
 const { sanitizeInput } = require('./_sanitize');
 const { formBucket } = require('./_token-bucket');
@@ -57,11 +57,12 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  const authHeader = event.headers?.authorization || event.headers?.Authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
-  if (!token) {
-    return respond(401, { error: 'Unauthorized' }, event);
+  const auth = await authorize(event, { allowCustomer: true });
+  if (!auth.ok) {
+    return {
+      ...auth.response,
+      headers: { ...auth.response.headers, ...corsHeaders(event) },
+    };
   }
 
   let body;
@@ -83,12 +84,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { data: authData, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !authData?.user) {
-      return respond(401, { error: 'Unauthorized' }, event);
-    }
-
-    const authedEmail = (authData.user.email || '').trim().toLowerCase();
+    const authedEmail = (auth.user?.email || '').trim().toLowerCase();
     if (!authedEmail || authedEmail !== email) {
       return respond(403, { error: 'Email mismatch' }, event);
     }
@@ -98,9 +94,9 @@ exports.handler = async (event) => {
       .from('customers')
       .select('id, auth_id')
       .eq('email', email)
-      .single();
+      .maybeSingle();
 
-    if (existingError && existingError.code !== 'PGRST116') {
+    if (existingError) {
       console.error('[CREATE-CUSTOMER] Lookup error:', existingError?.message);
       return respond(500, { error: 'Customer lookup failed' }, event);
     }
@@ -108,20 +104,27 @@ exports.handler = async (event) => {
     if (existing) {
       // "Account Upgrade" — walk-in now has an auth account. Link it.
       if (!existing.auth_id) {
-        const { error: linkErr } = await supabase
+        const { data: linkedRow, error: linkErr } = await supabase
           .from('customers')
           .update({
-            auth_id: authData.user.id,
+            auth_id: auth.user.id,
             full_name: fullName || undefined,
             address_street: addressStreet || undefined,
             phone: phone || undefined,
             sms_opt_in: smsOptIn,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', existing.id);
+          .eq('id', existing.id)
+          .is('auth_id', null)
+          .select('id')
+          .maybeSingle();
         if (linkErr) {
           console.error('[CREATE-CUSTOMER] Account upgrade error:', linkErr?.message);
           return respond(500, { error: 'Account upgrade failed' }, event);
+        }
+        // Another request may have linked the record first; treat as idempotent success.
+        if (!linkedRow) {
+          return respond(200, { success: true, alreadyExists: true }, event);
         }
         return respond(200, { success: true, upgraded: true }, event);
       }
@@ -131,7 +134,7 @@ exports.handler = async (event) => {
     const { error } = await supabase
       .from('customers')
       .insert({
-        auth_id: authData.user.id,
+        auth_id: auth.user.id,
         email,
         full_name: fullName,
         address_street: addressStreet,

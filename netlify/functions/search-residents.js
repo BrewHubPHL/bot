@@ -2,6 +2,8 @@
 // Unified CRM: all person data lives in the single `customers` table.
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, json } = require('./_auth');
+const { staffBucket } = require('./_token-bucket');
+const { logSystemError } = require('./_system-errors');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -29,6 +31,15 @@ exports.handler = async (event) => {
 
   if (event.httpMethod !== 'GET') {
     return json(405, { error: 'Method not allowed' });
+  }
+
+  // Rate limit
+  const clientIp = event.headers['x-nf-client-connection-ip']
+    || event.headers['x-forwarded-for']?.split(',')[0]?.trim()
+    || 'unknown';
+  const rl = staffBucket.consume(`search-residents:${clientIp}`);
+  if (!rl.allowed) {
+    return json(429, { error: 'Too many requests' });
   }
 
   try {
@@ -119,6 +130,13 @@ exports.handler = async (event) => {
 
   } catch (err) {
     console.error('[SEARCH-RESIDENTS ERROR]', err?.message);
+    await logSystemError(supabase, {
+      error_type: 'unhandled_exception',
+      severity: 'critical',
+      source_function: 'search-residents',
+      error_message: err?.message || 'Unknown error',
+      context: { stack: err?.stack },
+    });
     return json(500, { error: 'Search failed' });
   }
 };

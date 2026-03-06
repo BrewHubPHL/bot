@@ -142,3 +142,27 @@ BrewHub uses a dual-perimeter authentication model separating customer identity 
   - **Login Handler Cookie Settling:** `OpsGate.tsx` now calls `router.refresh()` after a successful login to force Next.js to re-evaluate server components with the newly committed `Set-Cookie` header, then waits 100ms before calling `router.replace()` to navigate.
   - **Session `verified` Flag:** A `verified: boolean` field was added to the `OpsSession` context. It is `false` during the cookie-settling window after login and `true` once the session is confirmed. All dashboard data-fetching hooks (`DashboardOverhaul`, `StaffShiftProvider`, `ManagerDashboardInner`) gate their initial fetch and polling behind `verified`, eliminating the burst of premature requests.
   - **`credentials: 'include'` Audit:** Confirmed that `fetchOps()` (the centralized ops API wrapper) already enforces `credentials: "include"` on all requests, and all direct `fetch()` calls in `OpsGate.tsx` (pin-verify, pin-clock, pin-logout, webauthn-login) also include credentials.
+
+### P. CRM/Auth Hardening: Auth Boundary + Upgrade Race + Error Surface (March 2026)
+* **Scope:** `create-customer.js`, `get-crm-insights.js`.
+* **[CRITICAL] Auth Perimeter Bypass Removed:** `create-customer.js` no longer performs raw `supabase.auth.getUser(token)` verification. It now uses centralized `authorize(event)` from `_auth.js`, inheriting unified revocation and token-version enforcement behavior.
+* **[HIGH] Account Upgrade Race Condition Closed:** Customer account-link upgrade now updates with a guarded predicate `id = ? AND auth_id IS NULL`, preventing two concurrent requests from both linking the same walk-in row.
+* **Idempotent Concurrent Behavior:** If a competing request links first, the guarded update returns no row and the endpoint returns `alreadyExists: true` instead of writing inconsistent state.
+* **[HIGH] Error Formatting Fix:** `get-crm-insights.js` now returns `sanitizedError(err, 'CRM_INSIGHTS')` directly. This prevents double-wrapping a response helper that already emits a fully-formed Netlify HTTP response object.
+
+### Q. React UI Supabase Error Handling & Unmount Guards (March 2026)
+* **Scope:** `portal/page.tsx`, `resident/page.tsx`, `CrmInsights.tsx`.
+* **Supabase Error Handling (extends §4A to client components):**
+  - `supabase.auth.getSession()` now destructures `{ error }` and handles it with early return + `console.error`.
+  - `supabase.auth.signOut()` now destructures `{ error }` and logs before page reload.
+  - `staff_directory` `.maybeSingle()` lookup now destructures `{ error: staffErr }` and logs if present.
+* **Unmount State Guards (prevents React state-update-on-unmount warnings):**
+  - `portal/page.tsx` auth bootstrap `useEffect`: `let isMounted = true;` guard on all state setters (`setUser`, `setLoading`, `loadData`) and `onAuthStateChange` callback; cleanup sets `isMounted = false`.
+  - `resident/page.tsx` invite verification `useEffect`: `.then()`, `.catch()`, `.finally()` all gated behind `if (isMounted)`.
+  - `CrmInsights.tsx`: both CRM insights fetch and customer drill-down fetch `useEffect` hooks use `isMounted` guards on all state setters.
+
+### R. `authorize()` Customer JWT Fast-Path (March 2026)
+* **Problem:** Migrating `create-customer.js` to the unified `authorize()` middleware (§4P) broke customer signups because `authorize()` unconditionally requires a `staff_directory` record for JWT tokens.
+* **Fix:** Added `allowCustomer: false` option to `authorize(event, options)`. When `true`, valid customer JWTs exit immediately after revocation and token-age checks with `{ ok: true, via: 'jwt', role: 'customer' }`, bypassing the `staff_directory` lookup entirely.
+* **Default:** `allowCustomer` defaults to `false` — all existing ops/manager endpoints remain staff-only with zero changes required.
+* **Consumer:** `create-customer.js` now calls `authorize(event, { allowCustomer: true })`.

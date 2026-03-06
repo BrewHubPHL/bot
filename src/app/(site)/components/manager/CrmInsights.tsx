@@ -243,39 +243,61 @@ export default function CrmInsights() {
   }, [token]);
 
   /* ── Fetch customers when filter changes ───────────── */
-  const fetchCustomers = useCallback(
-    async (filter: CrmFilter) => {
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetchOps("/get-crm-insights", {}, token);
+        if (!isMounted) return;
+        if (!res.ok) {
+          setError(`Failed to load (${res.status})`);
+          return;
+        }
+        const json: CrmData = await res.json();
+        if (!isMounted) return;
+        setData(json);
+      } catch {
+        if (!isMounted) return;
+        setError("Network error");
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, [token]);
+
+  /* Fetch customers on initial mount and whenever filter changes */
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
       setCustLoading(true);
       setCustError(null);
       try {
         const res = await fetchOps(
-          `/get-crm-customers?filter=${encodeURIComponent(filter)}`,
+          `/get-crm-customers?filter=${encodeURIComponent(activeFilter)}`,
           {},
           token
         );
+        if (!isMounted) return;
         if (!res.ok) {
           setCustError(`Failed to load customers (${res.status})`);
           return;
         }
         const json = await res.json();
+        if (!isMounted) return;
         setCustomers(json.customers ?? []);
       } catch {
+        if (!isMounted) return;
         setCustError("Network error loading customers");
       } finally {
-        setCustLoading(false);
+        if (isMounted) setCustLoading(false);
       }
-    },
-    [token]
-  );
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  /* Fetch customers on initial mount and whenever filter changes */
-  useEffect(() => {
-    fetchCustomers(activeFilter);
-  }, [activeFilter, fetchCustomers]);
+    })();
+    return () => { isMounted = false; };
+  }, [activeFilter, token]);
 
   /* ── Card click handler ────────────────────────────── */
   const handleCardClick = (filter: CrmFilter) => {

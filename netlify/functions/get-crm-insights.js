@@ -4,6 +4,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { authorize, sanitizedError } = require('./_auth');
 const { staffBucket } = require('./_token-bucket');
+const { logSystemError } = require('./_system-errors');
 
 const MISSING_ENV = !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -71,6 +72,14 @@ exports.handler = async (event) => {
     return { statusCode: 200, headers, body: JSON.stringify(data || {}) };
   } catch (err) {
     console.error('[CRM-INSIGHTS]', err?.message);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: sanitizedError(err) }) };
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    await logSystemError(supabase, {
+      error_type: 'unhandled_exception',
+      severity: 'critical',
+      source_function: 'get-crm-insights',
+      error_message: err?.message || 'Unknown error',
+      context: { stack: err?.stack },
+    });
+    return sanitizedError(err, 'CRM_INSIGHTS');
   }
 };

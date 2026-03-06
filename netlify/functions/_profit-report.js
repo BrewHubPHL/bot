@@ -54,7 +54,7 @@ function monthBounds(monthStr) {
  *   maintenance_event_count: number,
  * }>}
  */
-async function computeProfitReport(supabase, monthStr) {
+async function computeProfitReport(supabase, monthStr, { productionOnly = true } = {}) {
   if (!MONTH_RE.test(monthStr)) {
     throw new Error(`Invalid month format: "${monthStr}". Use YYYY-MM.`);
   }
@@ -69,12 +69,16 @@ async function computeProfitReport(supabase, monthStr) {
   // If the RPC is not yet deployed we fall back to the row-level approach
   // with an explicit null guard.
   const [ordersResult, maintRpcResult, opexResult] = await Promise.all([
-    supabase
-      .from('orders')
-      .select('total_amount_cents')
-      .eq('status', 'completed')
-      .gte('created_at', start)
-      .lt('created_at', end),
+    (() => {
+      let q = supabase
+        .from('orders')
+        .select('total_amount_cents')
+        .eq('status', 'completed')
+        .gte('created_at', start)
+        .lt('created_at', end);
+      if (productionOnly) q = q.eq('data_integrity_level', 'production');
+      return q;
+    })(),
 
     supabase
       .rpc('agg_maintenance_costs', {

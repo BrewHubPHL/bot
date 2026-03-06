@@ -272,8 +272,15 @@ export default function ResidentPortal() {
 
   /* ── Auth bootstrap ────────────────────────────────────── */
   useEffect(() => {
+    let isMounted = true;
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error("getSession error:", error.message);
+        if (isMounted) setLoading(false);
+        return;
+      }
+      if (!isMounted) return;
       if (session) {
         setUser(session.user);
         loadData(session.user.id, String(session.user.email));
@@ -283,6 +290,7 @@ export default function ResidentPortal() {
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) return;
       if (session) {
         setUser(session.user);
         setQrError(false);
@@ -291,7 +299,10 @@ export default function ResidentPortal() {
         setUser(null);
       }
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   /* ── Realtime subscriptions: parcels (by unit), orders, coffee ── */
@@ -318,7 +329,11 @@ export default function ResidentPortal() {
               .eq("unit_number", unitNumber)
               .in("status", ["arrived", "pending_notification"])
               .order("received_at", { ascending: false })
-              .then(({ data }) => {
+              .then(({ data, error }) => {
+                if (error) {
+                  console.error("Realtime parcels re-fetch error:", error.message);
+                  return;
+                }
                 if (data) {
                   setParcels(data);
                   // "Pop" animation for INSERT events
@@ -350,7 +365,11 @@ export default function ResidentPortal() {
             .eq("user_id", userId)
             .order("created_at", { ascending: false })
             .limit(5)
-            .then(({ data }) => {
+            .then(({ data, error }) => {
+              if (error) {
+                console.error("Realtime orders re-fetch error:", error.message);
+                return;
+              }
               if (data) setOrders(data);
             });
         },
@@ -449,9 +468,10 @@ export default function ResidentPortal() {
           .order("created_at", { ascending: true }),
       ]);
 
-      // If critical queries failed, surface maintenance mode
-      if (orderRes.error) {
-        console.error("Portal data load errors:", parcelRes.error?.message, orderRes.error?.message);
+      // If any critical query failed, surface maintenance mode
+      if (parcelRes.error || orderRes.error || coffeeRes.error) {
+        console.error("Portal data load errors:",
+          parcelRes.error?.message, orderRes.error?.message, coffeeRes.error?.message);
         setIsMaintenanceMode(true);
         setDataLoading(false);
         return;
@@ -517,11 +537,15 @@ export default function ResidentPortal() {
           const userEmail = (signInData.session.user.email || "").toLowerCase();
           try {
             const anonSb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            const { data: staffRow } = await anonSb
+            const { data: staffRow, error: staffErr } = await anonSb
               .from("staff_directory")
               .select("role")
               .eq("email", userEmail)
               .maybeSingle();
+
+            if (staffErr) {
+              console.error("Staff directory lookup error:", staffErr.message);
+            }
 
             if (staffRow && STAFF_ROLES.has((staffRow.role || "").toLowerCase())) {
               await supabase.auth.signOut();
@@ -765,7 +789,11 @@ export default function ResidentPortal() {
             <p className="text-stone-500 text-sm mt-1">{user.email}{unitLabel}</p>
           </div>
           <button
-            onClick={() => supabase.auth.signOut().then(() => window.location.reload())}
+            onClick={async () => {
+              const { error } = await supabase.auth.signOut();
+              if (error) console.error("signOut error:", error.message);
+              window.location.reload();
+            }}
             className="min-h-[44px] min-w-[44px] text-stone-600 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-stone-900 flex items-center justify-center"
             aria-label="Sign out"
           >

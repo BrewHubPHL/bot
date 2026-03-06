@@ -85,7 +85,27 @@ Copy Migration SQL: Click the "Copy Migration SQL" button on the banner to copy 
 
 No action is needed when the schema is healthy — the banner only appears when a migration is required.
 
-11. QA/Security Audit Ticket Backlog (March 4, 2026)
+11. Data Integrity: Simulation vs. Production
+
+All new inventory, orders, and equipment entries default to "simulation" mode. This prevents test data from affecting real profitability numbers, stock alerts, or financial reports.
+
+Viewing Data Level: In the Inventory table, each row now shows a "simulation" or "production" badge. Use the ?level=production or ?level=simulation filter to focus on one tier.
+
+Stock Alerts (P1/P2): By default, low-stock alerts only fire for production-level items. If you need to see simulation alerts during development, enable "Dev Mode" on the dashboard (adds ?dev_mode=true to inventory checks).
+
+Profitability Reports: The Profitability card and monthly financial email now compute revenue ONLY from production orders. Simulation orders are excluded from all accounting calculations. The v_accounting_ledger_live view in Supabase provides a live, production-only financial ledger.
+
+Promoting Items to Production: When real inventory arrives and is verified on-site:
+  1. Go to the Inventory or Orders table.
+  2. Select the items to promote.
+  3. Use the "Promote to Production" action. This requires your Manager PIN and moves the selected items from simulation → production permanently.
+  4. Promoted items will immediately appear in stock alerts, profitability reports, and the accounting ledger.
+
+Batch Limit: Up to 500 items can be promoted at once. The operation is atomic — either all succeed or none do.
+
+Tables Affected: inventory, orders, equipment, maintenance_logs all support the simulation/production distinction.
+
+12. QA/Security Audit Ticket Backlog (March 4, 2026)
 
 Use this as the execution queue for engineering hardening. Priority order is Critical → High → Medium.
 

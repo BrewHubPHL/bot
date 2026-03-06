@@ -55,6 +55,8 @@ import ExportOrdersButton from "./ExportOrdersButton";
 import StaffSection from "./components/StaffSection";
 /* ─── Manager override audit log (Shadcn Data Table) ─────── */
 import ManagerOverrideLog from "@/components/manager/ManagerOverrideLog";
+/* ─── Unified inventory management panel ─────────────────── */
+import InventoryPanel from "./InventoryPanel";
 /* ─── Ops session + fetchOps for asset health check ──────── */
 import { useOpsSessionOptional } from "@/components/OpsGate";
 import { fetchOps } from "@/utils/ops-api";
@@ -67,6 +69,7 @@ const TABS: ManagerTab[] = [
   { key: "team",      label: "Team",            icon: UsersRound },
   { key: "queue",     label: "Queue Monitor",   icon: MonitorPlay },
   { key: "parcels",   label: "Parcel Board",    icon: Package },
+  { key: "inventory", label: "Inventory",       icon: Database },
   { key: "assets",    label: "Assets",          icon: Wrench },
 ];
 
@@ -328,6 +331,8 @@ function ManagerDashboardInner() {
             ? <ParcelsMonitor onBack={() => setShowDepartureBoard(false)} />
             : <ParcelOpsPanel onLaunchBoard={() => setShowDepartureBoard(true)} />
         )}
+
+        {activeTab === "inventory" && <InventoryPanel />}
 
         {activeTab === "assets" && (
           <div className="space-y-4">

@@ -44,6 +44,7 @@ function ResidentRegisterInner() {
 
   /* ── Auto-populate unit & phone from URL params (invite link flow) ── */
   useEffect(() => {
+    let isMounted = true;
     const urlUnit = searchParams.get("unit");
     const urlPhone = searchParams.get("phone");
     const urlExpires = searchParams.get("expires");
@@ -64,6 +65,7 @@ function ResidentRegisterInner() {
       })
         .then((res) => res.json())
         .then((data) => {
+          if (!isMounted) return;
           if (data.valid) {
             if (data.unit) setPrefilledUnit(data.unit.slice(0, MAX_UNIT));
             if (data.phone) setPrefilledPhone(data.phone.slice(0, MAX_PHONE));
@@ -74,11 +76,13 @@ function ResidentRegisterInner() {
           }
         })
         .catch(() => {
+          if (!isMounted) return;
           setInviteExpired(true);
           setInviteError("Unable to verify invite link. Please try again or request a new one.");
         })
-        .finally(() => setVerifying(false));
+        .finally(() => { if (isMounted) setVerifying(false); });
     }
+    return () => { isMounted = false; };
   }, [searchParams]);
 
   return (

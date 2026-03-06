@@ -944,16 +944,36 @@ exports.handler = async (event) => {
                 const tools = createTools({ supabase, authedUser, clientIp: getClientIP(event) });
 
                 // AI SDK handles the full tool call loop automatically via maxSteps
+                // maxSteps: 5 gives the model room to call tools (search_catalog → get_menu)
+                // AND still produce a final text reply on recommendations/orders.
                 const result = await generateText({
                     model: anthropic('claude-sonnet-4-20250514'),
                     system: SYSTEM_PROMPT,
                     messages,
                     tools,
-                    maxSteps: 3,
+                    maxSteps: 5,
                     maxTokens: 300,
                 });
 
-                let reply = result.text || "Hey! How can I help you today?";
+                // When all steps are consumed by tool calls, result.text is empty.
+                // Pull the last tool result string so we never send a generic greeting.
+                let reply = result.text;
+                if (!reply) {
+                    const steps = result.steps || [];
+                    for (let i = steps.length - 1; i >= 0; i--) {
+                        const toolResults = steps[i].toolResults;
+                        if (toolResults?.length) {
+                            const last = toolResults[toolResults.length - 1];
+                            if (last.result?.result && typeof last.result.result === 'string') {
+                                reply = last.result.result;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!reply) {
+                    reply = "Sorry, I got a little lost there! What can I help you with?";
+                }
 
                 // ═══════════════════════════════════════════════════
                 // POST-RESPONSE SCRUBBER (Layer 3 — after LLM)

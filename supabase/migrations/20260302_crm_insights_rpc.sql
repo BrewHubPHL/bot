@@ -35,12 +35,13 @@ AS $$
       AND c.unit_number != ''
       AND c.total_orders > 0
   ),
-  -- Recently active (ordered in last 30 days)
+  -- Recently active (ordered in last 30 days, production only)
   recent AS (
     SELECT count(DISTINCT o.user_id) AS active_last_30d
     FROM public.orders o
     WHERE o.created_at >= now() - interval '30 days'
       AND o.status IN ('completed', 'ready', 'preparing')
+      AND o.data_integrity_level = 'production'
   ),
   -- New signups in last 7 days
   new_signups AS (

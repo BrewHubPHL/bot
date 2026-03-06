@@ -11,7 +11,7 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
-        "npm:@ai-sdk/anthropic@^3.0.58",
+        "npm:@ai-sdk/anthropic@^3.0.59",
         "npm:@ai-sdk/cohere@^3.0.25",
         "npm:@braintree/sanitize-url@^7.1.2",
         "npm:@elevenlabs/client@0.14",

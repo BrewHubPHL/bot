@@ -81,6 +81,7 @@ async function authorize(event, options = {}) {
     allowManagerIPBypass = false,
     requireManagerChallenge = false,  // Schema 47: require TOTP challenge nonce
     challengeActionType = null,       // e.g. 'adjust_hours', 'fix_clock', 'comp_order'
+    allowCustomer = false,            // When true, valid customer JWTs pass without a staff_directory record
   } = options;
 
   const clientIP = getClientIP(event);
@@ -328,6 +329,11 @@ async function authorize(event, options = {}) {
         console.error(`[AUTH BLOCKED] Stale token: ${data.user.email}`);
         return { ok: false, response: json(401, { error: 'Session expired' }) };
       }
+    }
+
+    // Customer JWT fast-path: skip staff_directory lookup entirely
+    if (options.allowCustomer) {
+      return { ok: true, via: 'jwt', user: data.user, role: 'customer' };
     }
 
     const email = (data.user.email || '').toLowerCase();

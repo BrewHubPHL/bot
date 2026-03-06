@@ -33,6 +33,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useQueryState, parseAsString } from "nuqs";
 import { useOpsSession } from "@/components/OpsGate";
+import { fetchOps } from "@/utils/ops-api";
 import { useParcelSync } from "@/hooks/useParcelSync";
 import { cn } from "@/lib/utils";
 import {
@@ -71,10 +72,7 @@ const CARRIER_LOGO: Record<string, { label: string; bg: string; text: string; bo
   OTHER:  { label: "Other",  bg: "bg-stone-800/60",  text: "text-stone-400",  border: "border-stone-600" },
 };
 
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? "http://localhost:8888/.netlify/functions"
-    : "/.netlify/functions";
+
 
 /* ─── Audio helper — mechanical clack ──────────────────────────── */
 function playClack() {
@@ -257,12 +255,7 @@ export default function ParcelDashboardPage() {
         ? `phone=${encodeURIComponent(q)}`
         : `prefix=${encodeURIComponent(q)}`;
 
-      const res = await fetch(`${API_BASE}/search-residents?${param}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-BrewHub-Action": "true",
-        },
-      });
+      const res = await fetchOps(`/search-residents?${param}`, {}, token);
       if (!res.ok) { setSearchResults([]); return; }
       const data = await res.json();
       setSearchResults(data.results || []);
@@ -318,14 +311,10 @@ export default function ParcelDashboardPage() {
   const lookupUnit = useCallback(async (unit: string): Promise<ResidentInfo | null> => {
     if (!unit.trim()) return null;
     try {
-      const res = await fetch(
-        `${API_BASE}/search-residents?unit=${encodeURIComponent(unit.trim())}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "X-BrewHub-Action": "true",
-          },
-        },
+      const res = await fetchOps(
+        `/search-residents?unit=${encodeURIComponent(unit.trim())}`,
+        {},
+        token,
       );
       if (!res.ok) return null;
       const data = await res.json();
@@ -797,19 +786,15 @@ export default function ParcelDashboardPage() {
                         // Persist guest to Supabase residents table
                         setGuestSaving(true);
                         try {
-                          const res = await fetch(`${API_BASE}/upsert-guest`, {
+                          const res = await fetchOps(`/upsert-guest`, {
                             method: "POST",
-                            headers: {
-                              "Content-Type": "application/json",
-                              Authorization: `Bearer ${token}`,
-                              "X-BrewHub-Action": "true",
-                            },
+                            headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({
                               name: guestName.trim(),
                               phone: guestPhone.trim() || undefined,
                               unit_number: unitInput || undefined,
                             }),
-                          });
+                          }, token);
                           const json = await res.json();
                           if (!res.ok || !json.resident) {
                             console.error("[GUEST] upsert failed", json.error);
