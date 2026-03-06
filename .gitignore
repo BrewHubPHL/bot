@@ -17,6 +17,10 @@ tsconfig.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+scripts/_direct-test.js
+scripts/_invoke-noshow.js
+scripts/_test-local-noshow.js
+scripts/test-noshow-sms.js
 coverage/
 .nyc_output/
 *.lcov

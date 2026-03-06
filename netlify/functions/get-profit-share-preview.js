@@ -171,39 +171,56 @@ exports.handler = async (event) => {
     // ── 4. Total eligible staff hours (vested only) ────────
     const { start, end } = profitMonthBounds(rawMonth);
 
-    // Fetch all time_logs for the month, joined with staff hire_date
-    const { data: timeLogs, error: tlError } = await supabase
-      .from('time_logs')
-      .select('clock_in, clock_out, staff_id, staff_directory!inner(hire_date)')
-      .gte('clock_in', start)
-      .lt('clock_in', end)
-      .not('clock_out', 'is', null);
+    // time_logs links to staff via employee_email (not a UUID FK).
+    // Fetch time_logs + staff_directory separately, then join by email.
+    const [timeLogsResult, staffResult] = await Promise.all([
+      supabase
+        .from('time_logs')
+        .select('clock_in, clock_out, employee_email')
+        .gte('clock_in', start)
+        .lt('clock_in', end)
+        .not('clock_out', 'is', null),
+      supabase
+        .from('staff_directory')
+        .select('id, email, hire_date'),
+    ]);
 
-    if (tlError) throw tlError;
+    if (timeLogsResult.error) throw timeLogsResult.error;
+    if (staffResult.error) throw staffResult.error;
 
-    const logs = timeLogs || [];
+    // Build email → { id, hire_date } lookup (lowercase keys)
+    const staffByEmail = new Map();
+    for (const s of (staffResult.data || [])) {
+      if (s.email) staffByEmail.set(s.email.toLowerCase(), s);
+    }
+
+    const logs = timeLogsResult.data || [];
     let totalEligibleMinutes = 0;
     const eligibleStaffIds = new Set();
     const pendingStaffIds = new Set();
 
     for (const log of logs) {
-      const hireDate = log.staff_directory?.hire_date;
-      if (!hireDate) continue; // skip orphan rows with no hire_date
+      const email = (log.employee_email || '').toLowerCase();
+      const staff = staffByEmail.get(email);
+      const hireDate = staff?.hire_date;
+      if (!hireDate) continue; // skip orphan rows with no matching staff
+
+      const staffId = staff.id;
 
       // Probation guard: employees hired within the last 90 days are hard-excluded
       if (hireDate > probationDateISO) {
-        pendingStaffIds.add(log.staff_id);
+        pendingStaffIds.add(staffId);
         continue;
       }
 
       // 6-month vesting: only count hours for staff hired on or before vestingDate
       if (hireDate > vestingDateISO) {
-        pendingStaffIds.add(log.staff_id);
+        pendingStaffIds.add(staffId);
         continue;
       }
 
       // Vested employee — count their minutes (integer)
-      eligibleStaffIds.add(log.staff_id);
+      eligibleStaffIds.add(staffId);
       const inMs = new Date(log.clock_in).getTime();
       const outMs = new Date(log.clock_out).getTime();
       if (outMs > inMs) {

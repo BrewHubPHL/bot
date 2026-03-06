@@ -182,7 +182,7 @@ async function computeProfitReport(supabase, monthStr, { productionOnly = true }
       ? cogsRpcResult.data[0]
       : cogsRpcResult.data;
     cogsCents = Number(row?.total_cogs_cents) || 0;
-    cogsEventCount = Number(row?.event_count) || 0;
+    cogsEventCount = Number(row?.consumption_events) || 0;
   } else {
     console.warn('[PROFIT-REPORT] agg_inventory_cogs RPC unavailable, COGS defaults to $0.', cogsRpcResult.error?.message);
   }

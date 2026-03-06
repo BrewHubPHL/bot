@@ -83,11 +83,36 @@ exports.handler = async (event) => {
   }
 
   const barcode = event.queryStringParameters?.barcode;
+  const nameQuery = event.queryStringParameters?.name;
 
-  if (!barcode) {
-    return json(400, { error: 'Barcode required' });
+  if (!barcode && !nameQuery) {
+    return json(400, { error: 'Barcode or name required' });
   }
 
+  // ── Name search mode (partial match, max 10 results) ───────
+  if (nameQuery) {
+    const safeName = nameQuery.replace(/[^\x20-\x7E]/g, '').trim().substring(0, 100);
+    if (safeName.length < 2) {
+      return json(400, { error: 'Name must be at least 2 characters' });
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select('id, item_name, current_stock, min_threshold, unit, barcode')
+        .ilike('item_name', `%${safeName}%`)
+        .limit(10);
+
+      if (error) throw error;
+
+      return json(200, { found: (data && data.length > 0), items: data || [], query: safeName });
+    } catch (err) {
+      console.error('[INVENTORY-LOOKUP] Name search error:', err);
+      return json(500, { error: 'Search failed' });
+    }
+  }
+
+  // ── Barcode lookup mode ────────────────────────────────────
   // SCHEMA-STRICT VALIDATION
   const validation = validateBarcode(barcode);
   
