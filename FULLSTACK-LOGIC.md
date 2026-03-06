@@ -146,3 +146,13 @@ The system prompt's `check_parcels` instructions match BrewHub's brand voice: co
 | **Result limit** | 20 parcels (10 per sub-query when both params provided) |
 | **PII controls** | No tracking numbers, sender details, recipient names, or unit numbers returned to LLM. Only carrier, arrival time, and generic secure-locker status. |
 | **Error handling** | `console.error` + `logSystemError()` → graceful user message |
+
+---
+
+### LOW — Scanner: Add New Item Missing Size/Unit Picker
+
+**Files:** `src/app/(ops)/scanner/page.tsx`, `netlify/functions/staff-add-inventory-item.js`
+
+The "Add New Item" modal (shown when scanning an unknown barcode) only captured name and category. The `inventory.unit` column existed but always defaulted to `'units'`, making it impossible for staff to specify item sizes like 12oz cups, coffee bean weights (g/kg), etc.
+
+**Fix:** Added a "Size / Unit" dropdown to the Add New Item modal with common coffee-shop sizes (8/12/16/20oz cups, lids, sleeves, g, kg, oz, lb, bags, boxes, gallons, liters, bottles, packets, each). The backend `staff-add-inventory-item` function now accepts and validates the `unit` field against an allowlist, defaulting to `'units'` for unrecognized values.

@@ -39,9 +39,9 @@ exports.handler = async (event) => {
   const csrfBlock = requireCsrfHeader(event);
   if (csrfBlock) return csrfBlock;
 
-  let barcode, name, category;
+  let barcode, name, category, unit;
   try {
-    ({ barcode, name, category } = JSON.parse(event.body || '{}'));
+    ({ barcode, name, category, unit } = JSON.parse(event.body || '{}'));
   } catch {
     return cors(400, { error: 'Invalid JSON body' });
   }
@@ -86,6 +86,15 @@ exports.handler = async (event) => {
   const catStr = category ? sanitizeInput(String(category).trim()).slice(0, 100) : 'general';
   const safeCat = ALLOWED_CATS.has(catStr) ? catStr : 'general';
 
+  // Validate unit/size
+  const ALLOWED_UNITS = new Set([
+    'units', '8oz cups', '12oz cups', '16oz cups', '20oz cups',
+    'lids', 'sleeves', 'g', 'kg', 'oz', 'lb',
+    'bags', 'boxes', 'gallons', 'liters', 'bottles', 'packets', 'each',
+  ]);
+  const unitStr = unit ? sanitizeInput(String(unit).trim()).slice(0, 30) : 'units';
+  const safeUnit = ALLOWED_UNITS.has(unitStr) ? unitStr : 'units';
+
   const { data, error } = await supabase
     .from('inventory')
     .insert({
@@ -93,7 +102,7 @@ exports.handler = async (event) => {
       item_name: nameStr,
       current_stock: 0,
       min_threshold: 10,
-      unit: 'units',
+      unit: safeUnit,
       category: safeCat,
     })
     .select()

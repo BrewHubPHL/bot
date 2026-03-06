@@ -48,6 +48,8 @@
     "@simplewebauthn/server": "^11.0.0",
     "@supabase/supabase-js": "^2.98.0",
     "@tanstack/react-table": "^8.21.3",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
     "ai": "^6.0.116",
     "axios": "^1.13.4",
     "canvas-confetti": "^1.9.4",

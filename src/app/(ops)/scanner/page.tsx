@@ -51,24 +51,6 @@ function haptic(pattern: "tap" | "success" | "error" | "warning") {
   try { navigator.vibrate(patterns[pattern]); } catch { /* silent */ }
 }
 
-/* ─── BarcodeDetector type shim ────────────────────────────────── */
-interface BarcodeDetectorResult {
-  rawValue: string;
-  format: string;
-  boundingBox: DOMRectReadOnly;
-}
-interface BarcodeDetectorLike {
-  detect: (source: ImageBitmapSource) => Promise<BarcodeDetectorResult[]>;
-}
-interface BarcodeDetectorCtorLike {
-  new (options?: { formats?: string[] }): BarcodeDetectorLike;
-  getSupportedFormats: () => Promise<string[]>;
-}
-function getBarcodeDetectorCtor(): BarcodeDetectorCtorLike | undefined {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (globalThis as any).BarcodeDetector as BarcodeDetectorCtorLike | undefined;
-}
-
 /* ─── Barcode validation ───────────────────────────────────────── */
 const BARCODE_FORMATS: Record<string, RegExp> = {
   UPC_A:    /^[0-9]{12}$/,
@@ -127,6 +109,7 @@ export default function ScannerPage() {
   const [addBarcode, setAddBarcode] = useState("");
   const [addName, setAddName] = useState("");
   const [addCategory, setAddCategory] = useState("Other");
+  const [addUnit, setAddUnit] = useState("units");
   const [addSaving, setAddSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -134,12 +117,13 @@ export default function ScannerPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const detectorRef = useRef<BarcodeDetectorLike | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const zxingReaderRef = useRef<any>(null);
+  const zxingStopRef = useRef(false);
   const scanLockRef = useRef(false);
   const saveLockRef = useRef(false);
   const lastScannedCode = useRef<string>("");
   const lastScannedTime = useRef<number>(0);
-  const animFrameRef = useRef<number>(0);
   const handleScanRef = useRef<(raw: string) => void>(() => {});
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -171,28 +155,8 @@ export default function ScannerPage() {
         await videoRef.current.play();
       }
       setCameraActive(true);
-      setStatusMsg("Point at barcode or QR code");
-
-      // Initialize BarcodeDetector after camera is live
-      const Ctor = getBarcodeDetectorCtor();
-      if (Ctor) {
-        try {
-          const supported = await Ctor.getSupportedFormats();
-          if (supported.length > 0) {
-            detectorRef.current = new Ctor({
-              formats: ["qr_code", "ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39"],
-            });
-            setDetectorStatus("active");
-            startDetectionLoop();
-          } else {
-            setDetectorStatus("unsupported");
-          }
-        } catch {
-          setDetectorStatus("unsupported");
-        }
-      } else {
-        setDetectorStatus("unsupported");
-      }
+      setStatusMsg("Starting scanner...");
+      startZxingScanner();
     } catch (err: unknown) {
       const msg = toUserSafeMessageFromUnknown(err, "Camera access denied. Check Settings > Safari > Camera.");
       setCameraError(msg);
@@ -205,8 +169,8 @@ export default function ScannerPage() {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    detectorRef.current = null;
+    zxingStopRef.current = true;
+    zxingReaderRef.current = null;
     setCameraActive(false);
     setDetectorStatus("init");
     setStatusMsg("Camera stopped");
@@ -214,60 +178,50 @@ export default function ScannerPage() {
 
   useEffect(() => () => stopCamera(), [stopCamera]);
 
-  /* ─── BarcodeDetector loop — waits for video readyState ──────── */
-  const startDetectionLoop = useCallback(() => {
-    let consecutiveErrors = 0;
+  /* ─── ZXing JS barcode scanner (works on all browsers inc. iOS) ─ */
+  const startZxingScanner = useCallback(async () => {
+    try {
+      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+      const reader = new BrowserMultiFormatReader();
+      zxingReaderRef.current = reader;
+      zxingStopRef.current = false;
+      setDetectorStatus("active");
+      setStatusMsg("Point at barcode or QR code");
 
-    const detect = async () => {
+      const canvas = canvasRef.current;
       const video = videoRef.current;
-      const detector = detectorRef.current;
+      if (!canvas || !video) return;
 
-      if (!video || !detector || !streamRef.current) return;
+      const loop = async () => {
+        if (zxingStopRef.current || !streamRef.current) return;
 
-      // Wait for video to have enough data before detecting
-      if (video.readyState < video.HAVE_ENOUGH_DATA) {
-        animFrameRef.current = requestAnimationFrame(detect);
-        return;
-      }
-
-      try {
-        const barcodes = await detector.detect(video);
-        consecutiveErrors = 0; // Reset on success
-
-        if (barcodes.length > 0 && !scanLockRef.current) {
-          const value = barcodes[0].rawValue.trim();
-          if (value) {
-            handleScanRef.current(value);
-          }
-        }
-      } catch (err) {
-        consecutiveErrors++;
-        // If detection consistently fails, switch to canvas-based approach
-        if (consecutiveErrors > 10 && canvasRef.current && video.videoWidth > 0) {
-          try {
-            const canvas = canvasRef.current;
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext("2d");
-            if (ctx) {
-              ctx.drawImage(video, 0, 0);
-              const barcodes = await detector.detect(canvas);
-              if (barcodes.length > 0 && !scanLockRef.current) {
-                const value = barcodes[0].rawValue.trim();
+        if (video.readyState >= video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(video, 0, 0);
+            try {
+              const result = reader.decodeFromCanvas(canvas);
+              if (result && !scanLockRef.current) {
+                const value = result.getText().trim();
                 if (value) handleScanRef.current(value);
               }
-              consecutiveErrors = 0;
+            } catch {
+              // No barcode found in this frame — normal
             }
-          } catch {
-            // Canvas fallback also failed — continue loop
           }
         }
-      }
 
-      animFrameRef.current = requestAnimationFrame(detect);
-    };
+        // ~10 fps scan rate to balance performance & responsiveness
+        setTimeout(loop, 100);
+      };
 
-    animFrameRef.current = requestAnimationFrame(detect);
+      loop();
+    } catch {
+      // ZXing failed to load — fall back to manual only
+      setDetectorStatus("unsupported");
+    }
   }, []);
 
   /* ─── Handle scan result ─────────────────────────────────────── */
@@ -324,6 +278,7 @@ export default function ScannerPage() {
         setAddBarcode(v.sanitized!);
         setAddName("");
         setAddCategory("Other");
+        setAddUnit("units");
         setAddError(null);
         setAddModalOpen(true);
         setViewState("idle");
@@ -623,7 +578,7 @@ export default function ScannerPage() {
         {cameraActive && detectorStatus === "unsupported" && (
           <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
             <span className="px-3 py-1 rounded-full bg-yellow-500/20 text-yellow-300 text-[10px] font-medium backdrop-blur-md">
-              Auto-detect unavailable — use manual entry below
+              Camera scan unavailable — use manual entry below
             </span>
           </div>
         )}
@@ -694,6 +649,17 @@ export default function ScannerPage() {
                 Skip
               </button>
             </div>
+
+            <button
+              onClick={() => {
+                clearResult();
+                setInputMode("name");
+                setTimeout(() => inputRef.current?.focus(), 100);
+              }}
+              className="w-full mt-2 py-2 text-xs text-stone-500 hover:text-amber-400 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Search size={12} /> Wrong item? Search by name
+            </button>
           </div>
         )}
 
@@ -911,7 +877,7 @@ export default function ScannerPage() {
                 try {
                   const res = await fetchOps("/staff-add-inventory-item", {
                     method: "POST",
-                    body: JSON.stringify({ barcode: addBarcode, name: trimmed, category: addCategory }),
+                    body: JSON.stringify({ barcode: addBarcode, name: trimmed, category: addCategory, unit: addUnit }),
                   }, opsToken);
                   if (!res.ok) {
                     const body = await res.json().catch(() => ({ error: "Request failed" }));
@@ -956,6 +922,38 @@ export default function ScannerPage() {
                 >
                   {["Coffee Beans","Milk & Dairy","Syrups & Flavors","Cups & Lids","Pastry & Food","Cleaning Supplies","Equipment Parts","Merchandise","Other"].map((c) => (
                     <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-stone-300 mb-1">Size / Unit</label>
+                <select
+                  value={addUnit}
+                  onChange={(e) => setAddUnit(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-stone-800 border border-stone-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                  disabled={addSaving}
+                >
+                  {[
+                    { v: "units", l: "Units (generic)" },
+                    { v: "8oz cups", l: "8 oz Cups" },
+                    { v: "12oz cups", l: "12 oz Cups" },
+                    { v: "16oz cups", l: "16 oz Cups" },
+                    { v: "20oz cups", l: "20 oz Cups" },
+                    { v: "lids", l: "Lids" },
+                    { v: "sleeves", l: "Sleeves" },
+                    { v: "g", l: "Grams (g)" },
+                    { v: "kg", l: "Kilograms (kg)" },
+                    { v: "oz", l: "Ounces (oz)" },
+                    { v: "lb", l: "Pounds (lb)" },
+                    { v: "bags", l: "Bags" },
+                    { v: "boxes", l: "Boxes" },
+                    { v: "gallons", l: "Gallons" },
+                    { v: "liters", l: "Liters" },
+                    { v: "bottles", l: "Bottles" },
+                    { v: "packets", l: "Packets" },
+                    { v: "each", l: "Each" },
+                  ].map((u) => (
+                    <option key={u.v} value={u.v}>{u.l}</option>
                   ))}
                 </select>
               </div>
